@@ -10,6 +10,13 @@
 import Foundation
 import Combine
 
+public struct AgentLogEntry: Identifiable, Sendable {
+    public let id = UUID()
+    public let timestamp: Date
+    public let activity: AgentActivity
+    public let detail: String
+}
+
 public enum AgentActivity: Equatable, Sendable {
     case idle
     case listening
@@ -45,10 +52,18 @@ public final class AgentState: ObservableObject {
     @Published public var activity: AgentActivity = .idle
     @Published public var detail: String = ""
     @Published public var lastTranscript: String = ""
+    @Published public var activityLog: [AgentLogEntry] = []
 
     private init() {}
 
     public func set(_ activity: AgentActivity, detail: String = "") {
+        switch activity {
+        case .idle: break
+        default:
+            let entry = AgentLogEntry(timestamp: Date(), activity: activity, detail: detail)
+            activityLog.insert(entry, at: 0)
+            if activityLog.count > 30 { activityLog.removeLast() }
+        }
         self.activity = activity
         self.detail = detail
     }

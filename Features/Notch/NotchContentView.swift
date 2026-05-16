@@ -91,7 +91,7 @@ struct NotchContentView: View {
             Group {
                 switch selected {
                 case .home:
-                    NotchHomePlaceholder()
+                    NotchHomeView()
                 case .agent:
                     AgentTabView()
                 }
@@ -148,14 +148,6 @@ private struct NotchTabBar: View {
     }
 }
 
-private struct NotchHomePlaceholder: View {
-    var body: some View {
-        Text("Home")
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.4))
-            .frame(maxWidth: .infinity, minHeight: 100)
-    }
-}
 
 struct AgentTabView: View {
     var body: some View {
