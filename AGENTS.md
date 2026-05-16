@@ -24,28 +24,70 @@ Avoid:
 # Structure
 
 ```txt
-App/
+App/                  — window lifecycle, AppDelegate
+Core/                 — shared types and cross-feature contracts only
 Features/
-Core/
-Generated/
-Tests/
+  Notch/              — notch UI and settings panel
+  Cursor/             — cursor companion, long-press, click hooks
+  Context/            — screenshot capture, OCR, Gemini, memory
+  Agent/              — Sonnet wiring, computer-use harness
+  Onboarding/         — first-launch permission prompts
+vendored/             — read-only reference code (do not edit, do not include in target)
 ```
 
 ---
 
 # Feature Layout
 
-Each feature owns its code.
+Each feature owns its code. Keep related code together.
 
 ```txt
 Features/Notch/
-├── NotchContentView.swift
-├── AgentStateView.swift
-├── AgentSettingsView.swift
-└── NotchShape.swift
-```
+├── NotchContentView.swift      — root, tab bar, open/closed, Cmd+D toggle
+├── NotchHomeView.swift         — Home tab: orb, transcript, activity log
+├── AgentSettingsView.swift     — Settings tab: 4 knobs + Advanced section
+├── ClosedNotchView.swift       — resting dot states in closed notch
+├── NotchShape.swift            — custom Shape for notch geometry
+└── AgentStateView.swift        — standalone status row (available, not in tabs)
 
-Keep related code together.
+Features/Cursor/
+├── CursorCompanion.swift       — coordinator; implements CursorAppearanceSetting
+├── CursorCompanionView.swift   — SwiftUI PNG sprite
+├── CursorCompanionViewModel.swift
+├── CursorCompanionWindow.swift — transparent always-on-top NSPanel
+├── CursorTracker.swift         — tracks real cursor position
+├── LongPressDetector.swift     — fires .longPressBegan / .longPressEnded
+└── LongPressEvents.swift       — notification name constants
+
+Features/Context/
+├── ContextCoordinator.swift    — entry point; implements RecentActivityContext
+├── ContextClickMonitor.swift   — debounced click hook (Accessibility API)
+├── ContextSnapshotStore.swift  — rolling buffer of screenshots (max 20)
+├── ContextMemoryStore.swift    — learned UI memory on disk
+├── ContextOCRService.swift     — native OCR via Vision framework
+├── ContextGeminiObservationService.swift
+├── ContextGeminiObservationModels.swift
+├── ContextActivationBuilder.swift  — buffer → compact prompt packet
+├── ContextMemoryRenderer.swift
+├── ContextModels.swift
+├── ContextWindowMetadataReader.swift
+├── ContextTextSignalFilter.swift
+├── ContextDebugView.swift
+└── ContextPerformanceReporter.swift
+
+Features/Agent/
+├── AgentSession.swift          — subscribes to longPressEnded, fires harness
+├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop
+├── ComputerUseModels.swift     — Codable API types
+├── AnthropicClient.swift       — URLSession API client
+├── ToolDispatcher.swift        — tool calls → CGEvent actions
+└── AgentRunMetrics.swift       — per-run metrics logging
+
+Features/Onboarding/
+├── OnboardingView.swift        — three permission cards
+├── OnboardingWindowController.swift
+└── PermissionChecker.swift     — live permission polling
+```
 
 Do not create:
 - global managers
@@ -61,18 +103,16 @@ Preferred flow:
 ```txt
 View
  ↕
-ViewModel
+ViewModel (if needed)
  ↕
-Service
+Service / Actor
 ```
-
-Responsibilities:
 
 | Layer | Responsibility |
 |---|---|
 | View | rendering + user interaction |
 | ViewModel | UI state + orchestration |
-| Service | API/storage side effects |
+| Service/Actor | API calls, storage, OS side effects |
 | Models | lightweight data types |
 
 ---
@@ -81,10 +121,7 @@ Responsibilities:
 
 ## 1. Prefer Locality
 
-If code is only used by one feature:
-- keep it inside that feature
-
-Do not abstract early.
+If code is only used by one feature, keep it inside that feature. Do not abstract early.
 
 ---
 
@@ -94,7 +131,6 @@ Allowed:
 
 ```txt
 Feature → Core
-Feature → Generated
 ```
 
 Avoid:
@@ -108,11 +144,7 @@ Shared logic belongs in `Core/`.
 
 ## 3. Keep Files Focused
 
-Target:
-- ~100–500 LOC
-- one primary responsibility
-
-Split files when reasoning becomes difficult.
+Target: ~100–500 LOC, one primary responsibility. Split when reasoning becomes difficult.
 
 ---
 
@@ -121,9 +153,9 @@ Split files when reasoning becomes difficult.
 Prefer:
 
 ```swift
-ChatService
-ProfileViewModel
-AuthSession
+AgentSession
+ContextCoordinator
+CursorCompanion
 ```
 
 Avoid:
@@ -144,14 +176,30 @@ Names should be searchable and unambiguous.
 Use:
 - SwiftUI
 - async/await
-- structs
-- value semantics
-- `@MainActor` on ObservableObject singletons
+- `actor` for shared mutable state across async contexts
+- `@MainActor` on `ObservableObject` singletons
+- structs + value semantics for models
 
 Avoid:
 - unnecessary protocols
 - deep inheritance
-- unnecessary frameworks
+- DispatchQueue.main.async (use `await MainActor.run` or `@MainActor` instead)
+
+---
+
+## 6. Cross-Feature Contracts
+
+The only legal surface between features is `AgentInterfaces`:
+
+```swift
+// Core/AgentInterfaces.swift
+AgentInterfaces.cursor   // CursorAppearanceSetting
+AgentInterfaces.context  // RecentActivityContext
+```
+
+Each module sets its slot in its `start()` or `init`, called from `AppDelegate.bootAgent()`.
+
+Do not import one feature module from another directly.
 
 ---
 
@@ -184,7 +232,6 @@ Default behavior:
 - turn findings into concrete patches, tests, demos, or measured recommendations
 - propose and implement safe next steps without waiting for repeated prompting
 - benchmark performance-sensitive paths instead of guessing
-- write down important learnings in repo docs or inspectable artifacts
 - surface tradeoffs clearly, then choose a reasonable default when the choice is reversible
 
 For experimental systems:
@@ -192,7 +239,6 @@ For experimental systems:
 - create repeatable demos that show first-run vs second-run behavior
 - measure latency, action count, failure rate, and memory usefulness
 - inspect real model outputs and harden parsers/prompts against drift
-- keep cached/model outputs local unless they are synthetic and safe to commit
 
 Ask the user only when:
 - the decision changes product direction
@@ -200,20 +246,20 @@ Ask the user only when:
 - credentials, privacy, or destructive actions are involved
 - multiple maintainers may be editing the same owned surface
 
-Do not ask just to continue obvious work. If the next step is clear, do it and report back with results.
+Do not ask just to continue obvious work. If the next step is clear, do it and report back.
 
 ---
 
 # Collaboration Workflow
 
-This is a shared hackathon repo with multiple maintainers and AI agents working at the same time.
+Shared hackathon repo — three maintainers and AI agents working simultaneously.
 
 Default workflow:
 - work directly on `main`
 - do not create branches
 - do not open PRs
-- fetch and fast-forward pull from `origin/main` before starting meaningful work
-- fetch and fast-forward pull again before committing or pushing
+- `git pull --ff-only origin main` before starting meaningful work
+- `git pull --ff-only origin main` again before committing or pushing
 - commit small, complete, verified changes directly to `main`
 - push to `origin/main` after each complete change
 
@@ -229,86 +275,53 @@ Before editing:
 
 ---
 
-# Current Ownership Boundaries
+# Ownership Boundaries
 
-Stay in the owning feature folder whenever possible.
+| Area | Owner | Status |
+|---|---|---|
+| `Features/Notch/` | Wyatt | ✅ done |
+| `Features/Cursor/` | Sam | ✅ done |
+| `Features/Context/` | Ashan | ✅ done |
+| `Features/Agent/` | Ashan | ✅ done (voice/Whisper pending) |
+| `Features/Onboarding/` | shared | ✅ done |
+| `Core/` | shared | ✅ done |
+| `App/` | shared | ✅ done |
 
-Current work areas:
-- `Features/Notch/` — notch UI and settings
-- `Features/Cursor/` — cursor companion, long-press gesture plumbing, click hooks, computer-use actions
-- `Features/Context/` — screenshot capture, screen understanding, recent activity memory
-- `Features/Agent/` — model input assembly, tool orchestration, agent execution
-- `Core/` — stable shared types and cross-feature interfaces only
-
-For Ashan/Codex context work:
-- prefer `Features/Context/` and `Features/Agent/`
-- use `Core/` only for explicit contracts shared with other features
-- avoid editing `Features/Notch/` or `Features/Cursor/` unless integration requires it
-- treat `vendored/` as read-only reference unless explicitly told otherwise
+Stay in your owning feature folder whenever possible. Touch `Core/` only for explicit contracts shared across features.
 
 ---
 
 # Product Constraints
 
-This is a local macOS desktop app.
-
-Do not add:
+Local macOS desktop app. Do not add:
 - backend servers
 - accounts
 - cloud sync
 - remote databases
-- browser extensions
 
-Users bring their own API keys.
-
-API keys and secrets must:
+Users bring their own API keys. Keys must:
 - stay local
 - never be hardcoded
 - never be committed
-- be read from local settings, environment, or Keychain-style storage
+- be read from environment variables (see `Core/Secrets.swift`)
 
 For context and screen understanding:
-- prefer a screenshot-first design
-- use OS events as capture triggers and metadata, not as the primary source of truth
+- prefer screenshot-first design
+- use OS events as capture triggers, not as primary source of truth
 - keep Accessibility API usage optional, narrow, and isolated
-- favor on-device preprocessing when it reduces model work
+- favor on-device preprocessing (OCR via Vision) to reduce model work
 - keep outputs inspectable and useful to the computer-use agent
-- avoid a complex graph or embedding system until a simpler artifact proves insufficient
 
 ---
 
 # Networking
 
 Prefer:
-- URLSession
-- Codable
-- async/await
+- `URLSession` + `Codable` + `async/await`
+- Feature-scoped services (`Features/Agent/AnthropicClient.swift`)
 
-Keep services feature-scoped when possible.
-
-Prefer:
-
-```txt
-Features/Chat/ChatService.swift
-```
-
-over:
-
-```txt
-Core/API/GlobalAPIManager.swift
-```
-
----
-
-# Generated Code
-
-Generated files belong in:
-
-```txt
-Generated/
-```
-
-Never manually edit generated files.
+Over:
+- global API managers in `Core/`
 
 ---
 
@@ -320,5 +333,4 @@ Never manually edit generated files.
 4. iteration speed
 5. architecture purity
 
-This is a hackathon project.
-Optimize for momentum.
+This is a hackathon project. Optimize for momentum.

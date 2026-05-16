@@ -22,7 +22,22 @@ After pulling changes that touch `Project.yml` or source layout, re-run `xcodege
 
 Requires macOS 14+ with a notch (M-series MacBook). Microphone, automation, and screen capture entitlements live in `App/AgentNotch.entitlements`.
 
-The app **is not** a fork of boring.notch. The boring.notch source is checked in under `vendored/boring.notch/` as read-only reference material (window plumbing, animations, tab layout, music UI). Read it, learn from it — **do not modify it** and do not include any of its files in our app target.
+The app **is not** a fork of boring.notch. The boring.notch source is checked in under `vendored/boring.notch/` as read-only reference material. Read it, learn from it — **do not modify it** and do not include any of its files in our app target.
+
+---
+
+## API Keys
+
+No keys are hardcoded. Resolution order: environment variable → nil.
+
+| Key | Used by |
+|---|---|
+| `ANTHROPIC_API_KEY` | `AnthropicClient` → Claude Sonnet agent |
+| `GEMINI_API_KEY` | `ContextGeminiObservationService` → screenshot analysis |
+
+Set these in your Xcode scheme's environment or your shell before launching.
+
+**Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `AgentSession` will use it as the user's transcript when Whisper is not available.
 
 ---
 
@@ -30,10 +45,10 @@ The app **is not** a fork of boring.notch. The boring.notch source is checked in
 
 **Agent in the Notch** — a macOS computer-use agent with two surfaces:
 
-- **Notch UI**: the agent's home, a fresh SwiftUI app (inspired by, but not forked from, boring.notch). Shows live agent state and settings.
+- **Notch UI**: the agent's home, a fresh SwiftUI app. Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
-The agent (Claude Sonnet) receives: voice transcript (Whisper) + a ≤2-paragraph text summary of recent screen activity (Gemini multimodal pipeline) + user preferences. It then drives computer-use actions.
+The agent (Claude Sonnet) receives: voice transcript (Whisper, P1 — not yet wired) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
 
 Full spec: `PRD.md`.
 
@@ -41,71 +56,123 @@ Full spec: `PRD.md`.
 
 ## Architecture
 
-New feature code follows the layout in `AGENTS.md`. The three feature areas map to:
-
 ```
-Features/Notch/       — notch UI, settings panel (Wyatt)           ← exists
-Features/Cursor/      — PNG overlay, computer use, click hooks (Sam)  ← create
-Features/Context/     — long-press/voice, screenshot capture, Gemini summarizer (Ashan)  ← create
-Features/Agent/       — Sonnet agent wiring, assembles inputs, fires model (Ashan)        ← create
-Core/                 — shared types, settings store               ← exists
+Features/Notch/       — notch UI, settings panel (Wyatt)      ✅ done
+Features/Cursor/      — PNG overlay, long-press, click hooks   ✅ done
+Features/Context/     — screenshot capture, OCR, Gemini, memory ✅ done
+Features/Agent/       — Sonnet wiring, computer-use harness    ✅ done
+Features/Onboarding/  — permission prompts at first launch     ✅ done
+Core/                 — shared types, settings store, secrets  ✅ done
 ```
 
 ### Core/ file map
 
-These are stable — all features should use them, not duplicate:
+All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `AgentInterfaces.swift` | Protocol stubs + static DI slots (`AgentInterfaces.cursor`, `.context`) — register your implementation here |
-| `AgentState.swift` | `AgentState.shared` — live status the Notch UI reads; call `AgentState.shared.set()` to reflect what the agent is doing |
-| `AgentSettingsStore.swift` | `AgentSettingsStore.shared` — persisted user settings (reasoning effort, preferences, system prompt, cursor color) |
+| `AgentInterfaces.swift` | Protocol stubs + static DI slots (`AgentInterfaces.cursor`, `.context`) |
+| `AgentState.swift` | `AgentState.shared` — live status the Notch UI reads; call `.set()` to update |
+| `AgentSettingsStore.swift` | `AgentSettingsStore.shared` — persisted user settings |
 | `AgentReasoningEffort.swift` | Enum: `.low` / `.medium` / `.high` |
 | `CursorColor.swift` | Enum: `.red` / `.green` / `.blue` / `.yellow` — has `.assetName` for PNG lookup |
+| `ScreenCapture.swift` | `ScreenCapture.shared` — shared screenshot utility |
+| `Secrets.swift` | `Secrets.anthropicAPIKey` — reads from env, never hardcoded |
 
-The boring.notch reference is at `vendored/boring.notch/`. Useful files: `boringNotch/BoringViewModel.swift` (main state), `boringNotch/BoringViewCoordinator.swift` (window/notch lifecycle), `boringNotch/ContentView.swift` (root SwiftUI view), `boringNotch/components/Notch/BoringNotchWindow.swift` (window plumbing).
+---
+
+## Feature File Maps
+
+### Features/Notch/ (Wyatt)
+
+| File | What it is |
+|---|---|
+| `NotchContentView.swift` | Root view — open/closed states, tab bar, Cmd+D toggle |
+| `NotchHomeView.swift` | Home tab — agent orb, last transcript, activity feed |
+| `AgentSettingsView.swift` | Settings tab — 4 knobs + Advanced section |
+| `ClosedNotchView.swift` | Resting dot/waveform in the closed notch |
+| `NotchShape.swift` | Custom `Shape` for the notch geometry |
+| `AgentStateView.swift` | Standalone status row (available but not used in current tab layout) |
+
+### Features/Cursor/ (Sam)
+
+| File | What it is |
+|---|---|
+| `CursorCompanion.swift` | Top-level coordinator; implements `CursorAppearanceSetting` |
+| `CursorCompanionView.swift` | SwiftUI PNG sprite |
+| `CursorCompanionViewModel.swift` | Observable state (color, listening, thinking) |
+| `CursorCompanionWindow.swift` | Transparent always-on-top `NSPanel` |
+| `CursorTracker.swift` | Follows real cursor position |
+| `LongPressDetector.swift` | Detects long-press; posts `.longPressBegan` / `.longPressEnded` |
+| `LongPressEvents.swift` | Notification name constants |
+
+### Features/Context/ (Ashan)
+
+| File | What it is |
+|---|---|
+| `ContextCoordinator.swift` | Entry point; implements `RecentActivityContext`; owns click-triggered capture |
+| `ContextClickMonitor.swift` | Debounced click hook via Accessibility API |
+| `ContextSnapshotStore.swift` | Rolling buffer of screenshots (max 20) |
+| `ContextMemoryStore.swift` | Learned UI memory persistence |
+| `ContextOCRService.swift` | Native OCR via Vision framework |
+| `ContextGeminiObservationService.swift` | Gemini multimodal analysis per screenshot |
+| `ContextGeminiObservationModels.swift` | Input/output types for Gemini calls |
+| `ContextActivationBuilder.swift` | Converts screenshot buffer → compact prompt packet |
+| `ContextMemoryRenderer.swift` | Renders learned UI memory to text |
+| `ContextModels.swift` | Data types: `ContextSnapshot`, `ContextDiagnostics`, etc. |
+| `ContextWindowMetadataReader.swift` | Reads active app name + window title |
+| `ContextTextSignalFilter.swift` | Cleans OCR output |
+| `ContextDebugView.swift` | Debug SwiftUI view for snapshot inspection |
+| `ContextPerformanceReporter.swift` | Reads stored artifacts and summarizes diagnostics |
+
+### Features/Agent/ (Ashan)
+
+| File | What it is |
+|---|---|
+| `AgentSession.swift` | Subscribes to `.longPressEnded`; fires one harness turn |
+| `ComputerUseHarness.swift` | Multi-turn Claude computer-use loop (model: `claude-sonnet-4-6`) |
+| `ComputerUseModels.swift` | Codable types for the Anthropic computer-use API |
+| `AnthropicClient.swift` | Raw API client (URLSession + async/await) |
+| `ToolDispatcher.swift` | Maps computer-use tool calls to CGEvent actions |
+| `AgentRunMetrics.swift` | Records per-run metrics to `AgentMetricsStore` |
+
+### Features/Onboarding/
+
+| File | What it is |
+|---|---|
+| `OnboardingView.swift` | Three permission cards (Accessibility, Screen Recording, Microphone) |
+| `OnboardingWindowController.swift` | Presents onboarding at first launch; calls `bootAgent()` on dismiss |
+| `PermissionChecker.swift` | Polls permission statuses live |
 
 ---
 
 ## Cross-Feature Interfaces
 
-These are the only contracts between features — keep them stable:
+The only contracts between features — keep them stable.
 
 | Interface | Owner | Consumer |
 |---|---|---|
-| `setCursorColor(_ color: CursorColor)` | Sam (Cursor) | Wyatt (Notch settings panel) |
-| `getRecentActivityContext() async -> String` | Ashan (Context) | Ashan (Agent wiring) |
+| `setCursorColor(_ color: CursorColor)` | `CursorCompanion` (Sam) | Notch settings panel (Wyatt) |
+| `getRecentActivityContext() async -> String` | `ContextCoordinator` (Ashan) | `AgentSession` (Ashan) |
 
-Settings (reasoning effort, preferences text, system prompt, cursor color) are persisted as a local JSON file — no sync, no iCloud. The settings store lives in `Core/` and is the single source of truth read by both the Notch UI and the Agent.
-
----
-
-## External Models
-
-| Model | Purpose | Notes |
-|---|---|---|
-| Claude Sonnet | Primary agent | Tool calls / computer actions |
-| Gemini multimodal | Screenshot batch summarizer | Batches of ~10, parallel, → text |
-| Whisper | Voice transcription | On long-press release |
-
-Context pipeline: click event (debounced 1 s) → screenshot → rolling buffer (cap 20) → Gemini batches → merged ≤2-paragraph string → injected into Sonnet system context.
+Settings (reasoning effort, preferences text, system prompt, cursor color) are persisted as a local JSON file — no sync, no iCloud. The settings store lives in `Core/` and is the single source of truth.
 
 ---
 
-## Adding a New Feature Module
+## Known Gap
 
-When Sam or Ashan creates their feature directory:
+**Voice transcription (Whisper) is not yet wired.** `AgentState.shared.lastTranscript` is read by the UI and by `AgentSession` but never written. Use `ANTHROPIC_NOTCH_DEMO_PROMPT` as a workaround to test the end-to-end loop without microphone input.
 
-1. **Register with `AgentInterfaces`** — set the static slot from your module's `install()` method called from `AppDelegate.applicationDidFinishLaunching`:
-   ```swift
-   AgentInterfaces.cursor = MyCursorModule()
-   AgentInterfaces.context = MyContextModule()
-   ```
+---
 
-2. **Use `@MainActor` on any `ObservableObject`** — all Core singletons are `@MainActor`; match the pattern.
+## Boot Sequence
 
-3. **Read settings from `AgentSettingsStore.shared`** — don't copy settings into your own store.
-
-4. **Update `AgentState.shared`** to reflect live agent status — the Notch UI observes it automatically.
-
-5. **Keep networking in your feature** — e.g. `Features/Agent/AgentService.swift`, not in `Core/`.
+```
+AppDelegate.applicationDidFinishLaunching
+  → NotchWindowController.shared.install()      // notch panel appears
+  → OnboardingWindowController.presentIfNeeded  // first-launch permissions
+      → bootAgent()
+          → CursorCompanion.shared.start()       // registers AgentInterfaces.cursor
+          → ContextCoordinator.shared.start()    // registers AgentInterfaces.context
+          → AgentSession.shared.start()          // subscribes to longPressEnded
+```
