@@ -33,7 +33,7 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
-        LSUIElement: false
+        LSUIElement: true
         NSHumanReadableCopyright: "Copyright © 2026 Agent in the Notch team."
         NSMicrophoneUsageDescription: "Agent in the Notch listens to your voice when you long-press the cursor companion."
         NSAppleEventsUsageDescription: "Agent in the Notch sends events to other apps when performing computer-use actions."

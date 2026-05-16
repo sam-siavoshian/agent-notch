@@ -2,8 +2,9 @@
 //  AgentNotchApp.swift
 //  Agent in the Notch
 //
-//  SwiftUI entry point. The actual notch-positioned NSPanel/SkyLightWindow
-//  wiring will be added on top of this — for now this gets us a Run target.
+//  Entry point. We don't use a SwiftUI WindowGroup — the real UI is an
+//  NSPanel installed by AppDelegate. The Settings scene exists only so the
+//  App protocol has a Scene to return.
 //
 
 import SwiftUI
@@ -13,10 +14,8 @@ struct AgentNotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("Agent in the Notch") {
-            NotchContentView()
-                .frame(minWidth: 520, minHeight: 360)
+        Settings {
+            EmptyView()
         }
-        .windowResizability(.contentSize)
     }
 }

@@ -34,6 +34,7 @@ struct NotchContentView: View {
     var body: some View {
         VStack(spacing: 8) {
             NotchTabBar(selected: $selected)
+                .padding(.top, 4)
             Group {
                 switch selected {
                 case .home:
@@ -44,8 +45,11 @@ struct NotchContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .background(.black)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 14)
+        .padding(.top, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(NotchShape(bottomCornerRadius: 20).fill(Color.black))
         .preferredColorScheme(.dark)
     }
 }
