@@ -29,3 +29,4 @@ ArshanTesting/test-results/
 ArshanTesting/playwright-report/
 ArshanTesting/fixtures/private/
 ArshanTesting/memory/private/
+ArshanTesting/memory/cache/*.json

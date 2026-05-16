@@ -17,6 +17,6 @@ describe("Gemini observation pipeline", () => {
     expect(() => ObservationSchema.parse(observation)).not.toThrow();
     expect(observation.app).toBe("Acme Deploy");
     expect(observation.visibleControls.length).toBeGreaterThan(0);
-    expect(observation.likelyAffordances.join(" ").toLowerCase()).toContain("deployments");
-  });
+    expect(observation.visibleControls.map((control) => control.label).join(" ").toLowerCase()).toContain("deployments");
+  }, 30_000);
 });

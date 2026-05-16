@@ -35,6 +35,11 @@ export function buildObservationPrompt(stateHint?: string): string {
     "Return strict JSON with these fields:",
     "app, windowTitle, surfaceId, surfaceLabel, summary, visibleControls, visibleEntities, landmarks, likelyAffordances, uncertainty, confidence.",
     "visibleControls must contain label, role, region, confidence.",
+    "visibleEntities must be an array of strings only.",
+    "landmarks must be an array of strings only.",
+    "likelyAffordances must be an array of strings only.",
+    "uncertainty must be an array of strings only, not a number.",
+    "confidence must be a number from 0 to 1.",
     "Use approximate regions like left-sidebar, top-right, center-table, right-panel.",
     "Prefer uncertainty over guessing. Do not invent hidden UI.",
     stateHint ? `Known synthetic state hint: ${stateHint}` : "",
@@ -59,12 +64,56 @@ export function parseObservationJson(rawText: string, defaults: {
     throw new Error("Observation response was not a JSON object.");
   }
   return ObservationSchema.parse({
-    ...parsed,
+    ...normalizeObservationLike(parsed as Record<string, unknown>),
     id: defaults.id,
     timestamp: defaults.timestamp,
     source: defaults.source,
     screenshotPath: defaults.screenshotPath
   });
+}
+
+function normalizeObservationLike(parsed: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...parsed,
+    visibleEntities: normalizeStringArray(parsed.visibleEntities),
+    landmarks: normalizeStringArray(parsed.landmarks),
+    likelyAffordances: normalizeStringArray(parsed.likelyAffordances),
+    uncertainty: normalizeUncertainty(parsed.uncertainty),
+    confidence: normalizeConfidence(parsed.confidence)
+  };
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return String(item);
+      const record = item as Record<string, unknown>;
+      return firstString(record.label, record.name, record.text, record.title, record.description) ??
+        JSON.stringify(item);
+    })
+    .filter((item) => item.trim().length > 0);
+}
+
+function normalizeUncertainty(value: unknown): string[] {
+  if (Array.isArray(value)) return normalizeStringArray(value);
+  if (typeof value === "string") return value.trim() ? [value] : [];
+  if (typeof value === "number") return value > 0 ? [`uncertainty score ${value}`] : [];
+  if (value && typeof value === "object") return normalizeStringArray([value]);
+  return [];
+}
+
+function normalizeConfidence(value: unknown): number {
+  if (typeof value === "number") {
+    if (value > 1) return Math.max(0, Math.min(1, value / 100));
+    return Math.max(0, Math.min(1, value));
+  }
+  return 0.5;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
 export function fixtureObservationForState(stateId: string, screenshotPath?: string): Observation {
