@@ -11,14 +11,22 @@ import SwiftUI
 
 @MainActor
 final class CursorCompanionWindow {
+    /// Panel is bigger than the sprite so the listening halo + thinking ring
+    /// don't clip. Must match the outer frame of CursorCompanionView.
+    private let panelSize: CGFloat = 40
+
+    /// Where the sprite center sits relative to the user's real cursor tip
+    /// (screen coords, AppKit: +x right, +y up). Tuned so the companion sits
+    /// just to the right and slightly below the cursor, like a buddy.
+    private let spriteOffsetFromCursor = CGPoint(x: 15, y: -10)
+
     private let panel: NSPanel
     private let hostingView: NSHostingView<CursorCompanionView>
-    private let spriteSize: CGFloat = 36
 
     init(viewModel: CursorCompanionViewModel) {
         let view = CursorCompanionView(viewModel: viewModel)
         let hosting = NSHostingView(rootView: view)
-        hosting.frame = CGRect(x: 0, y: 0, width: spriteSize, height: spriteSize)
+        hosting.frame = CGRect(x: 0, y: 0, width: panelSize, height: panelSize)
 
         let panel = NSPanel(
             contentRect: hosting.frame,
@@ -48,12 +56,15 @@ final class CursorCompanionWindow {
         panel.orderOut(nil)
     }
 
-    /// `point` is a top-of-cursor coordinate in global screen space (AppKit
-    /// origin = bottom-left of the primary screen). We offset so the sprite
-    /// sits just below-right of the actual cursor tip.
+    /// `point` = user's real cursor tip in global screen space (AppKit
+    /// origin = bottom-left of the primary screen). Positions the panel so
+    /// the sprite *center* lands at cursor + spriteOffsetFromCursor.
     func reposition(toCursorTip point: NSPoint) {
-        let offset = CGPoint(x: 14, y: -spriteSize)
-        let origin = CGPoint(x: point.x + offset.x, y: point.y + offset.y)
+        let center = CGPoint(
+            x: point.x + spriteOffsetFromCursor.x,
+            y: point.y + spriteOffsetFromCursor.y
+        )
+        let origin = CGPoint(x: center.x - panelSize / 2, y: center.y - panelSize / 2)
         panel.setFrameOrigin(origin)
     }
 }
