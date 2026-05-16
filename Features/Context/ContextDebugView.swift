@@ -562,6 +562,8 @@ struct ContextDebugView: View {
                     .foregroundStyle(.white.opacity(0.38))
             }
 
+            aiArtifactInspector(event)
+
             VStack(alignment: .leading, spacing: 4) {
                 detailLine("Model", event.model)
                 detailLine("Prompt version", event.promptVersion)
@@ -596,6 +598,82 @@ struct ContextDebugView: View {
         }
         .padding(9)
         .background(rowBackground)
+    }
+
+    @ViewBuilder
+    private func aiArtifactInspector(_ event: ContextAIObservationEvent) -> some View {
+        if hasInlineArtifacts(event) {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    requestImagePreview(event.requestImagePath)
+                    artifactTextBlock("Request metadata + transformations", event.requestMetadataPath, maxCharacters: 4_000)
+                    artifactTextBlock("Prompt sent to Gemini", event.promptPath, maxCharacters: 8_000)
+                    artifactTextBlock("Raw Gemini response", event.rawResponsePath, maxCharacters: 8_000)
+                    artifactTextBlock("Gemini error", event.errorPath, maxCharacters: 4_000)
+                }
+                .padding(.top, 4)
+            } label: {
+                Label("Inline request/response artifacts", systemImage: "tray.full")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+            .tint(.white.opacity(0.58))
+        }
+    }
+
+    private func hasInlineArtifacts(_ event: ContextAIObservationEvent) -> Bool {
+        [
+            event.requestImagePath,
+            event.requestMetadataPath,
+            event.promptPath,
+            event.rawResponsePath,
+            event.errorPath
+        ].contains { path in
+            guard let path else { return false }
+            return FileManager.default.fileExists(atPath: path)
+        }
+    }
+
+    @ViewBuilder
+    private func requestImagePreview(_ path: String?) -> some View {
+        if let path, let image = NSImage(contentsOfFile: path) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Screenshot sent to Gemini")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(maxHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func artifactTextBlock(_ title: String, _ path: String?, maxCharacters: Int) -> some View {
+        if let path, let text = fileText(path, maxCharacters: maxCharacters), !text.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.58))
+                Text(text)
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.62))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .padding(7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.black.opacity(0.18))
+                    )
+            }
+        }
     }
 
     private func memoryCard(_ memory: ContextAppMemory) -> some View {
@@ -659,15 +737,35 @@ struct ContextDebugView: View {
                     .foregroundStyle(.white.opacity(0.72))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                statusPill("\(surface.observationCount)x", color: .white)
-                if surface.clickCount > 0 {
-                    statusPill("\(surface.clickCount) clicks", color: .cyan)
+                if !surface.facts.isEmpty {
+                    statusPill("\(surface.facts.count) facts", color: .orange)
                 }
-                if surface.activationCount > 0 {
-                    statusPill("\(surface.activationCount) activations", color: .green)
+                if !surface.controls.isEmpty {
+                    statusPill("\(surface.controls.count) controls", color: .cyan)
+                }
+                if !surface.entities.isEmpty {
+                    statusPill("\(surface.entities.count) entities", color: .green)
                 }
             }
 
+            detailList(
+                "Structured facts",
+                surface.facts
+                    .sorted { $0.lastSeen > $1.lastSeen }
+                    .prefix(10)
+                    .map { "[\($0.category)/\($0.durability)] \($0.text)" }
+            )
+            detailList(
+                "Structured controls",
+                surface.controls
+                    .sorted { $0.lastSeen > $1.lastSeen }
+                    .prefix(10)
+                    .map { control in
+                        let hint = control.actionHint.isEmpty ? "" : ": \(control.actionHint)"
+                        return "\(control.label) (\(control.role), \(control.region))\(hint)"
+                    }
+            )
+            detailList("Structured entities", surface.entities.sorted { $0.lastSeen > $1.lastSeen }.prefix(12).map(\.text))
             detailList("UI facts", surface.semanticHighlights)
             detailList("Controls", surface.controlHighlights)
             detailList("Affordances", surface.affordanceHighlights)
@@ -947,6 +1045,16 @@ struct ContextDebugView: View {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.count > maxLines else { return text }
         return lines.prefix(maxLines).joined(separator: "\n") + "\n..."
+    }
+
+    private func fileText(_ path: String, maxCharacters: Int) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        if text.count <= maxCharacters {
+            return text
+        }
+        let prefix = String(text.prefix(maxCharacters))
+        return "\(prefix)\n\n... truncated in Dev Tools preview ..."
     }
 
     @ViewBuilder

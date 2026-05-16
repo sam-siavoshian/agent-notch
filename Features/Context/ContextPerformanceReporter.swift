@@ -194,7 +194,8 @@ public struct ContextPerformanceReporter {
             total + surface.stringArrayValue("semanticHighlights").count
         }
         let controlCount = surfaces.reduce(0) { total, surface in
-            total + surface.stringArrayValue("controlHighlights").count
+            let typedControls = surface.arrayValue("controls").count
+            return total + (typedControls > 0 ? typedControls : surface.stringArrayValue("controlHighlights").count)
         }
 
         return MemorySummary(

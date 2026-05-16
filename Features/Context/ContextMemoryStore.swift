@@ -86,7 +86,12 @@ public actor ContextMemoryStore {
             capturedAt: capturedAt,
             memory: &memory
         )
-        recordSemanticObservation(observation, surfaceID: surfaceID, memory: &memory)
+        recordSemanticObservation(
+            observation,
+            surfaceID: surfaceID,
+            capturedAt: capturedAt,
+            memory: &memory
+        )
 
         appMemories[appKey] = memory
         persist(memory, appKey: appKey)
@@ -262,6 +267,7 @@ public actor ContextMemoryStore {
     private func recordSemanticObservation(
         _ observation: ContextGeminiObservation,
         surfaceID: String,
+        capturedAt: Date,
         memory: inout ContextAppMemory
     ) {
         guard let index = memory.surfaces.firstIndex(where: { $0.id == surfaceID }) else { return }
@@ -293,6 +299,21 @@ public actor ContextMemoryStore {
             new: observation.uncertainty + observation.negativeCues,
             maxCount: 10
         )
+        memory.surfaces[index].facts = mergeFacts(
+            existing: memory.surfaces[index].facts,
+            new: structuredFacts(from: observation, capturedAt: capturedAt),
+            maxCount: 36
+        )
+        memory.surfaces[index].controls = mergeControls(
+            existing: memory.surfaces[index].controls,
+            new: structuredControls(from: observation, capturedAt: capturedAt),
+            maxCount: 32
+        )
+        memory.surfaces[index].entities = mergeEntities(
+            existing: memory.surfaces[index].entities,
+            new: structuredEntities(from: observation, capturedAt: capturedAt),
+            maxCount: 40
+        )
     }
 
     private func semanticHighlights(from observation: ContextGeminiObservation) -> [String] {
@@ -302,6 +323,167 @@ public actor ContextMemoryStore {
             observation.layoutSummary.isEmpty ? nil : "Layout: \(observation.layoutSummary)",
             observation.contentSummary.isEmpty ? nil : "Content: \(observation.contentSummary)"
         ].compactMap { $0 } + observation.memoryCandidates + observation.stateIndicators + observation.dataRegions
+    }
+
+    private func structuredFacts(
+        from observation: ContextGeminiObservation,
+        capturedAt: Date
+    ) -> [ContextMemoryFact] {
+        var pairs: [(String, String, String)] = []
+        addFact(observation.summary, category: "summary", durability: "stable", to: &pairs)
+        addFact(observation.primaryTask, category: "task", durability: "stable", to: &pairs)
+        addFact(observation.layoutSummary, category: "layout", durability: "stable", to: &pairs)
+        addFact(observation.contentSummary, category: "content", durability: "transient", to: &pairs)
+        for value in observation.stateIndicators {
+            addFact(value, category: "state", durability: "transient", to: &pairs)
+        }
+        for value in observation.dataRegions {
+            addFact(value, category: "data-region", durability: "stable", to: &pairs)
+        }
+        for value in observation.navigationPaths {
+            addFact(value, category: "navigation", durability: "stable", to: &pairs)
+        }
+        for value in observation.workflowHints {
+            addFact(value, category: "workflow", durability: "stable", to: &pairs)
+        }
+        for value in observation.affordances {
+            addFact(value, category: "affordance", durability: "stable", to: &pairs)
+        }
+        for value in observation.memoryCandidates {
+            let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = cleaned.lowercased()
+            let durability = lower.hasPrefix("transient:") ? "transient" : "stable"
+            let text = cleaned
+                .replacingOccurrences(of: #"(?i)^stable:\s*"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"(?i)^transient:\s*"#, with: "", options: .regularExpression)
+            addFact(text, category: "memory", durability: durability, to: &pairs)
+        }
+
+        return pairs.map { category, text, durability in
+            ContextMemoryFact(
+                id: "fact#\(Self.normalize(category))#\(Self.normalize(text))",
+                category: category,
+                text: text,
+                durability: durability,
+                source: observation.source.rawValue,
+                firstSeen: capturedAt,
+                lastSeen: capturedAt,
+                evidenceCount: 1,
+                confidence: observation.confidence
+            )
+        }
+    }
+
+    private func addFact(
+        _ value: String,
+        category: String,
+        durability: String,
+        to pairs: inout [(String, String, String)]
+    ) {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        pairs.append((category, text, durability))
+    }
+
+    private func structuredControls(
+        from observation: ContextGeminiObservation,
+        capturedAt: Date
+    ) -> [ContextControlMemory] {
+        observation.visibleControls.map { control in
+            let label = control.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            let role = control.role.trimmingCharacters(in: .whitespacesAndNewlines)
+            let region = control.region.trimmingCharacters(in: .whitespacesAndNewlines)
+            let actionHint = control.actionHint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return ContextControlMemory(
+                id: "control#\(Self.normalize(label))#\(Self.normalize(role))#\(Self.normalize(region))",
+                label: label.isEmpty ? "Unlabeled control" : label,
+                role: role.isEmpty ? "control" : role,
+                region: region.isEmpty ? "unknown-region" : region,
+                actionHint: actionHint,
+                firstSeen: capturedAt,
+                lastSeen: capturedAt,
+                evidenceCount: 1,
+                confidence: control.confidence
+            )
+        }
+    }
+
+    private func structuredEntities(
+        from observation: ContextGeminiObservation,
+        capturedAt: Date
+    ) -> [ContextEntityMemory] {
+        observation.entities.map { entity in
+            let text = entity.trimmingCharacters(in: .whitespacesAndNewlines)
+            return ContextEntityMemory(
+                id: "entity#\(Self.normalize(text))",
+                text: text,
+                source: observation.source.rawValue,
+                firstSeen: capturedAt,
+                lastSeen: capturedAt,
+                evidenceCount: 1,
+                confidence: observation.confidence
+            )
+        }
+        .filter { !$0.text.isEmpty }
+    }
+
+    private func mergeFacts(
+        existing: [ContextMemoryFact],
+        new: [ContextMemoryFact],
+        maxCount: Int
+    ) -> [ContextMemoryFact] {
+        var merged = existing
+        for fact in new {
+            if let index = merged.firstIndex(where: { $0.id == fact.id }) {
+                merged[index].lastSeen = fact.lastSeen
+                merged[index].evidenceCount += 1
+                merged[index].confidence = max(merged[index].confidence, fact.confidence)
+                merged[index].source = fact.source
+            } else {
+                merged.append(fact)
+            }
+        }
+        return Array(merged.sorted { $0.lastSeen > $1.lastSeen }.prefix(maxCount))
+    }
+
+    private func mergeControls(
+        existing: [ContextControlMemory],
+        new: [ContextControlMemory],
+        maxCount: Int
+    ) -> [ContextControlMemory] {
+        var merged = existing
+        for control in new {
+            if let index = merged.firstIndex(where: { $0.id == control.id }) {
+                merged[index].lastSeen = control.lastSeen
+                merged[index].evidenceCount += 1
+                merged[index].confidence = max(merged[index].confidence, control.confidence)
+                if !control.actionHint.isEmpty {
+                    merged[index].actionHint = control.actionHint
+                }
+            } else {
+                merged.append(control)
+            }
+        }
+        return Array(merged.sorted { $0.lastSeen > $1.lastSeen }.prefix(maxCount))
+    }
+
+    private func mergeEntities(
+        existing: [ContextEntityMemory],
+        new: [ContextEntityMemory],
+        maxCount: Int
+    ) -> [ContextEntityMemory] {
+        var merged = existing
+        for entity in new {
+            if let index = merged.firstIndex(where: { $0.id == entity.id }) {
+                merged[index].lastSeen = entity.lastSeen
+                merged[index].evidenceCount += 1
+                merged[index].confidence = max(merged[index].confidence, entity.confidence)
+                merged[index].source = entity.source
+            } else {
+                merged.append(entity)
+            }
+        }
+        return Array(merged.sorted { $0.lastSeen > $1.lastSeen }.prefix(maxCount))
     }
 
     private func persist(_ memory: ContextAppMemory, appKey: String) {

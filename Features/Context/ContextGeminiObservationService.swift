@@ -309,6 +309,14 @@ public actor ContextGeminiObservationService {
         timeoutSeconds: \(Int(config.timeoutSeconds))
         temperature: default
         partOrder: image, prompt
+
+        Image processing pipeline:
+        - Capture: ScreenCaptureKit full-display CGImage with cursor included.
+        - Local OCR: Apple Vision runs on the lossless PNG bytes from the capture.
+        - Local preview artifact: JPEG encoded separately at capture quality for lightweight Dev Tools thumbnails.
+        - Gemini request image: PNG bytes from the same capture, no crop, no downscale, no JPEG compression.
+        - Gemini request format: inline_data image first, text prompt second.
+        - Gemini latency knobs: global mediaResolution=\(config.mediaResolution), thinkingLevel=\(config.thinkingLevel), maxOutputTokens=\(config.maxOutputTokens).
         """
     }
 

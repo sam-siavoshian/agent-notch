@@ -20,19 +20,42 @@ enum ContextMemoryRenderer {
             .prefix(5)
             .map { surface in
                 var parts = ["- \(surface.title)"]
+                let facts = surface.facts
+                    .filter { $0.durability != "transient" }
+                    .prefix(4)
+                    .map { "\($0.category): \($0.text)" }
+                    .joined(separator: " | ")
+                if !facts.isEmpty {
+                    parts.append("Facts: \(facts).")
+                }
+                let controls = surface.controls.prefix(6).map { control in
+                    let hint = control.actionHint.isEmpty ? "" : " -> \(control.actionHint)"
+                    return "\(control.label) (\(control.role), \(control.region))\(hint)"
+                }.joined(separator: " | ")
+                if !controls.isEmpty {
+                    parts.append("Controls: \(controls).")
+                }
+                let entities = surface.entities.prefix(6).map(\.text).joined(separator: " | ")
+                if !entities.isEmpty {
+                    parts.append("Entities: \(entities).")
+                }
                 let text = surface.textHighlights.prefix(6).joined(separator: " | ")
                 if !text.isEmpty {
                     parts.append("Visible text: \(text).")
                 }
-                let semantic = surface.semanticHighlights.prefix(2).joined(separator: " ")
+                let semantic = surface.facts.isEmpty
+                    ? surface.semanticHighlights.prefix(2).joined(separator: " ")
+                    : ""
                 if !semantic.isEmpty {
                     parts.append("Learned UI: \(semantic)")
                 }
-                let controls = surface.controlHighlights.prefix(4).joined(separator: " | ")
-                if !controls.isEmpty {
-                    parts.append("Controls: \(controls).")
-                }
-                let affordances = surface.affordanceHighlights.prefix(3).joined(separator: " | ")
+                let affordances = surface.controls.isEmpty
+                    ? surface.affordanceHighlights.prefix(3).joined(separator: " | ")
+                    : surface.facts
+                        .filter { $0.category == "workflow" || $0.category == "navigation" || $0.category == "affordance" }
+                        .prefix(3)
+                        .map(\.text)
+                        .joined(separator: " | ")
                 if !affordances.isEmpty {
                     parts.append("Affordances: \(affordances).")
                 }
@@ -87,6 +110,15 @@ enum ContextMemoryRenderer {
                 }
                 if !surface.semanticHighlights.isEmpty {
                     lines.append("  - Learned UI summaries: \(surface.semanticHighlights.prefix(4).joined(separator: " | "))")
+                }
+                if !surface.facts.isEmpty {
+                    lines.append("  - Structured facts: \(surface.facts.prefix(12).map { "[\($0.category)/\($0.durability)] \($0.text)" }.joined(separator: " | "))")
+                }
+                if !surface.controls.isEmpty {
+                    lines.append("  - Structured controls: \(surface.controls.prefix(12).map { "\($0.label) (\($0.role), \($0.region), evidence \($0.evidenceCount)x)" }.joined(separator: " | "))")
+                }
+                if !surface.entities.isEmpty {
+                    lines.append("  - Structured entities: \(surface.entities.prefix(12).map(\.text).joined(separator: " | "))")
                 }
                 if !surface.controlHighlights.isEmpty {
                     lines.append("  - Controls: \(surface.controlHighlights.prefix(10).joined(separator: " | "))")

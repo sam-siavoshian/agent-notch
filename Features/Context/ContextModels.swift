@@ -170,6 +170,9 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
     public var controlHighlights: [String]
     public var affordanceHighlights: [String]
     public var uncertaintyHighlights: [String]
+    public var facts: [ContextMemoryFact]
+    public var controls: [ContextControlMemory]
+    public var entities: [ContextEntityMemory]
 
     public init(
         id: String,
@@ -183,7 +186,10 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         semanticHighlights: [String] = [],
         controlHighlights: [String] = [],
         affordanceHighlights: [String] = [],
-        uncertaintyHighlights: [String] = []
+        uncertaintyHighlights: [String] = [],
+        facts: [ContextMemoryFact] = [],
+        controls: [ContextControlMemory] = [],
+        entities: [ContextEntityMemory] = []
     ) {
         self.id = id
         self.title = title
@@ -197,6 +203,9 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         self.controlHighlights = controlHighlights
         self.affordanceHighlights = affordanceHighlights
         self.uncertaintyHighlights = uncertaintyHighlights
+        self.facts = facts
+        self.controls = controls
+        self.entities = entities
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -212,6 +221,9 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         case controlHighlights
         case affordanceHighlights
         case uncertaintyHighlights
+        case facts
+        case controls
+        case entities
     }
 
     public init(from decoder: Decoder) throws {
@@ -228,7 +240,44 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         self.controlHighlights = try container.decodeIfPresent([String].self, forKey: .controlHighlights) ?? []
         self.affordanceHighlights = try container.decodeIfPresent([String].self, forKey: .affordanceHighlights) ?? []
         self.uncertaintyHighlights = try container.decodeIfPresent([String].self, forKey: .uncertaintyHighlights) ?? []
+        self.facts = try container.decodeIfPresent([ContextMemoryFact].self, forKey: .facts) ?? []
+        self.controls = try container.decodeIfPresent([ContextControlMemory].self, forKey: .controls) ?? []
+        self.entities = try container.decodeIfPresent([ContextEntityMemory].self, forKey: .entities) ?? []
     }
+}
+
+public struct ContextMemoryFact: Codable, Identifiable, Sendable {
+    public var id: String
+    public var category: String
+    public var text: String
+    public var durability: String
+    public var source: String
+    public var firstSeen: Date
+    public var lastSeen: Date
+    public var evidenceCount: Int
+    public var confidence: Double
+}
+
+public struct ContextControlMemory: Codable, Identifiable, Sendable {
+    public var id: String
+    public var label: String
+    public var role: String
+    public var region: String
+    public var actionHint: String
+    public var firstSeen: Date
+    public var lastSeen: Date
+    public var evidenceCount: Int
+    public var confidence: Double
+}
+
+public struct ContextEntityMemory: Codable, Identifiable, Sendable {
+    public var id: String
+    public var text: String
+    public var source: String
+    public var firstSeen: Date
+    public var lastSeen: Date
+    public var evidenceCount: Int
+    public var confidence: Double
 }
 
 public struct ContextTransitionMemory: Codable, Identifiable, Sendable {
