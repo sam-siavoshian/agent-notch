@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ContextDevToolsWindowController.shared.install()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
-        SpotifyController.shared.start()
+        // Spotify: user-opt-in. Resume the connection if they previously
+        // tapped Connect (state persists in UserDefaults).
+        SpotifyController.shared.startIfPreviouslyConnected()
     }
 }

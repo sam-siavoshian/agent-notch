@@ -24,6 +24,7 @@ private struct NotchContentHeightKey: PreferenceKey {
 
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
+    case music
     case settings
 
     var id: String { rawValue }
@@ -31,6 +32,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .home: return "Home"
+        case .music: return "Music"
         case .settings: return "Settings"
         }
     }
@@ -38,6 +40,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
+        case .music: return "music.note"
         case .settings: return "gearshape.fill"
         }
     }
@@ -188,6 +191,10 @@ struct NotchContentView: View {
                 switch selectedTab {
                 case .home:
                     NotchHomeView()
+                case .music:
+                    SpotifyNowPlayingView()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 4)
                 case .settings:
                     ScrollView(.vertical, showsIndicators: false) {
                         AgentSettingsView()

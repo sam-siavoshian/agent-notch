@@ -40,17 +40,37 @@ final class SpotifyController: ObservableObject {
 
     @Published private(set) var state = SpotifyPlaybackState()
     @Published private(set) var isRunning = false
+    @Published private(set) var isConnected = false
 
+    private let connectedKey = "spotify.connected"
     private var notificationTask: Task<Void, Never>?
+    private var runningPollTask: Task<Void, Never>?
     private var artworkTask: Task<Void, Never>?
     private var lastArtworkURL: String?
     private let commandDelay: Duration = .milliseconds(40)
 
     private init() {}
 
-    /// Begin observing Spotify. Safe to call multiple times.
-    func start() {
-        guard notificationTask == nil else { return }
+    /// True once the user has tapped Connect. Persisted across launches.
+    var hasEverConnected: Bool {
+        UserDefaults.standard.bool(forKey: connectedKey)
+    }
+
+    /// Resume the connection at launch if user previously opted in.
+    func startIfPreviouslyConnected() {
+        guard hasEverConnected else { return }
+        connect()
+    }
+
+    /// Back-compat: AppDelegate boot path. Equivalent to
+    /// `startIfPreviouslyConnected()` — never auto-opts-in.
+    func start() { startIfPreviouslyConnected() }
+
+    /// User tapped Connect. Begins listening + persists the choice.
+    func connect() {
+        guard !isConnected else { return }
+        isConnected = true
+        UserDefaults.standard.set(true, forKey: connectedKey)
         refreshRunningState()
         notificationTask = Task { [weak self] in
             let notifications = DistributedNotificationCenter.default().notifications(
@@ -60,15 +80,36 @@ final class SpotifyController: ObservableObject {
                 await self?.refresh()
             }
         }
-        // Initial fetch in case Spotify is already playing on launch.
+        // Poll running state every 3s so the view reacts when Spotify
+        // launches or quits (no system notification for that).
+        runningPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3))
+                await self?.refreshRunningStateAndMaybeFetch()
+            }
+        }
         Task { await refresh() }
     }
 
-    func stop() {
-        notificationTask?.cancel()
-        notificationTask = nil
-        artworkTask?.cancel()
-        artworkTask = nil
+    /// User tapped Disconnect. Stops listening + clears state.
+    func disconnect() {
+        isConnected = false
+        UserDefaults.standard.set(false, forKey: connectedKey)
+        notificationTask?.cancel(); notificationTask = nil
+        runningPollTask?.cancel(); runningPollTask = nil
+        artworkTask?.cancel(); artworkTask = nil
+        state = SpotifyPlaybackState()
+        lastArtworkURL = nil
+    }
+
+    private func refreshRunningStateAndMaybeFetch() async {
+        let wasRunning = isRunning
+        refreshRunningState()
+        if isRunning && !wasRunning {
+            await refresh()
+        } else if !isRunning && wasRunning {
+            state = SpotifyPlaybackState()
+        }
     }
 
     // MARK: - Controls

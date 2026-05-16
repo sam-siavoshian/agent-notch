@@ -13,6 +13,7 @@
 //  the cursor companion or a neutral area, not on a UI control.
 //
 
+import ApplicationServices
 import Foundation
 import CoreGraphics
 import os.lock
@@ -34,6 +35,15 @@ final class LongPressDetector {
 
     func start() {
         guard eventTap == nil else { return }
+
+        let trusted = AXIsProcessTrusted()
+        NSLog("[LongPressDetector] AXIsProcessTrusted=\(trusted)")
+        if !trusted {
+            NSLog("[LongPressDetector] WARNING: Accessibility not granted. Open System Settings > Privacy & Security > Accessibility and enable AgentNotch, then relaunch.")
+            Task { @MainActor in
+                AgentState.shared.set(.error(message: "Accessibility permission missing — long-press disabled"))
+            }
+        }
 
         let mask = (1 << CGEventType.leftMouseDown.rawValue)
                  | (1 << CGEventType.leftMouseUp.rawValue)
@@ -64,6 +74,7 @@ final class LongPressDetector {
 
         self.eventTap = tap
         self.runLoopSource = source
+        NSLog("[LongPressDetector] event tap installed (threshold=\(threshold)s)")
     }
 
     func stop() {
@@ -104,6 +115,7 @@ final class LongPressDetector {
     }
 
     private func handleMouseDown() {
+        NSLog("[LongPressDetector] mouseDown")
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
 

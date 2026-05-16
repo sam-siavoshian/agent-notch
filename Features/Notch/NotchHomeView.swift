@@ -21,7 +21,6 @@ struct NotchHomeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             statusHero
-            SpotifyNowPlayingView()
             if !state.lastTranscript.isEmpty {
                 lastRequestCard
             }
