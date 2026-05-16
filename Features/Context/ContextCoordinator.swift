@@ -749,29 +749,43 @@ public final class ContextCoordinator: RecentActivityContext {
 
     private static let comparisonVariants: [GeminiComparisonVariant] = [
         GeminiComparisonVariant(
+            id: "31-lite-med-min",
+            label: "Gemini 3.1 Flash-Lite minimal, medium image",
+            model: "gemini-3.1-flash-lite",
+            mediaResolution: "MEDIA_RESOLUTION_MEDIUM",
+            thinkingLevel: "minimal"
+        ),
+        GeminiComparisonVariant(
             id: "31-lite-min",
-            label: "Gemini 3.1 Flash-Lite minimal",
+            label: "Gemini 3.1 Flash-Lite minimal, high image",
             model: "gemini-3.1-flash-lite",
             mediaResolution: "MEDIA_RESOLUTION_HIGH",
             thinkingLevel: "minimal"
         ),
         GeminiComparisonVariant(
             id: "31-lite-low",
-            label: "Gemini 3.1 Flash-Lite low",
+            label: "Gemini 3.1 Flash-Lite low, high image",
             model: "gemini-3.1-flash-lite",
             mediaResolution: "MEDIA_RESOLUTION_HIGH",
             thinkingLevel: "low"
         ),
         GeminiComparisonVariant(
+            id: "3-flash-med-min",
+            label: "Gemini 3 Flash minimal, medium image",
+            model: "gemini-3-flash",
+            mediaResolution: "MEDIA_RESOLUTION_MEDIUM",
+            thinkingLevel: "minimal"
+        ),
+        GeminiComparisonVariant(
             id: "3-flash-min",
-            label: "Gemini 3 Flash minimal",
+            label: "Gemini 3 Flash minimal, high image",
             model: "gemini-3-flash",
             mediaResolution: "MEDIA_RESOLUTION_HIGH",
             thinkingLevel: "minimal"
         ),
         GeminiComparisonVariant(
             id: "3-flash-low",
-            label: "Gemini 3 Flash low",
+            label: "Gemini 3 Flash low, high image",
             model: "gemini-3-flash",
             mediaResolution: "MEDIA_RESOLUTION_HIGH",
             thinkingLevel: "low"

@@ -83,7 +83,7 @@ public actor ContextMemoryStore {
             surfaceID: surfaceID,
             title: surfaceTitle,
             trigger: .manual,
-            textHighlights: observation.entities + observation.landmarks,
+            textHighlights: memoryHighlights(observation.entities + observation.landmarks),
             capturedAt: capturedAt,
             memory: &memory
         )
@@ -246,12 +246,12 @@ public actor ContextMemoryStore {
         memory: inout ContextAppMemory
     ) {
         let noteID = "stable-click#\(surfaceID)"
-        let note = "Clicks here have recently stayed on the same app/window surface; they may update controls in place instead of navigating elsewhere."
+        let note = "Recent clicks updated this surface in place. Treat this as weak evidence until a specific control or region is learned."
 
         if let index = memory.negativeNotes.firstIndex(where: { $0.id == noteID }) {
             memory.negativeNotes[index].surfaceTitle = surfaceTitle
             memory.negativeNotes[index].lastSeen = capturedAt
-            memory.negativeNotes[index].evidenceCount += 1
+            memory.negativeNotes[index].evidenceCount = min(memory.negativeNotes[index].evidenceCount + 1, 3)
         } else {
             memory.negativeNotes.append(ContextNegativeMemory(
                 id: noteID,
@@ -318,12 +318,12 @@ public actor ContextMemoryStore {
     }
 
     private func semanticHighlights(from observation: ContextGeminiObservation) -> [String] {
-        [
+        memoryHighlights([
             observation.summary,
             observation.primaryTask.isEmpty ? nil : "Task: \(observation.primaryTask)",
             observation.layoutSummary.isEmpty ? nil : "Layout: \(observation.layoutSummary)",
             observation.contentSummary.isEmpty ? nil : "Content: \(observation.contentSummary)"
-        ].compactMap { $0 } + observation.memoryCandidates + observation.stateIndicators + observation.dataRegions
+        ].compactMap { $0 } + observation.memoryCandidates + observation.stateIndicators + observation.dataRegions)
     }
 
     private func structuredFacts(
@@ -331,9 +331,9 @@ public actor ContextMemoryStore {
         capturedAt: Date
     ) -> [ContextMemoryFact] {
         var pairs: [(String, String, String)] = []
-        addFact(observation.summary, category: "summary", durability: "stable", to: &pairs)
-        addFact(observation.primaryTask, category: "task", durability: "stable", to: &pairs)
-        addFact(observation.layoutSummary, category: "layout", durability: "stable", to: &pairs)
+        addFact(observation.summary, category: "summary", durability: durability(for: observation.summary, preferred: "stable"), to: &pairs)
+        addFact(observation.primaryTask, category: "task", durability: "transient", to: &pairs)
+        addFact(observation.layoutSummary, category: "layout", durability: durability(for: observation.layoutSummary, preferred: "stable"), to: &pairs)
         addFact(observation.contentSummary, category: "content", durability: "transient", to: &pairs)
         for value in observation.stateIndicators {
             addFact(value, category: "state", durability: "transient", to: &pairs)
@@ -357,14 +357,15 @@ public actor ContextMemoryStore {
             let text = cleaned
                 .replacingOccurrences(of: #"(?i)^stable:\s*"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"(?i)^transient:\s*"#, with: "", options: .regularExpression)
-            addFact(text, category: "memory", durability: durability, to: &pairs)
+            addFact(text, category: "memory", durability: self.durability(for: text, preferred: durability), to: &pairs)
         }
 
         return pairs.map { category, text, durability in
-            ContextMemoryFact(
-                id: "fact#\(Self.normalize(category))#\(Self.normalize(text))",
+            let safeText = ContextTextSignalFilter.redacted(text)
+            return ContextMemoryFact(
+                id: "fact#\(Self.normalize(category))#\(Self.normalize(safeText))",
                 category: category,
-                text: text,
+                text: safeText,
                 durability: durability,
                 source: observation.source.rawValue,
                 firstSeen: capturedAt,
@@ -381,9 +382,12 @@ public actor ContextMemoryStore {
         durability: String,
         to pairs: inout [(String, String, String)]
     ) {
-        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard let text = ContextTextSignalFilter.memoryText(value) else { return }
         pairs.append((category, text, durability))
+    }
+
+    private func durability(for value: String, preferred: String) -> String {
+        ContextTextSignalFilter.looksTransientState(value) ? "transient" : preferred
     }
 
     private func structuredControls(
@@ -391,10 +395,10 @@ public actor ContextMemoryStore {
         capturedAt: Date
     ) -> [ContextControlMemory] {
         observation.visibleControls.map { control in
-            let label = control.label.trimmingCharacters(in: .whitespacesAndNewlines)
-            let role = control.role.trimmingCharacters(in: .whitespacesAndNewlines)
-            let region = control.region.trimmingCharacters(in: .whitespacesAndNewlines)
-            let actionHint = control.actionHint?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let label = ContextTextSignalFilter.redacted(control.label)
+            let role = ContextTextSignalFilter.redacted(control.role)
+            let region = ContextTextSignalFilter.redacted(control.region)
+            let actionHint = control.actionHint.flatMap { ContextTextSignalFilter.memoryText($0) } ?? ""
             return ContextControlMemory(
                 id: "control#\(Self.normalize(label))#\(Self.normalize(role))#\(Self.normalize(region))",
                 label: label.isEmpty ? "Unlabeled control" : label,
@@ -413,8 +417,8 @@ public actor ContextMemoryStore {
         from observation: ContextGeminiObservation,
         capturedAt: Date
     ) -> [ContextEntityMemory] {
-        observation.entities.map { entity in
-            let text = entity.trimmingCharacters(in: .whitespacesAndNewlines)
+        observation.entities.compactMap { entity in
+            guard let text = ContextTextSignalFilter.memoryText(entity, maxLength: 120) else { return nil }
             return ContextEntityMemory(
                 id: "entity#\(Self.normalize(text))",
                 text: text,
@@ -425,7 +429,6 @@ public actor ContextMemoryStore {
                 confidence: observation.confidence
             )
         }
-        .filter { !$0.text.isEmpty }
     }
 
     private func mergeFacts(
@@ -538,7 +541,9 @@ public actor ContextMemoryStore {
     }
 
     private func textHighlights(from snapshot: ContextSnapshot, maxCount: Int = 12) -> [String] {
-        ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: maxCount)
+        memoryHighlights(ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: maxCount * 2))
+            .prefix(maxCount)
+            .map { $0 }
     }
 
     private func mergedHighlights(existing: [String], new: [String], maxCount: Int = 24) -> [String] {
@@ -546,16 +551,30 @@ public actor ContextMemoryStore {
         var merged: [String] = []
 
         for text in new + existing {
-            let key = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let cleaned = ContextTextSignalFilter.memoryText(text) else { continue }
+            let key = cleaned.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             guard !key.isEmpty, !seen.contains(key) else { continue }
             seen.insert(key)
-            merged.append(text)
+            merged.append(cleaned)
             if merged.count >= maxCount {
                 break
             }
         }
 
         return merged
+    }
+
+    private func memoryHighlights(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values {
+            guard let cleaned = ContextTextSignalFilter.memoryText(value) else { continue }
+            let key = cleaned.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            output.append(cleaned)
+        }
+        return output
     }
 
     private func clean(_ value: String?) -> String? {

@@ -507,6 +507,7 @@ public actor ContextGeminiObservationService {
         thinkingLevel: \(config.thinkingLevel)
         maxOutputTokens: \(config.maxOutputTokens)
         timeoutSeconds: \(Int(config.timeoutSeconds))
+        estimatedCost: \(Self.estimatedCostDescription(model: model, config: config))
         temperature: default
         partOrder: image, prompt
 
@@ -995,6 +996,54 @@ public actor ContextGeminiObservationService {
         default:
             return defaultThinkingLevel
         }
+    }
+
+    private static func estimatedCostDescription(model: String, config: GeminiObservationRequestConfig) -> String {
+        let mediaTokens = estimatedMediaTokens(for: config.mediaResolution)
+        guard let pricing = tokenPricing(for: model) else {
+            return "unknown for \(model); request logs include media tokens \(mediaTokens) plus text/OCR/output tokens"
+        }
+
+        let imageInputCost = Double(mediaTokens) / 1_000_000 * pricing.inputPerMillion
+        let maxOutputCost = Double(config.maxOutputTokens) / 1_000_000 * pricing.outputPerMillion
+        return "\(mediaTokens) image tokens, image input approx \(dollars(imageInputCost)), max output approx \(dollars(maxOutputCost)); excludes OCR/prompt text input"
+    }
+
+    private static func estimatedMediaTokens(for mediaResolution: String) -> Int {
+        switch normalizedMediaResolution(mediaResolution) {
+        case "MEDIA_RESOLUTION_LOW":
+            return 280
+        case "MEDIA_RESOLUTION_MEDIUM":
+            return 560
+        case "MEDIA_RESOLUTION_HIGH":
+            return 1120
+        default:
+            return 1120
+        }
+    }
+
+    private static func tokenPricing(for model: String) -> (inputPerMillion: Double, outputPerMillion: Double)? {
+        let lower = model.lowercased()
+        if lower.contains("3.1-flash-lite") {
+            return (0.25, 1.50)
+        }
+        if lower.contains("3-flash") {
+            return (0.50, 3.00)
+        }
+        if lower.contains("2.5-flash-lite") {
+            return (0.10, 0.40)
+        }
+        if lower.contains("2.5-flash") {
+            return (0.30, 2.50)
+        }
+        return nil
+    }
+
+    private static func dollars(_ value: Double) -> String {
+        if value < 0.0001 {
+            return String(format: "$%.6f", value)
+        }
+        return String(format: "$%.4f", value)
     }
 
     private static var encoder: JSONEncoder {
