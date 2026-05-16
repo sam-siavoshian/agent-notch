@@ -18,6 +18,13 @@ public actor ContextGeminiObservationService {
     public static let defaultThinkingLevel = "minimal"
     public static let defaultMaxOutputTokens = 2400
 
+    public static var configuredModel: String {
+        normalizedModel(
+            Env.value("AGENTNOTCH_GEMINI_MODEL")
+                ?? Env.value("GEMINI_MODEL")
+        )
+    }
+
     public static var isAPIKeyConfigured: Bool {
         guard let apiKey = Env.value("GEMINI_API_KEY")?.trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
@@ -75,7 +82,7 @@ public actor ContextGeminiObservationService {
     private let session: URLSession
 
     public init(
-        model: String = ContextGeminiObservationService.defaultModel,
+        model: String = ContextGeminiObservationService.configuredModel,
         cacheDirectoryURL: URL = ContextGeminiObservationService.defaultCacheDirectoryURL,
         endpointBaseURL: URL = URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!,
         mediaResolutionOverride: String? = nil,
@@ -983,6 +990,20 @@ public actor ContextGeminiObservationService {
             return "MEDIA_RESOLUTION_HIGH"
         default:
             return defaultMediaResolution
+        }
+    }
+
+    private static func normalizedModel(_ rawValue: String?) -> String {
+        let value = rawValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch value {
+        case "gemini-3.1-flash-lite", "3.1-flash-lite", "flash-lite", "lite":
+            return "gemini-3.1-flash-lite"
+        case "gemini-3-flash", "3-flash", "flash":
+            return "gemini-3-flash"
+        default:
+            return defaultModel
         }
     }
 

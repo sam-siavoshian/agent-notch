@@ -75,7 +75,7 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         happenedAt: Date = Date(),
         provider: Provider = .gemini,
         status: Status,
-        model: String = ContextGeminiObservationService.defaultModel,
+        model: String = ContextGeminiObservationService.configuredModel,
         promptVersion: String = ContextGeminiObservationService.promptVersion,
         trigger: ContextCaptureTrigger,
         appName: String,

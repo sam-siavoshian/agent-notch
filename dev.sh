@@ -83,6 +83,14 @@ else
   echo "→ Gemini key not configured; context observation will run OCR-only"
 fi
 
+# Recommended native screenshot-analysis baseline. The AGENTNOTCH_* names take
+# precedence over generic GEMINI_* vars so sandbox experiments cannot
+# accidentally change the macOS app's production context pipeline.
+export AGENTNOTCH_GEMINI_MODEL="${AGENTNOTCH_GEMINI_MODEL:-gemini-3.1-flash-lite}"
+export AGENTNOTCH_GEMINI_MEDIA_RESOLUTION="${AGENTNOTCH_GEMINI_MEDIA_RESOLUTION:-MEDIA_RESOLUTION_HIGH}"
+export AGENTNOTCH_GEMINI_THINKING_LEVEL="${AGENTNOTCH_GEMINI_THINKING_LEVEL:-minimal}"
+echo "→ Gemini config: ${AGENTNOTCH_GEMINI_MODEL}, ${AGENTNOTCH_GEMINI_MEDIA_RESOLUTION}, thinking=${AGENTNOTCH_GEMINI_THINKING_LEVEL}"
+
 # ---------- signing guard ----------
 # Without a stable Apple Development cert, every build is signed ad-hoc and
 # TCC drops Accessibility / Screen Recording / Mic grants on each rebuild.
