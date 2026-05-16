@@ -32,11 +32,7 @@ struct LyricsView: View {
                 if store.isLoading {
                     skeleton
                 } else if store.lines.isEmpty && store.plain.isEmpty {
-                    if store.lastError != nil {
-                        emptyState
-                    } else {
-                        Color.clear
-                    }
+                    emptyState
                 } else if store.lines.isEmpty {
                     plainBlock
                 } else {

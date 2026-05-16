@@ -1,93 +1,85 @@
-# Agent in the Notch
+# Agent Notch
 
-A macOS computer-use agent that lives in the notch. Voice-activated (long-press the cursor companion), context-aware (captures recent screen activity), powered by Claude Sonnet.
+macOS computer-use agent that lives in the notch.
 
----
+Long-press the cursor companion, talk, Claude Sonnet drives the mouse. The notch shows what it is doing. Screen context (OCR + Gemini) gets fed in so it knows where it is.
 
-## Requirements
-
-- macOS 14+ on an M-series MacBook (physical notch required)
-- Xcode 15+
-- [xcodegen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
-- Apple ID added to Xcode → Settings → Accounts (free Personal Team works) with an Apple Development cert in the login keychain
-- An Anthropic API key
+> Requires an M-series MacBook with a physical notch. macOS 14+.
 
 ---
 
-## First-time setup
+## Quick start
 
 ```bash
 brew install xcodegen
-bash scripts/setup-signing.sh   # detects your Apple Dev cert, writes Local.xcconfig
+bash scripts/setup-signing.sh
 xcodegen generate
 open AgentNotch.xcodeproj
 ```
 
-`setup-signing.sh` is idempotent. Re-run if you switch Apple ID. Re-run `xcodegen generate` any time `Project.yml` or the source layout changes.
-
-### Why the signing script?
-
-Ad-hoc signing (`CODE_SIGN_IDENTITY = "-"`) regenerates the binary's cdhash on every build. macOS TCC keys permission grants (Accessibility, Screen Recording) by cdhash + cert chain. Ad-hoc rebuild → TCC sees a "different app" → grant invalidated → onboarding red Xs forever.
-
-Signing with your Apple Development cert keeps the Designated Requirement stable across rebuilds, so once you grant a permission, it sticks. Hardened runtime is also off for local dev so declared entitlements survive at runtime without a provisioning profile — otherwise stripped entitlements destabilize the effective signature each launch.
-
-If `scripts/setup-signing.sh` complains it cannot find a cert: open Xcode → Settings → Accounts → Manage Certificates → + → Apple Development, then re-run.
+Set `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` in the Xcode scheme env. Build, run, grant the three permissions, long-press the cursor.
 
 ---
 
-## Setting your API keys
+## Keys
 
-**Anthropic** key reads from `ANTHROPIC_API_KEY` in the Xcode scheme environment at launch.
+| Var | Used by |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude Sonnet agent |
+| `GEMINI_API_KEY` | Screen context observer |
+| `ANTHROPIC_NOTCH_DEMO_PROMPT` | Optional. Hardcoded transcript for mic-less demos. |
 
-1. In Xcode, **Product → Scheme → Edit Scheme…** (or `⌘<`)
-2. Select **Run** → **Arguments** tab
-3. Under **Environment Variables**, add:
-
-| Name | Value |
-|------|-------|
-| `ANTHROPIC_API_KEY` | `sk-ant-...` |
-
-The key is never written to disk — it lives only in the local scheme, which is gitignored.
-
-**OpenAI** (Whisper) key is stored in the macOS Keychain under service `com.agentnotch.app`. `AppDelegate.seedSecrets()` bootstraps a default on first launch; rotate via `Secrets.setOpenAIAPIKey(_:)`.
+Never committed. Scheme env only. OpenAI Whisper key lives in the macOS Keychain (`com.agentnotch.app`).
 
 ---
 
 ## Permissions
 
-On first launch the onboarding window asks for three TCC grants:
+Onboarding asks for three:
 
-- **Accessibility** — read long-press gesture, drive clicks/keystrokes
-- **Screen Recording** — capture activity for context
-- **Microphone** — long-press to talk
-
-Click Grant on each. The window auto-relaunches after you return from Settings so the in-process TCC cache flushes.
+- **Accessibility** — long-press detection + click/keystroke synthesis
+- **Screen Recording** — context capture
+- **Microphone** — voice in
 
 ---
 
-## Demo without a microphone
+## Controls
 
-If you want to fire the agent without Whisper:
-
-| Name | Value |
-|------|-------|
-| `ANTHROPIC_NOTCH_DEMO_PROMPT` | `Open Safari and go to x.com` |
-
-Any long-press on the cursor companion will fire the agent using that string as the transcript.
+- Hover notch, it opens
+- Drag down to open, drag up to close
+- `⌘D` toggles open/closed
+- Long-press cursor companion, talk, release, agent fires
+- Tabs: Home (status), Settings (reasoning, color, prefs), Spotify
 
 ---
 
-## Using the app
+## Why a signing script?
 
-- **Hover** over the notch to open it
-- **Drag down** on the closed notch to open; **drag up** inside to close
-- **Cmd+D** toggles open/closed (grant Accessibility access when prompted; auto-closes after 3 s)
-- **Long-press** the cursor companion to start a voice command (hold until the waveform appears, release to send)
-- Switch between **Home** (live agent status) and **Settings** (reasoning effort, cursor color, preferences) via the tab bar
+Ad-hoc signing changes the cdhash every build. macOS TCC keys permission grants by cdhash, so grants vanish on every rebuild. `scripts/setup-signing.sh` wires your Apple Development cert in so grants stick.
+
+Open Xcode → Settings → Accounts → Manage Certificates → + → Apple Development if the script cannot find one.
 
 ---
 
-## Architecture
+## Layout
 
-See `AGENTS.md` and `CLAUDE.md` for module layout and conventions.
-See `PRD.md` for the product spec and `NOTES.md` for current build status.
+```
+App/                  app entry, entitlements
+Core/                 shared types, settings, secrets
+Features/Notch/       notch UI + tabs
+Features/Cursor/      cursor companion + long-press
+Features/Context/     screen capture, OCR, Gemini
+Features/Agent/       Whisper + Claude computer-use loop
+Features/Music/       Spotify tab
+Features/Onboarding/  first-launch permissions
+```
+
+Details in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md). Product spec in [`PRD.md`](PRD.md).
+
+---
+
+## Stack
+
+Swift, SwiftUI, Claude Sonnet 4.6 (computer-use), Gemini, WhisperKit, Vision OCR, CGEvent, ScreenCaptureKit, XcodeGen.
+
+Built at TritonHacks 2026.

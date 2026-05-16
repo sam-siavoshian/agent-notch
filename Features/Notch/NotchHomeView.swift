@@ -45,34 +45,46 @@ struct NotchHomeView: View {
     private var permissionBanner: some View {
         let missing = permissions.missing
         let primary = missing.first
-        return Button {
-            if let primary { permissions.openSettings(for: primary) }
-        } label: {
-            HStack(spacing: 6) {
-                StatusBadge(color: SoftPill.Status.amber, symbol: "exclamationmark.triangle.fill", size: 14)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(missing.count == 1
-                         ? "\(primary?.label ?? "Permission") not granted"
-                         : "\(missing.count) permissions missing")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(SoftPill.Status.amber)
-                    Text("Tap to open System Settings")
-                        .font(.system(size: 9))
-                        .foregroundStyle(SoftPill.Text.muted)
-                }
-                Spacer(minLength: 0)
+        return HStack(spacing: 8) {
+            StatusBadge(color: SoftPill.Status.amber, symbol: "exclamationmark.triangle.fill", size: 14)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(missing.count == 1
+                     ? "\(primary?.label ?? "Permission") not granted"
+                     : "\(missing.count) permissions missing")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(SoftPill.Status.amber)
+                Text("Drag the icon into Settings, or tap Grant")
+                    .font(.system(size: 9))
+                    .foregroundStyle(SoftPill.Text.muted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(
-                PillBackground(
-                    fill: AnyShapeStyle(SoftPill.Surface.inset),
-                    glow: SoftPill.Status.amber,
-                    cornerRadius: 10
-                )
-            )
+            Spacer(minLength: 4)
+            DraggableAgentIcon(size: 24)
+                .help("Drag onto the Privacy list in System Settings")
+            if let primary {
+                GrantPermissionButton(target: pickTarget(primary))
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            PillBackground(
+                fill: AnyShapeStyle(SoftPill.Surface.inset),
+                glow: SoftPill.Status.amber,
+                cornerRadius: 10
+            )
+        )
+    }
+
+    /// Map a PermissionChecker id onto the local nested PermissionTarget.
+    /// String-based to avoid coupling the home view to the checker enum.
+    private func pickTarget(_ id: PermissionChecker.PermissionID) -> PermissionTarget {
+        switch String(describing: id).lowercased() {
+        case let s where s.contains("screen"): return .screenRecording
+        case let s where s.contains("mic"):    return .microphone
+        default:                                return .accessibility
+        }
     }
 
     private var statusHero: some View {
@@ -100,7 +112,9 @@ struct NotchHomeView: View {
                 .truncationMode(.tail)
             }
             Spacer(minLength: 0)
-            if let fix = missingPermission {
+            // Skip the inline Grant when the amber banner above already
+            // owns the permission fix flow — avoids two competing CTAs.
+            if let fix = missingPermission, permissions.missing.isEmpty {
                 DraggableAgentIcon(size: 26)
                     .help("Drag onto the privacy list in System Settings to add AgentNotch")
                 GrantPermissionButton(target: fix)
@@ -359,20 +373,35 @@ private struct DraggableAgentIcon: View {
     var size: CGFloat = 26
     @State private var hover = false
 
-    private var iconImage: NSImage {
-        NSApp.applicationIconImage
-            ?? NSImage(named: NSImage.applicationIconName)
-            ?? NSImage()
+    /// True when the bundle has a real app icon. The default Xcode template
+    /// icon is a blank/placeholder rendering — fall back to a custom badge
+    /// so the drag target reads as "this app" instead of "blank square".
+    private var hasRealIcon: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") != nil
+            || Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") != nil
+    }
+
+    private var iconImage: NSImage? {
+        NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if hasRealIcon, let img = iconImage {
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+        } else {
+            AgentNotchBadge()
+        }
     }
 
     var body: some View {
-        Image(nsImage: iconImage)
-            .resizable()
-            .interpolation(.high)
-            .scaledToFit()
+        icon
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-            .shadow(color: .black.opacity(hover ? 0.35 : 0.20),
+            .shadow(color: .black.opacity(hover ? 0.40 : 0.22),
                     radius: hover ? 6 : 3, y: hover ? 3 : 1)
             .scaleEffect(hover ? 1.06 : 1.0)
             .animation(.spring(response: 0.25, dampingFraction: 0.75), value: hover)
@@ -383,12 +412,57 @@ private struct DraggableAgentIcon: View {
                 provider.suggestedName = Bundle.main.bundleURL.lastPathComponent
                 return provider
             } preview: {
-                Image(nsImage: iconImage)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 80, height: 80)
+                icon.frame(width: 80, height: 80)
             }
+    }
+}
+
+/// Drawn fallback: black rounded square with a tiny notch silhouette in
+/// the top-center. Matches the product — looks like the menu-bar notch.
+private struct AgentNotchBadge: View {
+    var body: some View {
+        GeometryReader { geo in
+            let s = min(geo.size.width, geo.size.height)
+            ZStack {
+                RoundedRectangle(cornerRadius: s * 0.22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.15, green: 0.16, blue: 0.20),
+                                Color(red: 0.05, green: 0.06, blue: 0.09)
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                // Inset top highlight
+                RoundedRectangle(cornerRadius: s * 0.22, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.20), .clear],
+                            startPoint: .top, endPoint: .center
+                        ),
+                        lineWidth: 0.7
+                    )
+                // Notch dent at top center
+                Capsule()
+                    .fill(Color.black)
+                    .frame(width: s * 0.45, height: s * 0.16)
+                    .offset(y: -s * 0.30)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                            .frame(width: s * 0.45, height: s * 0.16)
+                            .offset(y: -s * 0.30)
+                    )
+                // Tiny green status dot under the notch
+                Circle()
+                    .fill(Color(red: 0.133, green: 0.773, blue: 0.369))
+                    .frame(width: s * 0.13, height: s * 0.13)
+                    .offset(y: s * 0.05)
+                    .shadow(color: Color(red: 0.133, green: 0.773, blue: 0.369).opacity(0.6),
+                            radius: s * 0.10)
+            }
+        }
     }
 }
 

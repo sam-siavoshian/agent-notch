@@ -4,23 +4,21 @@ export default function Home() {
       <section className="landing">
         <header className="chrome">
           <a className="pill logo" href="#">
-            <span className="logo__mark">agent notch</span>
-            <span className="logo__sub">open source, for mac</span>
+            <span className="logo__orb" aria-hidden="true" />
+            <span className="logo__text">
+              <span className="logo__mark">agent notch</span>
+              <span className="logo__sub">open source · for mac</span>
+            </span>
           </a>
           <nav className="pill nav">
             <a className="nav__link" href="#features">features</a>
             <a className="nav__link" href="#how">how it works</a>
             <a className="nav__link" href="#github">github</a>
+            <span className="nav__sep" aria-hidden="true" />
             <a className="pill pill--dark nav__cta" href="#download">
               download
             </a>
           </nav>
-          <div className="stat-wrap">
-            <div className="pill pill--stat">
-              <span className="dot" style={{ background: "#22c55e" }} />
-              <strong>shipped</strong> free and open source
-            </div>
-          </div>
         </header>
 
         <div className="hero">
@@ -50,19 +48,96 @@ export default function Home() {
                 <div className="macbook__display">
                   <div className="desktop-bg" />
 
-                  <div className="notch">
-                    <div className="notch__wave">
-                      <span /><span /><span /><span /><span /><span />
-                    </div>
-                    <span className="notch__label">agent on</span>
-                  </div>
+                  <div className="notch-panel">
+                    <span className="notch-panel__camera" />
+                    <div className="np-frames">
+                      <div className="np-frame np-frame--listen">
+                        <div className="np-body">
+                          <div className="orb orb--pink">
+                            <span className="orb__core" />
+                          </div>
+                          <div className="np-text">
+                            <div className="np-text__label">listening</div>
+                            <div className="np-text__caption">
+                              &ldquo;share figma with saam, wyatt, arshan.&rdquo;
+                            </div>
+                          </div>
+                        </div>
+                        <div className="np-viz np-viz--meter">
+                          <span /><span /><span /><span /><span /><span />
+                          <span /><span /><span /><span /><span /><span />
+                        </div>
+                      </div>
 
-                  <div className="transcript">
-                    <div className="bubble bubble--user">
-                      open figma. share the doc with arshan.
-                    </div>
-                    <div className="bubble bubble--agent">
-                      opening figma. sharing with arshan@.
+                      <div className="np-frame np-frame--think">
+                        <div className="np-body">
+                          <div className="orb orb--blue">
+                            <span className="orb__core" />
+                          </div>
+                          <div className="np-text">
+                            <div className="np-text__label np-text__label--blue">reading</div>
+                            <div className="np-text__caption np-text__caption--soft">
+                              found share menu · 3 fields
+                            </div>
+                          </div>
+                        </div>
+                        <div className="np-viz np-viz--dots">
+                          <span /><span /><span />
+                        </div>
+                      </div>
+
+                      <div className="np-frame np-frame--click">
+                        <div className="np-body">
+                          <div className="orb orb--amber">
+                            <span className="orb__core" />
+                          </div>
+                          <div className="np-text">
+                            <div className="np-text__label np-text__label--amber">clicking</div>
+                            <div className="np-text__caption np-text__caption--soft">
+                              share → add people
+                            </div>
+                          </div>
+                        </div>
+                        <div className="np-viz np-viz--cursor">
+                          <span className="np-cursor">↖</span>
+                          <span className="np-cursor-track" />
+                        </div>
+                      </div>
+
+                      <div className="np-frame np-frame--type">
+                        <div className="np-body">
+                          <div className="orb orb--violet">
+                            <span className="orb__core" />
+                          </div>
+                          <div className="np-text">
+                            <div className="np-text__label np-text__label--violet">typing</div>
+                            <div className="np-text__caption np-text__caption--mono">
+                              wyatt@stanford.edu<span className="np-caret" />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="np-viz np-viz--keys">
+                          <span>w</span><span>y</span><span>a</span><span>t</span>
+                          <span>t</span><span>↵</span>
+                        </div>
+                      </div>
+
+                      <div className="np-frame np-frame--done">
+                        <div className="np-body">
+                          <div className="orb orb--green">
+                            <span className="orb__check">✓</span>
+                          </div>
+                          <div className="np-text">
+                            <div className="np-text__label np-text__label--green">done</div>
+                            <div className="np-text__caption">
+                              shared with saam · wyatt · arshan · 1.4s
+                            </div>
+                          </div>
+                        </div>
+                        <div className="np-viz np-viz--done">
+                          <span className="np-done-bar" />
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

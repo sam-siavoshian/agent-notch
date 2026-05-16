@@ -177,6 +177,37 @@ else
   fi
 fi
 set -e
+
+# Codesign sometimes rejects the bundle because CopySwiftLibs copies in
+# Swift runtime dylibs with extended attributes ("resource fork ... or
+# similar detritus not allowed"). Strip them and retry the build — the
+# incremental pass skips CopySwiftLibs so xattrs stay clean through sign.
+APP_PATH_RETRY="${DERIVED}/Build/Products/Debug/${SCHEME}.app"
+if [[ $BUILD_RC -ne 0 && -d "$APP_PATH_RETRY" ]]; then
+  echo "→ codesign failed — stripping xattrs and retrying"
+  /usr/bin/xattr -cr "$APP_PATH_RETRY" 2>/dev/null || true
+  set +e
+  if [[ ${#SIGNING_ARGS[@]} -gt 0 ]]; then
+    xcodebuild build \
+      -project "$PROJECT" \
+      -scheme "$SCHEME" \
+      -destination "platform=macOS" \
+      -derivedDataPath "$DERIVED" \
+      "${SIGNING_ARGS[@]}" \
+      2>&1 | tail -20
+    BUILD_RC=${PIPESTATUS[0]}
+  else
+    xcodebuild build \
+      -project "$PROJECT" \
+      -scheme "$SCHEME" \
+      -destination "platform=macOS" \
+      -derivedDataPath "$DERIVED" \
+      2>&1 | tail -20
+    BUILD_RC=${PIPESTATUS[0]}
+  fi
+  set -e
+fi
+
 if [[ $BUILD_RC -ne 0 ]]; then
   echo "ERROR: build failed (rc=$BUILD_RC)"
   exit $BUILD_RC
