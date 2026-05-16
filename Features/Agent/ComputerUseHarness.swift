@@ -148,6 +148,15 @@ public final class ComputerUseHarness {
                 return
             }
 
+            if turn == 1 {
+                let affirmation = response.content.compactMap { block -> String? in
+                    if case .text(let t) = block { return t } else { return nil }
+                }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !affirmation.isEmpty {
+                    TextToSpeechService.shared.speak(affirmation)
+                }
+            }
+
             var resultBlocks: [ContentBlock] = []
             for use in toolUses {
                 let action = actionLabel(use.input)
@@ -203,7 +212,8 @@ public final class ComputerUseHarness {
         parts.append("""
         You are an on-screen computer-use agent on macOS. You control the user's machine via the computer tool. \
         You can click, type, scroll, take screenshots, and press keys. Always take a screenshot before acting if you're unsure of the screen state. \
-        Refuse to perform irreversible destructive actions (deleting files, formatting drives, sending payments) without explicit confirmation.
+        Refuse to perform irreversible destructive actions (deleting files, formatting drives, sending payments) without explicit confirmation. \
+        Before executing any tool calls, always begin your response with a brief natural one-sentence spoken acknowledgment of what you're about to do — e.g. "Opening Chrome now." or "Sure, I'll click that." Keep it under 15 words. This sentence will be read aloud to the user.
         """)
 
         if !contextSummary.isEmpty {
