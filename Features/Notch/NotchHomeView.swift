@@ -108,7 +108,7 @@ struct NotchHomeView: View {
                     }
                 }
             }
-            .frame(maxHeight: 128)
+            .frame(maxHeight: 164)
         }
     }
 
@@ -116,13 +116,26 @@ struct NotchHomeView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "hand.tap.fill")
-                .font(.system(size: 24))
-                .foregroundStyle(store.cursorColor.swatch.opacity(0.65))
-            Text("Long-press the cursor companion to get started")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.38))
-                .multilineTextAlignment(.center)
+            if AgentInterfaces.cursor == nil {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.orange.opacity(0.75))
+                Text("Cursor companion not connected")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text("Waiting for Sam's module to register.")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.28))
+                    .multilineTextAlignment(.center)
+            } else {
+                Image(systemName: "hand.tap.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(store.cursorColor.swatch.opacity(0.65))
+                Text("Long-press the cursor companion to get started")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.38))
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 24)

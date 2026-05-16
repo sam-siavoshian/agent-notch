@@ -11,16 +11,35 @@ import AppKit
 
 struct AgentSettingsView: View {
     @ObservedObject private var store = AgentSettingsStore.shared
-    @State private var showSystemPrompt = false
+    @State private var showAdvanced = false
+    @State private var savedOpacity: Double = 0
     @State private var diagnosticsStatus = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             reasoningEffortRow
             cursorColorRow
-            contextDiagnosticsRow
             preferencesRow
-            systemPromptRow
+            advancedSection
+            savedBadge
+        }
+        .onChange(of: store.settings) { _, _ in
+            savedOpacity = 1
+            withAnimation(.easeOut(duration: 0.4).delay(1.0)) {
+                savedOpacity = 0
+            }
+        }
+    }
+
+    // MARK: Saved badge
+
+    private var savedBadge: some View {
+        HStack {
+            Spacer()
+            Text("Saved")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.green.opacity(0.85))
+                .opacity(savedOpacity)
         }
     }
 
@@ -66,45 +85,14 @@ struct AgentSettingsView: View {
                     .buttonStyle(.plain)
                     .help(color.displayName)
                 }
-            }
-        }
-    }
 
-    // MARK: Context diagnostics
+                Spacer(minLength: 6)
 
-    private var contextDiagnosticsRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SettingRow(title: "Context") {
-                HStack(spacing: 8) {
-                    Button {
-                        openDirectory(ContextMemoryStore.defaultDirectoryURL)
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .help("Open learned UI memory")
-
-                    Button {
-                        openDirectory(AgentMetricsStore.defaultDirectoryURL)
-                    } label: {
-                        Image(systemName: "chart.xyaxis.line")
-                    }
-                    .help("Open computer-use run metrics")
-
-                    Button {
-                        copyActivationContext()
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                    }
-                    .help("Copy current activation context packet")
-                }
-                .buttonStyle(.borderless)
-            }
-
-            if !diagnosticsStatus.isEmpty {
-                Text(diagnosticsStatus)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .lineLimit(1)
+                Image(systemName: "cursorarrow")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(store.cursorColor.swatch)
+                    .shadow(color: store.cursorColor.swatch.opacity(0.6), radius: 5)
+                    .animation(.smooth(duration: 0.25), value: store.cursorColor)
             }
         }
     }
@@ -141,37 +129,84 @@ struct AgentSettingsView: View {
         }
     }
 
-    // MARK: System prompt
+    // MARK: Advanced (system prompt + diagnostics)
 
-    private var systemPromptRow: some View {
+    private var advancedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(.smooth(duration: 0.2)) { showSystemPrompt.toggle() }
+                withAnimation(.smooth(duration: 0.2)) { showAdvanced.toggle() }
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: showSystemPrompt ? "chevron.down" : "chevron.right")
+                    Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .bold))
-                    Text("System prompt override")
+                    Text("Advanced")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.white.opacity(0.38))
             }
             .buttonStyle(.plain)
 
-            if showSystemPrompt {
-                TextEditor(text: Binding(
-                    get: { store.systemPrompt },
-                    set: { store.systemPrompt = $0 }
-                ))
-                .font(.system(size: 12, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 60, maxHeight: 80)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.05))
-                )
+            if showAdvanced {
+                VStack(alignment: .leading, spacing: 10) {
+                    systemPromptEditor
+                    diagnosticsRow
+                    if !diagnosticsStatus.isEmpty {
+                        Text(diagnosticsStatus)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.38))
+                            .lineLimit(1)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        }
+    }
+
+    private var systemPromptEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("System prompt override")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.55))
+            TextEditor(text: Binding(
+                get: { store.systemPrompt },
+                set: { store.systemPrompt = $0 }
+            ))
+            .font(.system(size: 12, design: .monospaced))
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .frame(minHeight: 60, maxHeight: 80)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+            )
+        }
+    }
+
+    private var diagnosticsRow: some View {
+        SettingRow(title: "Context") {
+            HStack(spacing: 8) {
+                Button {
+                    openDirectory(ContextMemoryStore.defaultDirectoryURL)
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .help("Open learned UI memory")
+
+                Button {
+                    openDirectory(AgentMetricsStore.defaultDirectoryURL)
+                } label: {
+                    Image(systemName: "chart.xyaxis.line")
+                }
+                .help("Open computer-use run metrics")
+
+                Button {
+                    copyActivationContext()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .help("Copy current activation context packet")
+            }
+            .buttonStyle(.borderless)
         }
     }
 

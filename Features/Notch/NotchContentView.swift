@@ -10,36 +10,33 @@ import SwiftUI
 
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
-    case agent
+    case settings
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .home: return "Home"
-        case .agent: return "Agent"
+        case .settings: return "Settings"
         }
     }
 
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .agent: return "sparkles"
+        case .settings: return "gearshape.fill"
         }
     }
 }
 
 struct NotchContentView: View {
-    @State private var selected: NotchTab = .agent
+    @State private var selected: NotchTab = .home
     @State private var isOpen = false
     @State private var closeTask: Task<Void, Never>?
     @State private var hoverTask: Task<Void, Never>?
 
-    // Closed state hugs the physical notch.
     private let closedWidth: CGFloat = 220
     private let closedHeight: CGFloat = 32
-
-    // Open state fits the agent UI comfortably.
     private let openWidth: CGFloat = 520
     private let openHeight: CGFloat = 360
 
@@ -105,8 +102,11 @@ struct NotchContentView: View {
                 switch selected {
                 case .home:
                     NotchHomeView()
-                case .agent:
-                    AgentTabView()
+                case .settings:
+                    ScrollView(.vertical, showsIndicators: false) {
+                        AgentSettingsView()
+                            .padding(.bottom, 4)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,37 +139,27 @@ private struct NotchTabBar: View {
                 Button {
                     withAnimation(.smooth) { selected = tab }
                 } label: {
-                    Image(systemName: tab.icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .foregroundStyle(selected == tab ? .white : .white.opacity(0.45))
-                        .contentShape(Capsule())
-                        .background {
-                            if selected == tab {
-                                Capsule()
-                                    .fill(Color.white.opacity(0.12))
-                                    .matchedGeometryEffect(id: "tab-bg", in: animation)
-                            }
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(tab.label)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .foregroundStyle(selected == tab ? .white : .white.opacity(0.45))
+                    .contentShape(Capsule())
+                    .background {
+                        if selected == tab {
+                            Capsule()
+                                .fill(Color.white.opacity(0.12))
+                                .matchedGeometryEffect(id: "tab-bg", in: animation)
                         }
+                    }
                 }
                 .buttonStyle(.plain)
-                .help(tab.label)
             }
         }
         .clipShape(Capsule())
-    }
-}
-
-
-struct AgentTabView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            AgentStateView()
-            ScrollView(.vertical, showsIndicators: false) {
-                AgentSettingsView()
-                    .padding(.bottom, 4)
-            }
-        }
     }
 }
