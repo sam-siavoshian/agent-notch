@@ -124,7 +124,7 @@ All features should use these — never duplicate them.
 | `ContextTextSignalFilter.swift` | Cleans OCR output |
 | `ContextAIObservationLog.swift` | In-memory log of Gemini observation events; includes `ContextGeminiObservationGate` (rate limiter) |
 | `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
-| `ContextDebugView.swift` | Dev Tools content — live snapshot list, AI observation log, diagnostics |
+| `ContextDebugView.swift` | Dev Tools console — pause/resume gathering, overview, injected packet, captures/OCR, Gemini I/O, learned memory, metrics |
 | `ContextPerformanceReporter.swift` | Reads stored artifacts and summarizes diagnostics |
 
 ### Features/Agent/ (Ashan)

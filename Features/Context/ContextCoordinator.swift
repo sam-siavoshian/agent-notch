@@ -24,7 +24,8 @@ public final class ContextCoordinator: RecentActivityContext {
     private let clickMonitor: ContextClickMonitor
     private let appSwitchMonitor: ContextAppSwitchMonitor
 
-    private var isStarted = false
+    @MainActor private var isStarted = false
+    @MainActor private var isGatheringPaused = false
 
     private init(
         capture: ScreenCapture = .shared,
@@ -59,8 +60,10 @@ public final class ContextCoordinator: RecentActivityContext {
         guard !isStarted else { return }
         isStarted = true
         AgentInterfaces.context = self
-        clickMonitor.start()
-        appSwitchMonitor.start()
+        if !isGatheringPaused {
+            clickMonitor.start()
+            appSwitchMonitor.start()
+        }
 
         Task {
             await capture(trigger: .startup, cursorLocation: nil)
@@ -76,6 +79,31 @@ public final class ContextCoordinator: RecentActivityContext {
         if AgentInterfaces.context === self {
             AgentInterfaces.context = nil
         }
+    }
+
+    @MainActor
+    @discardableResult
+    public func toggleGatheringPaused() -> Bool {
+        setGatheringPaused(!isGatheringPaused)
+    }
+
+    @MainActor
+    @discardableResult
+    public func setGatheringPaused(_ paused: Bool) -> Bool {
+        isGatheringPaused = paused
+
+        if isStarted {
+            if paused {
+                clickMonitor.stop()
+                appSwitchMonitor.stop()
+            } else {
+                clickMonitor.start()
+                appSwitchMonitor.start()
+            }
+        }
+
+        NSLog("[ContextCoordinator] Context gathering \(paused ? "paused" : "resumed").")
+        return isGatheringPaused
     }
 
     public func getRecentActivityContext() async -> String {
@@ -131,7 +159,7 @@ public final class ContextCoordinator: RecentActivityContext {
         let cursorLocation = await MainActor.run {
             NSEvent.mouseLocation
         }
-        await capture(trigger: .manual, cursorLocation: cursorLocation)
+        await capture(trigger: .manual, cursorLocation: cursorLocation, bypassPause: true)
     }
 
     public func diagnostics() async -> ContextDiagnostics {
@@ -143,7 +171,8 @@ public final class ContextCoordinator: RecentActivityContext {
                 latestWindowTitle: "Unknown window",
                 latestTrigger: nil,
                 latestRecognizedTextCount: 0,
-                hasLearnedMemory: false
+                hasLearnedMemory: false,
+                isGatheringPaused: await MainActor.run { isGatheringPaused }
             )
         }
 
@@ -154,11 +183,17 @@ public final class ContextCoordinator: RecentActivityContext {
             latestWindowTitle: latest.windowTitle,
             latestTrigger: latest.trigger,
             latestRecognizedTextCount: latest.recognizedText.count,
-            hasLearnedMemory: !learnedMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            hasLearnedMemory: !learnedMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            isGatheringPaused: await MainActor.run { isGatheringPaused }
         )
     }
 
-    public func capture(trigger: ContextCaptureTrigger, cursorLocation: CGPoint?) async {
+    public func capture(trigger: ContextCaptureTrigger, cursorLocation: CGPoint?, bypassPause: Bool = false) async {
+        if !bypassPause, await MainActor.run(body: { isGatheringPaused }) {
+            NSLog("[ContextCoordinator] Skipped \(trigger.rawValue) capture because context gathering is paused.")
+            return
+        }
+
         let metadata = await MainActor.run {
             ContextWindowMetadataReader.current()
         }

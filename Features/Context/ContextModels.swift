@@ -66,16 +66,19 @@ public struct ContextDiagnostics: Sendable {
     public let latestTrigger: ContextCaptureTrigger?
     public let latestRecognizedTextCount: Int
     public let hasLearnedMemory: Bool
+    public let isGatheringPaused: Bool
 
     public var summary: String {
+        let state = isGatheringPaused ? "Paused" : "Live"
+
         guard snapshotCount > 0 else {
-            return "No context captures yet."
+            return "\(state): no context captures yet."
         }
 
         let trigger = latestTrigger?.rawValue ?? "unknown"
         let window = latestWindowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled window" : latestWindowTitle
         let memory = hasLearnedMemory ? "memory ready" : "memory warming"
-        return "\(snapshotCount) captures, \(latestRecognizedTextCount) OCR items, \(memory). Latest: \(trigger) in \(latestAppName), \(window)."
+        return "\(state): \(snapshotCount) captures, \(latestRecognizedTextCount) OCR items, \(memory). Latest: \(trigger) in \(latestAppName), \(window)."
     }
 }
 

@@ -74,7 +74,7 @@ Features/Context/
 ├── ContextTextSignalFilter.swift
 ├── ContextAIObservationLog.swift   — in-memory Gemini event log + ContextGeminiObservationGate (rate limiter)
 ├── ContextDevToolsWindowController.swift — separate Dev Tools window for telemetry (Cmd+Option+D)
-├── ContextDebugView.swift          — Dev Tools content: live snapshots, AI observation log, diagnostics
+├── ContextDebugView.swift          — Dev Tools console: pause/resume gathering, overview, injected packet, captures/OCR, Gemini I/O, learned memory, metrics
 └── ContextPerformanceReporter.swift
 
 Features/Agent/

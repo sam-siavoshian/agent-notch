@@ -102,6 +102,15 @@ public actor ContextMemoryStore {
         return ContextMemoryRenderer.activationSnippet(for: memory)
     }
 
+    public func debugMemories(limit: Int = 20) -> [ContextAppMemory] {
+        loadPersistedMemories()
+        return Array(
+            appMemories.values
+                .sorted { $0.lastSeen > $1.lastSeen }
+                .prefix(max(0, limit))
+        )
+    }
+
     private func loadMemory(appKey: String, appName: String, now: Date) -> ContextAppMemory {
         if let memory = appMemories[appKey] {
             return memory
@@ -119,6 +128,28 @@ public actor ContextMemoryStore {
         let memory = ContextAppMemory(appName: appName, firstSeen: now, lastSeen: now)
         appMemories[appKey] = memory
         return memory
+    }
+
+    private func loadPersistedMemories() {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: appDirectoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        for url in urls where url.pathExtension == "json" {
+            let appKey = url.deletingPathExtension().lastPathComponent
+            guard appMemories[appKey] == nil else { continue }
+            guard
+                let data = try? Data(contentsOf: url),
+                let decoded = try? Self.decoder.decode(ContextAppMemory.self, from: data)
+            else {
+                continue
+            }
+            appMemories[appKey] = decoded
+        }
     }
 
     private func recordSurface(
