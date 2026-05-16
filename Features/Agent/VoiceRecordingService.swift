@@ -110,7 +110,7 @@ public final class VoiceRecordingService {
     }
 
     private func stopAndTranscribe() async {
-        let demoPrompt = ProcessInfo.processInfo.environment["ANTHROPIC_NOTCH_DEMO_PROMPT"] ?? ""
+        let demoPrompt = Env.value("ANTHROPIC_NOTCH_DEMO_PROMPT") ?? ""
 
         // No recording in progress — demo mode only path
         if !audioEngine.isRunning {

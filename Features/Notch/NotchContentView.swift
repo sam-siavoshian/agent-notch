@@ -13,6 +13,15 @@ extension Notification.Name {
     static let notchToggleRequested = Notification.Name("AgentNotch.notchToggleRequested")
 }
 
+/// Reports the intrinsic height of the open content so the surface can grow
+/// when sections expand (Settings → Advanced, etc).
+private struct NotchContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
     case settings
@@ -45,15 +54,20 @@ struct NotchContentView: View {
         Binding(get: { selectedTab }, set: { selectedTabRaw = $0.rawValue })
     }
 
-    private let closedWidth: CGFloat = 220
-    private let closedHeight: CGFloat = 32
+    private let closedWidth: CGFloat = 180
+    private let closedHeight: CGFloat = 30
 
-    // Compact open size — user-facing home/settings only.
     private let openWidth: CGFloat = NotchSizing.openWidth
-    private let openHeight: CGFloat = NotchSizing.openHeight
+    /// Measured height of the open content — flows from a GeometryReader in
+    /// openContent. Springs to its new value when sections expand/collapse.
+    @State private var measuredOpenHeight: CGFloat = 200
 
     private var width: CGFloat { isOpen ? openWidth : closedWidth }
-    private var height: CGFloat { isOpen ? openHeight : closedHeight }
+    private var height: CGFloat {
+        isOpen
+            ? min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax)
+            : closedHeight
+    }
     private var cornerRadius: CGFloat { isOpen ? 22 : 10 }
 
     var body: some View {
@@ -78,29 +92,38 @@ struct NotchContentView: View {
                 .shadow(color: .black.opacity(isOpen ? 0.50 : 0), radius: 16, y: 6)
                 .compositingGroup()
 
-            if isOpen {
-                openContent
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-                    .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 2)
-                    .frame(width: openWidth, height: openHeight, alignment: .top)
-                    // Insertion: opacity + tiny scale from the notch edge.
-                    // Removal: pure opacity (fastest possible exit).
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity
-                                .combined(with: .scale(scale: 0.985, anchor: .top))
-                                .animation(.easeOut(duration: 0.14)),
-                            removal: .opacity.animation(.easeIn(duration: 0.08))
+            // Both subviews always rendered, cross-faded by opacity. A single
+            // animation curve below drives shape size + content opacity in
+            // lock-step, so nothing appears before the box has grown.
+            ClosedNotchView()
+                .frame(width: closedWidth, height: closedHeight)
+                .opacity(isOpen ? 0 : 1)
+                .allowsHitTesting(!isOpen)
+
+            openContent
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 2)
+                .frame(width: openWidth, alignment: .top)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: NotchContentHeightKey.self,
+                            value: geo.size.height
                         )
-                    )
-            } else {
-                ClosedNotchView()
-                    .frame(width: closedWidth, height: closedHeight)
-                    .transition(.opacity.animation(.easeOut(duration: 0.07)))
-            }
+                    }
+                )
+                .frame(
+                    width: openWidth,
+                    height: min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax),
+                    alignment: .top
+                )
+                .opacity(isOpen ? 1 : 0)
+                .allowsHitTesting(isOpen)
         }
         .frame(width: width, height: height, alignment: .top)
+        .clipShape(NotchShape(bottomCornerRadius: cornerRadius))
         .contentShape(NotchShape(bottomCornerRadius: cornerRadius))
         .gesture(
             DragGesture(minimumDistance: 10)
@@ -128,11 +151,15 @@ struct NotchContentView: View {
                 scheduleClose()
             }
         }
-        // interactiveSpring is interruptible — fast cursor in/out won't queue
-        // up stale animations. Damping kept high so the top edge cannot
-        // overshoot into the real notch cutout.
         .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.90, blendDuration: 0),
                    value: isOpen)
+        .animation(.spring(response: 0.34, dampingFraction: 0.78, blendDuration: 0),
+                   value: measuredOpenHeight)
+        .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
+            guard isOpen, newHeight > 1,
+                  abs(newHeight - measuredOpenHeight) > 0.5 else { return }
+            measuredOpenHeight = newHeight
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
         .onChange(of: isOpen) { _, _ in

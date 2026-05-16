@@ -16,7 +16,7 @@ public actor ContextGeminiObservationService {
     public static let promptVersion = "context-gemini-observation-v3"
 
     public static var isAPIKeyConfigured: Bool {
-        guard let apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+        guard let apiKey = Env.value("GEMINI_API_KEY")?.trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
         }
         return !apiKey.isEmpty
@@ -54,7 +54,7 @@ public actor ContextGeminiObservationService {
         endpointBaseURL: URL = URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!,
         session: URLSession = .shared,
         apiKeyProvider: @escaping @Sendable () -> String? = {
-            ProcessInfo.processInfo.environment["GEMINI_API_KEY"]
+            Env.value("GEMINI_API_KEY")
         }
     ) {
         self.model = model

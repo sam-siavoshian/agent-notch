@@ -125,12 +125,17 @@ final class NotchWindowController: NSObject {
 
 @MainActor
 enum NotchSizing {
-    static let openWidth: CGFloat = 420
-    static let openHeight: CGFloat = 280
+    static let openWidth: CGFloat = 460
+    /// Upper bound on open height; the visible frame is content-driven
+    /// (see NotchContentView). The window pre-allocates the maximum so the
+    /// inner SwiftUI can grow without resizing the NSWindow.
+    static let openHeightMax: CGFloat = 480
+    static let openHeight: CGFloat = openHeightMax  // legacy alias
     static let shadowPadding: CGFloat = 24
 
     static func windowSize(for screen: NSScreen?) -> CGSize {
-        CGSize(width: openWidth + shadowPadding * 2, height: openHeight + shadowPadding)
+        CGSize(width: openWidth + shadowPadding * 2,
+               height: openHeightMax + shadowPadding)
     }
 
     static func notchHeight(for screen: NSScreen?) -> CGFloat {

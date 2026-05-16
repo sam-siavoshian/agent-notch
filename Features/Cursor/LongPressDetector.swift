@@ -24,7 +24,7 @@ final class LongPressDetector {
         case listening
     }
 
-    private let threshold: TimeInterval = 0.35
+    private let threshold: TimeInterval = 0.20
     private let queue = DispatchQueue(label: "agentnotch.longpress", qos: .userInteractive)
     private var lock = os_unfair_lock_s()
     private var state: State = .idle

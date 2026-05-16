@@ -38,7 +38,7 @@ public enum Secrets {
     }
 
     private static func resolve(env: String, account: String) -> String? {
-        if let v = ProcessInfo.processInfo.environment[env], !v.isEmpty { return v }
+        if let v = Env.value(env) { return v }
         if let v = Keychain.get(account), !v.isEmpty { return v }
         return nil
     }

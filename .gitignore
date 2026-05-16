@@ -22,6 +22,9 @@ Package.resolved
 # macOS
 .DS_Store
 
+# Local secrets — bundled at build time, never committed.
+Config/agentnotch.env
+
 # ArshanTesting sandbox
 ArshanTesting/.env
 ArshanTesting/node_modules/

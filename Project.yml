@@ -40,6 +40,10 @@ targets:
           - "AgentNotch.entitlements"
       - path: Core
       - path: Features
+      - path: Config
+        type: folder
+        buildPhase: resources
+        optional: true
     dependencies:
       - package: WhisperKit
     info:
