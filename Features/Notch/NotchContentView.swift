@@ -16,6 +16,7 @@ extension Notification.Name {
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
     case settings
+    case context
 
     var id: String { rawValue }
 
@@ -23,6 +24,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Home"
         case .settings: return "Settings"
+        case .context: return "Context"
         }
     }
 
@@ -30,6 +32,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "house.fill"
         case .settings: return "gearshape.fill"
+        case .context: return "eye"
         }
     }
 }
@@ -42,8 +45,10 @@ struct NotchContentView: View {
 
     private let closedWidth: CGFloat = 220
     private let closedHeight: CGFloat = 32
-    private let openWidth: CGFloat = 520
-    private let openHeight: CGFloat = 390
+
+    // Wider while open so the context inspector can show real debug state.
+    private let openWidth: CGFloat = 640
+    private let openHeight: CGFloat = 430
 
     private var width: CGFloat { isOpen ? openWidth : closedWidth }
     private var height: CGFloat { isOpen ? openHeight : closedHeight }
@@ -107,7 +112,7 @@ struct NotchContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
         .onChange(of: isOpen) { _, _ in
-            NSHapticFeedbackManager.default.perform(.generic, performanceTime: .default)
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
         }
         .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
             if isOpen {
@@ -132,6 +137,8 @@ struct NotchContentView: View {
                         AgentSettingsView()
                             .padding(.bottom, 4)
                     }
+                case .context:
+                    ContextDebugView()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

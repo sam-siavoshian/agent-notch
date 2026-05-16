@@ -58,6 +58,37 @@ public struct ContextWindowMetadata: Sendable {
     public let windowTitle: String
 }
 
+public struct ContextDiagnostics: Sendable {
+    public let snapshotCount: Int
+    public let latestAppName: String
+    public let latestWindowTitle: String
+    public let latestTrigger: ContextCaptureTrigger?
+    public let latestRecognizedTextCount: Int
+    public let hasLearnedMemory: Bool
+
+    public var summary: String {
+        guard snapshotCount > 0 else {
+            return "No context captures yet."
+        }
+
+        let trigger = latestTrigger?.rawValue ?? "unknown"
+        let window = latestWindowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled window" : latestWindowTitle
+        let memory = hasLearnedMemory ? "memory ready" : "memory warming"
+        return "\(snapshotCount) captures, \(latestRecognizedTextCount) OCR items, \(memory). Latest: \(trigger) in \(latestAppName), \(window)."
+    }
+}
+
+public struct ContextDebugSnapshot: Identifiable, Sendable {
+    public let id: UUID
+    public let capturedAt: Date
+    public let trigger: ContextCaptureTrigger
+    public let appName: String
+    public let windowTitle: String
+    public let jpegData: Data
+    public let recognizedTextCount: Int
+    public let textPreview: String
+}
+
 public struct ContextRecognizedText: Codable, Sendable {
     public let text: String
     public let confidence: Float
@@ -79,27 +110,26 @@ public struct ContextActivationPacket: Sendable {
     public let firstActionGuidance: [String]
 
     public var promptText: String {
-        let timeline = recentTimeline.isEmpty ? "- No recent captures." : recentTimeline.joined(separator: "\n")
-        let transitions = observedTransitions.isEmpty ? "- No window/app transitions observed yet." : observedTransitions.joined(separator: "\n")
-        let memory = learnedUIMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "- No durable UI memory for this app yet." : learnedUIMemory
-        let guidance = firstActionGuidance.isEmpty ? "- Use the computer screenshot tool before acting if the screen is ambiguous." : firstActionGuidance.joined(separator: "\n")
+        let screenFacts = recentTimeline.isEmpty ? "- Current screenshot has no useful OCR text yet." : recentTimeline.joined(separator: "\n")
+        let interactions = observedTransitions.isEmpty ? "- No useful recent interaction signal beyond the current screen." : observedTransitions.joined(separator: "\n")
+        let memory = learnedUIMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "- No learned UI memory for this app yet." : learnedUIMemory
+        let guidance = firstActionGuidance.isEmpty ? "- Use the live screen as ground truth." : firstActionGuidance.joined(separator: "\n")
 
         return """
-        Activation context packet:
-        Captures: \(capturedCount) over \(elapsedSeconds)s.
-        Current app: \(currentApp)
-        Current window: \(currentWindow)
+        Local UI context:
 
-        Recent screen timeline:
-        \(timeline)
+        Current screen:
+        - App: \(currentApp)
+        - Window: \(currentWindow)
+        \(screenFacts)
 
-        Learned navigation hints from recent use:
-        \(transitions)
+        Recent interaction signal:
+        \(interactions)
 
-        Learned UI memory for current app:
+        Learned UI memory:
         \(memory)
 
-        First-action guidance:
+        How to use this:
         \(guidance)
         """
     }
@@ -132,6 +162,10 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
     public var clickCount: Int
     public var activationCount: Int
     public var textHighlights: [String]
+    public var semanticHighlights: [String]
+    public var controlHighlights: [String]
+    public var affordanceHighlights: [String]
+    public var uncertaintyHighlights: [String]
 
     public init(
         id: String,
@@ -141,7 +175,11 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         observationCount: Int,
         clickCount: Int,
         activationCount: Int,
-        textHighlights: [String] = []
+        textHighlights: [String] = [],
+        semanticHighlights: [String] = [],
+        controlHighlights: [String] = [],
+        affordanceHighlights: [String] = [],
+        uncertaintyHighlights: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -151,6 +189,10 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         self.clickCount = clickCount
         self.activationCount = activationCount
         self.textHighlights = textHighlights
+        self.semanticHighlights = semanticHighlights
+        self.controlHighlights = controlHighlights
+        self.affordanceHighlights = affordanceHighlights
+        self.uncertaintyHighlights = uncertaintyHighlights
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -162,6 +204,10 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         case clickCount
         case activationCount
         case textHighlights
+        case semanticHighlights
+        case controlHighlights
+        case affordanceHighlights
+        case uncertaintyHighlights
     }
 
     public init(from decoder: Decoder) throws {
@@ -174,6 +220,10 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
         self.clickCount = try container.decode(Int.self, forKey: .clickCount)
         self.activationCount = try container.decode(Int.self, forKey: .activationCount)
         self.textHighlights = try container.decodeIfPresent([String].self, forKey: .textHighlights) ?? []
+        self.semanticHighlights = try container.decodeIfPresent([String].self, forKey: .semanticHighlights) ?? []
+        self.controlHighlights = try container.decodeIfPresent([String].self, forKey: .controlHighlights) ?? []
+        self.affordanceHighlights = try container.decodeIfPresent([String].self, forKey: .affordanceHighlights) ?? []
+        self.uncertaintyHighlights = try container.decodeIfPresent([String].self, forKey: .uncertaintyHighlights) ?? []
     }
 }
 

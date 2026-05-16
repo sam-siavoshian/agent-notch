@@ -6,15 +6,18 @@
 #   ./dev.sh --clean                           # nuke DerivedData, then build + run
 #   ./dev.sh --build-only                      # build, don't launch
 #   ./dev.sh --rotate-key sk-ant-...           # update keychain entry, then build + run
+#   ./dev.sh --rotate-gemini-key AIza...       # update optional Gemini key, then build + run
 #
 # Secrets: reads ANTHROPIC_API_KEY from macOS keychain (service: AgentNotch,
-# account: anthropic). Never store the key in this file or in git.
+# account: anthropic). Reads optional GEMINI_API_KEY from the same service
+# (account: gemini). Never store keys in this file or in git.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEYCHAIN_SERVICE="AgentNotch"
 KEYCHAIN_ACCOUNT="anthropic"
+GEMINI_KEYCHAIN_ACCOUNT="gemini"
 SCHEME="AgentNotch"
 PROJECT="${REPO_ROOT}/AgentNotch.xcodeproj"
 DERIVED="${REPO_ROOT}/.build/DerivedData"
@@ -39,6 +42,17 @@ while [[ $# -gt 0 ]]; do
         -U >/dev/null
       shift
       ;;
+    --rotate-gemini-key)
+      shift
+      if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-gemini-key needs the key as next arg"; exit 1; fi
+      echo "→ Updating keychain entry for ${KEYCHAIN_SERVICE}/${GEMINI_KEYCHAIN_ACCOUNT}"
+      security add-generic-password \
+        -s "$KEYCHAIN_SERVICE" \
+        -a "$GEMINI_KEYCHAIN_ACCOUNT" \
+        -w "$1" \
+        -U >/dev/null
+      shift
+      ;;
     -h|--help)
       sed -n '2,12p' "$0"; exit 0 ;;
     *)
@@ -57,6 +71,14 @@ if ! ANTHROPIC_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" 
   exit 1
 fi
 export ANTHROPIC_API_KEY
+
+echo "→ Fetching optional GEMINI_API_KEY from keychain"
+if GEMINI_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$GEMINI_KEYCHAIN_ACCOUNT" -w 2>/dev/null)"; then
+  export GEMINI_API_KEY
+  echo "→ Gemini context observation enabled"
+else
+  echo "→ Gemini key not configured; context observation will run OCR-only"
+fi
 
 # ---------- xcodegen ----------
 if ! command -v xcodegen >/dev/null 2>&1; then

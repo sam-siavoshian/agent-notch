@@ -63,6 +63,35 @@ public actor ContextMemoryStore {
         appendObservation(snapshot, surfaceID: surfaceID)
     }
 
+    public func record(
+        _ observation: ContextGeminiObservation,
+        appName appNameHint: String? = nil,
+        windowTitle windowTitleHint: String? = nil,
+        capturedAt: Date = Date()
+    ) {
+        let appName = clean(appNameHint) ?? clean(observation.appLabel) ?? "Unknown app"
+        let appKey = storageKey(for: appName)
+        var memory = loadMemory(appKey: appKey, appName: appName, now: capturedAt)
+        let surfaceTitle = clean(observation.surfaceLabel)
+            ?? clean(windowTitleHint)
+            ?? Self.displayTitle(observation.windowTitle)
+        let surfaceID = Self.surfaceID(appName: appName, windowTitle: surfaceTitle)
+
+        memory.lastSeen = capturedAt
+        recordSurface(
+            surfaceID: surfaceID,
+            title: surfaceTitle,
+            trigger: .manual,
+            textHighlights: observation.entities + observation.landmarks,
+            capturedAt: capturedAt,
+            memory: &memory
+        )
+        recordSemanticObservation(observation, surfaceID: surfaceID, memory: &memory)
+
+        appMemories[appKey] = memory
+        persist(memory, appKey: appKey)
+    }
+
     public func activationMemory(appName: String) -> String {
         guard !appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
@@ -199,6 +228,42 @@ public actor ContextMemoryStore {
         }
     }
 
+    private func recordSemanticObservation(
+        _ observation: ContextGeminiObservation,
+        surfaceID: String,
+        memory: inout ContextAppMemory
+    ) {
+        guard let index = memory.surfaces.firstIndex(where: { $0.id == surfaceID }) else { return }
+
+        let controls = observation.visibleControls.map { control -> String in
+            if let actionHint = control.actionHint, !actionHint.isEmpty {
+                return "\(control.label) (\(control.role), \(control.region)): \(actionHint)"
+            }
+            return "\(control.label) (\(control.role), \(control.region))"
+        }
+
+        memory.surfaces[index].semanticHighlights = mergedHighlights(
+            existing: memory.surfaces[index].semanticHighlights,
+            new: [observation.summary],
+            maxCount: 8
+        )
+        memory.surfaces[index].controlHighlights = mergedHighlights(
+            existing: memory.surfaces[index].controlHighlights,
+            new: controls,
+            maxCount: 16
+        )
+        memory.surfaces[index].affordanceHighlights = mergedHighlights(
+            existing: memory.surfaces[index].affordanceHighlights,
+            new: observation.affordances,
+            maxCount: 16
+        )
+        memory.surfaces[index].uncertaintyHighlights = mergedHighlights(
+            existing: memory.surfaces[index].uncertaintyHighlights,
+            new: observation.uncertainty,
+            maxCount: 10
+        )
+    }
+
     private func persist(_ memory: ContextAppMemory, appKey: String) {
         do {
             let jsonData = try Self.encoder.encode(memory)
@@ -227,7 +292,7 @@ public actor ContextMemoryStore {
         )
 
         do {
-            let data = try Self.encoder.encode(record) + Data([0x0A])
+            let data = try Self.jsonlEncoder.encode(record) + Data([0x0A])
             if FileManager.default.fileExists(atPath: observationsURL.path) {
                 let handle = try FileHandle(forWritingTo: observationsURL)
                 try handle.seekToEnd()
@@ -250,22 +315,7 @@ public actor ContextMemoryStore {
     }
 
     private func textHighlights(from snapshot: ContextSnapshot, maxCount: Int = 12) -> [String] {
-        var seen = Set<String>()
-        var highlights: [String] = []
-
-        for item in snapshot.recognizedText {
-            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard text.count >= 2 else { continue }
-            let key = text.lowercased()
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
-            highlights.append(text)
-            if highlights.count >= maxCount {
-                break
-            }
-        }
-
-        return highlights
+        ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: maxCount)
     }
 
     private func mergedHighlights(existing: [String], new: [String], maxCount: Int = 24) -> [String] {
@@ -283,6 +333,13 @@ public actor ContextMemoryStore {
         }
 
         return merged
+    }
+
+    private func clean(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
     }
 
     private func storageKey(for appName: String) -> String {
@@ -317,6 +374,13 @@ public actor ContextMemoryStore {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    private static var jsonlEncoder: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
         return encoder
     }
 

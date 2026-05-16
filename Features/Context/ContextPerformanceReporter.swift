@@ -31,6 +31,11 @@ public struct ContextPerformanceReporter {
             .appendingPathComponent("runs.jsonl")
     }
 
+    private var geminiCacheURL: URL {
+        applicationSupportURL
+            .appendingPathComponent("ContextGeminiCache", isDirectory: true)
+    }
+
     public init(applicationSupportURL: URL = Self.defaultApplicationSupportURL()) {
         self.applicationSupportURL = applicationSupportURL
     }
@@ -53,8 +58,11 @@ public struct ContextPerformanceReporter {
         let totalSurfaces = memorySummaries.reduce(0) { $0 + $1.surfaceCount }
         let totalTransitions = memorySummaries.reduce(0) { $0 + $1.transitionCount }
         let totalNegativeNotes = memorySummaries.reduce(0) { $0 + $1.negativeNoteCount }
-        let totalObservations = countJSONLLines(at: observationsURL)
-        let totalRuns = countJSONLLines(at: agentMetricsURL)
+        let totalSemanticHighlights = memorySummaries.reduce(0) { $0 + $1.semanticHighlightCount }
+        let totalControls = memorySummaries.reduce(0) { $0 + $1.controlCount }
+        let totalObservations = countJSONObjectRecords(at: observationsURL)
+        let totalRuns = countJSONObjectRecords(at: agentMetricsURL)
+        let totalGeminiCacheFiles = countJSONFiles(at: geminiCacheURL)
         let latestOCRCount = observationSummaries.first?.ocrCount
         let latestOCRText = latestOCRCount.map(String.init) ?? "n/a"
 
@@ -64,6 +72,7 @@ public struct ContextPerformanceReporter {
             "- Generated: \(formatDate(now))",
             "- Artifact root: `\(applicationSupportURL.path)`",
             "- App memories: \(memorySummaries.count) apps, \(totalSurfaces) surfaces, \(totalTransitions) transitions, \(totalNegativeNotes) caution notes",
+            "- Gemini memories: \(totalSemanticHighlights) semantic notes, \(totalControls) visible controls, \(totalGeminiCacheFiles) cached observations",
             "- Captures observed: \(totalObservations) observation records, latest OCR count: \(latestOCRText)",
             "- Agent runs: \(totalRuns) metric records",
             "",
@@ -74,7 +83,7 @@ public struct ContextPerformanceReporter {
             lines.append("- No app memory files found in `\(appMemoriesURL.path)`.")
         } else {
             for memory in memorySummaries.prefix(8) {
-                lines.append("- \(memory.appName): \(memory.surfaceCount) surfaces, \(memory.observationCount) observations, \(memory.clickCount) clicks, last seen \(formatDate(memory.lastSeen))")
+                lines.append("- \(memory.appName): \(memory.surfaceCount) surfaces, \(memory.observationCount) observations, \(memory.clickCount) clicks, \(memory.semanticHighlightCount) semantic notes, \(memory.controlCount) controls, last seen \(formatDate(memory.lastSeen))")
             }
         }
 
@@ -147,6 +156,12 @@ public struct ContextPerformanceReporter {
         let clickCount = surfaces.reduce(0) { total, surface in
             total + surface.intValue("clickCount")
         }
+        let semanticHighlightCount = surfaces.reduce(0) { total, surface in
+            total + surface.stringArrayValue("semanticHighlights").count
+        }
+        let controlCount = surfaces.reduce(0) { total, surface in
+            total + surface.stringArrayValue("controlHighlights").count
+        }
 
         return MemorySummary(
             appName: object.stringValue("appName", fallback: url.deletingPathExtension().lastPathComponent),
@@ -155,12 +170,14 @@ public struct ContextPerformanceReporter {
             transitionCount: transitions.count,
             negativeNoteCount: negativeNotes.count,
             observationCount: observationCount,
-            clickCount: clickCount
+            clickCount: clickCount,
+            semanticHighlightCount: semanticHighlightCount,
+            controlCount: controlCount
         )
     }
 
     private func loadObservationSummaries(limit: Int) -> [ObservationSummary] {
-        recentJSONLLines(at: observationsURL, limit: limit)
+        recentJSONObjectStrings(at: observationsURL, limit: limit)
             .compactMap { line in
                 guard let object = parseJSONObject(line) else { return nil }
                 let recognizedText = object.arrayValue("recognizedText")
@@ -178,7 +195,7 @@ public struct ContextPerformanceReporter {
     }
 
     private func loadRunSummaries(limit: Int) -> [RunSummary] {
-        recentJSONLLines(at: agentMetricsURL, limit: limit)
+        recentJSONObjectStrings(at: agentMetricsURL, limit: limit)
             .compactMap { line in
                 guard let object = parseJSONObject(line) else { return nil }
                 return RunSummary(
@@ -206,28 +223,81 @@ public struct ContextPerformanceReporter {
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
-    private func recentJSONLLines(at url: URL, limit: Int) -> [String] {
+    private func recentJSONObjectStrings(at url: URL, limit: Int) -> [String] {
         guard limit > 0, let contents = try? String(contentsOf: url, encoding: .utf8) else {
             return []
         }
 
-        let lines = contents
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-        return Array(lines.suffix(limit))
+        return Array(jsonObjectStrings(in: contents).suffix(limit))
     }
 
-    private func countJSONLLines(at url: URL) -> Int {
+    private func countJSONObjectRecords(at url: URL) -> Int {
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
             return 0
         }
 
-        return contents
-            .split(whereSeparator: \.isNewline)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .count
+        return jsonObjectStrings(in: contents).count
+    }
+
+    private func jsonObjectStrings(in contents: String) -> [String] {
+        var records: [String] = []
+        var buffer = ""
+        var depth = 0
+        var isInsideString = false
+        var isEscaped = false
+
+        for character in contents {
+            if depth == 0 {
+                guard character == "{" else { continue }
+                buffer = "{"
+                depth = 1
+                isInsideString = false
+                isEscaped = false
+                continue
+            }
+
+            buffer.append(character)
+
+            if isEscaped {
+                isEscaped = false
+                continue
+            }
+
+            if character == "\\" && isInsideString {
+                isEscaped = true
+                continue
+            }
+
+            if character == "\"" {
+                isInsideString.toggle()
+                continue
+            }
+
+            guard !isInsideString else { continue }
+
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    records.append(buffer)
+                    buffer = ""
+                }
+            }
+        }
+
+        return records
+    }
+
+    private func countJSONFiles(at url: URL) -> Int {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: nil
+        ) else {
+            return 0
+        }
+
+        return urls.filter { $0.pathExtension == "json" }.count
     }
 
     private func topActions(from counts: [String: Any]) -> [String] {
@@ -271,6 +341,8 @@ private struct MemorySummary {
     let negativeNoteCount: Int
     let observationCount: Int
     let clickCount: Int
+    let semanticHighlightCount: Int
+    let controlCount: Int
 }
 
 private struct ObservationSummary {
@@ -326,6 +398,10 @@ private extension Dictionary where Key == String, Value == Any {
 
     func arrayValue(_ key: String) -> [[String: Any]] {
         self[key] as? [[String: Any]] ?? []
+    }
+
+    func stringArrayValue(_ key: String) -> [String] {
+        self[key] as? [String] ?? []
     }
 
     func dictionaryValue(_ key: String) -> [String: Any] {

@@ -3,7 +3,7 @@
 //  Agent in the Notch
 //
 //  Native Gemini observation layer for turning screenshots into compact UI
-//  facts. This is intentionally not wired into ContextCoordinator yet.
+//  facts. ContextCoordinator runs it in the background after local OCR.
 //
 
 import CryptoKit
@@ -14,6 +14,13 @@ public actor ContextGeminiObservationService {
 
     public static let defaultModel = "gemini-3.1-flash-lite"
     public static let promptVersion = "context-gemini-observation-v1"
+
+    public static var isAPIKeyConfigured: Bool {
+        guard let apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !apiKey.isEmpty
+    }
 
     public static var defaultCacheDirectoryURL: URL {
         FileManager.default
@@ -118,8 +125,10 @@ public actor ContextGeminiObservationService {
     }
 
     private func send(_ request: GeminiGenerateContentRequest, apiKey: String) async throws -> GeminiGenerateContentResponse {
-        let url = endpointBaseURL
-            .appendingPathComponent("\(model):generateContent")
+        let base = endpointBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(base)/\(model):generateContent") else {
+            throw Error(status: nil, body: "Invalid Gemini endpoint URL.", underlying: nil)
+        }
 
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"

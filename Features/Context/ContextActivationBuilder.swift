@@ -3,8 +3,8 @@
 //  Agent in the Notch
 //
 //  Converts the rolling screenshot buffer into a compact prompt packet for
-//  the computer-use agent. This is deliberately text-only for the hot path;
-//  VLM summaries can feed this same packet later.
+//  the computer-use agent. This packet should teach action-relevant UI facts,
+//  not replay raw capture bookkeeping.
 //
 
 import Foundation
@@ -25,7 +25,7 @@ enum ContextActivationBuilder {
                 recentTimeline: [],
                 observedTransitions: [],
                 learnedUIMemory: learnedUIMemory,
-                firstActionGuidance: ["- No screen context has been captured yet. Take a screenshot before acting."]
+                firstActionGuidance: ["- No local screenshot context has been captured yet. Use the computer screenshot tool before acting."]
             )
         }
 
@@ -36,60 +36,62 @@ enum ContextActivationBuilder {
             elapsedSeconds: elapsed,
             currentApp: latest.appName,
             currentWindow: displayTitle(latest.windowTitle),
-            recentTimeline: timeline(from: snapshots, now: now),
-            observedTransitions: transitions(from: snapshots),
+            recentTimeline: currentScreenFacts(from: latest),
+            observedTransitions: interactionSignals(from: snapshots),
             learnedUIMemory: learnedUIMemory,
             firstActionGuidance: guidance(from: snapshots)
         )
     }
 
-    private static func timeline(from snapshots: [ContextSnapshot], now: Date) -> [String] {
-        snapshots.suffix(8).map { snapshot in
-            let age = max(0, Int(now.timeIntervalSince(snapshot.capturedAt)))
-            let cursor = snapshot.cursorLocation.map { " cursor=(\(Int($0.x)),\(Int($0.y)))" } ?? ""
-            let text = textPreview(from: snapshot)
-            return "- \(age)s ago: \(snapshot.trigger.rawValue) capture in \(snapshot.appName), \(displayTitle(snapshot.windowTitle)).\(cursor)\(text)"
+    private static func currentScreenFacts(from snapshot: ContextSnapshot) -> [String] {
+        var facts: [String] = []
+        let visibleText = ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: 10)
+        if !visibleText.isEmpty {
+            facts.append("- Useful visible text: \(visibleText.joined(separator: " | "))")
         }
+        if let cursorLocation = snapshot.cursorLocation {
+            facts.append("- Cursor at activation/capture: x=\(Int(cursorLocation.x)), y=\(Int(cursorLocation.y)).")
+        }
+        if snapshot.trigger == .activation {
+            facts.append("- Fresh screenshot was captured for this long-press activation.")
+        }
+        return facts
     }
 
-    private static func transitions(from snapshots: [ContextSnapshot]) -> [String] {
+    private static func interactionSignals(from snapshots: [ContextSnapshot]) -> [String] {
         guard snapshots.count >= 2 else { return [] }
 
         var notes: [String] = []
+        var sameSurfaceClickSeen = false
         for pair in snapshots.adjacentPairs() {
             let before = pair.0
             let after = pair.1
             guard after.trigger == .click || after.trigger == .activation else { continue }
 
             if before.appName != after.appName {
-                notes.append("- \(after.trigger.rawValue): moved from \(before.appName) to \(after.appName).")
+                notes.append("- User moved from \(before.appName) to \(after.appName).")
             } else if normalizedTitle(before.windowTitle) != normalizedTitle(after.windowTitle) {
-                notes.append("- \(after.trigger.rawValue): \(before.appName) window changed from \(displayTitle(before.windowTitle)) to \(displayTitle(after.windowTitle)).")
+                notes.append("- \(before.appName) changed from \(displayTitle(before.windowTitle)) to \(displayTitle(after.windowTitle)).")
             } else if after.trigger == .click {
-                notes.append("- click: stayed in \(after.appName), \(displayTitle(after.windowTitle)); no app/window transition detected.")
+                sameSurfaceClickSeen = true
             }
         }
 
-        return Array(notes.suffix(6))
+        var compactNotes = Array(unique(notes).suffix(3))
+        if sameSurfaceClickSeen {
+            compactNotes.append("- Recent clicks stayed on the current app/window, so they likely selected, edited, opened inline controls, or changed state without navigation.")
+        }
+
+        return Array(compactNotes)
     }
 
     private static func guidance(from snapshots: [ContextSnapshot]) -> [String] {
-        guard let latest = snapshots.last else {
-            return ["- Take a screenshot before acting."]
-        }
+        guard snapshots.last != nil else { return ["- Take a screenshot before acting."] }
 
-        var notes: [String] = [
-            "- Start from the current app/window above; it is the freshest local context captured at activation.",
-            "- Use recent transition hints as soft memory, not as guaranteed UI coordinates."
+        let notes: [String] = [
+            "- Treat the current screen as ground truth; learned memory is only prior UI knowledge.",
+            "- Prefer known surfaces, controls, and affordances from memory before exploratory screenshots."
         ]
-
-        if snapshots.contains(where: { $0.trigger == .click }) {
-            notes.append("- Recent clicks indicate what the user was actively interacting with before long-press.")
-        }
-
-        if latest.trigger == .activation {
-            notes.append("- The latest capture was taken specifically for this long-press activation.")
-        }
 
         return notes
     }
@@ -102,14 +104,14 @@ enum ContextActivationBuilder {
         title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func textPreview(from snapshot: ContextSnapshot) -> String {
-        let highlights = snapshot.recognizedText
-            .map(\.text)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .prefix(5)
-
-        guard !highlights.isEmpty else { return "" }
-        return " Visible text: \(highlights.joined(separator: " | "))"
+    private static func unique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { value in
+            let key = value.lowercased()
+            guard !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
+        }
     }
 }
 

@@ -14,6 +14,7 @@ struct AgentSettingsView: View {
     @State private var showAdvanced = false
     @State private var savedOpacity: Double = 0
     @State private var diagnosticsStatus = ""
+    @State private var contextHealth = "Checking context..."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -28,6 +29,9 @@ struct AgentSettingsView: View {
             withAnimation(.easeOut(duration: 0.4).delay(1.0)) {
                 savedOpacity = 0
             }
+        }
+        .task {
+            await refreshContextHealth()
         }
     }
 
@@ -150,6 +154,10 @@ struct AgentSettingsView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     systemPromptEditor
                     diagnosticsRow
+                    Text(contextHealth)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.42))
+                        .lineLimit(2)
                     if !diagnosticsStatus.isEmpty {
                         Text(diagnosticsStatus)
                             .font(.caption2)
@@ -205,6 +213,13 @@ struct AgentSettingsView: View {
                     Image(systemName: "doc.on.doc")
                 }
                 .help("Copy current activation context packet")
+
+                Button {
+                    Task { await refreshContextHealth() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("Refresh context health")
             }
             .buttonStyle(.borderless)
         }
@@ -223,6 +238,14 @@ struct AgentSettingsView: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             diagnosticsStatus = "Copied activation context."
+            await refreshContextHealth()
+        }
+    }
+
+    private func refreshContextHealth() async {
+        let diagnostics = await ContextCoordinator.shared.diagnostics()
+        await MainActor.run {
+            contextHealth = diagnostics.summary
         }
     }
 }

@@ -19,9 +19,25 @@ enum ContextMemoryRenderer {
             }
             .prefix(5)
             .map { surface in
+                var parts = ["- \(surface.title)"]
                 let text = surface.textHighlights.prefix(6).joined(separator: " | ")
-                let suffix = text.isEmpty ? "" : " Visible text: \(text)."
-                return "- \(surface.title): seen \(surface.observationCount)x, last seen \(relativeAge(surface.lastSeen)).\(suffix)"
+                if !text.isEmpty {
+                    parts.append("Visible text: \(text).")
+                }
+                let semantic = surface.semanticHighlights.prefix(2).joined(separator: " ")
+                if !semantic.isEmpty {
+                    parts.append("Learned UI: \(semantic)")
+                }
+                let controls = surface.controlHighlights.prefix(4).joined(separator: " | ")
+                if !controls.isEmpty {
+                    parts.append("Controls: \(controls).")
+                }
+                let affordances = surface.affordanceHighlights.prefix(3).joined(separator: " | ")
+                if !affordances.isEmpty {
+                    parts.append("Affordances: \(affordances).")
+                }
+                let rest = parts.dropFirst().joined(separator: " ")
+                return rest.isEmpty ? parts[0] : "\(parts[0]): \(rest)"
             }
 
         let transitions = memory.transitions
@@ -33,7 +49,7 @@ enum ContextMemoryRenderer {
             }
             .prefix(4)
             .map { transition in
-                "- \(transition.trigger.rawValue) from \(transition.fromTitle) -> \(transition.toTitle) (\(transition.evidenceCount)x)."
+                "- \(transition.fromTitle) -> \(transition.toTitle) after \(transition.trigger.rawValue)."
             }
 
         let negative = memory.negativeNotes
@@ -45,16 +61,16 @@ enum ContextMemoryRenderer {
             }
             .prefix(3)
             .map { note in
-                "- \(note.surfaceTitle): \(note.note) Evidence \(note.evidenceCount)x."
+                "- \(note.surfaceTitle): \(note.note)"
             }
 
         return """
         App: \(memory.appName)
-        Surfaces:
+        Known surfaces:
         \(surfaces.isEmpty ? "- No durable surfaces yet." : surfaces.joined(separator: "\n"))
-        Transitions:
+        Known transitions:
         \(transitions.isEmpty ? "- No learned transitions yet." : transitions.joined(separator: "\n"))
-        Negative memory:
+        Cautions:
         \(negative.isEmpty ? "- No same-surface click cautions yet." : negative.joined(separator: "\n"))
         """
     }
@@ -63,8 +79,25 @@ enum ContextMemoryRenderer {
         let surfaces = memory.surfaces
             .sorted { $0.lastSeen > $1.lastSeen }
             .map { surface in
-                let text = surface.textHighlights.isEmpty ? "" : "\n  - Text highlights: \(surface.textHighlights.prefix(12).joined(separator: " | "))"
-                return "- **\(surface.title)**: seen \(surface.observationCount)x, clicks \(surface.clickCount)x, activations \(surface.activationCount)x, last seen \(iso(surface.lastSeen)).\(text)"
+                var lines = [
+                    "- **\(surface.title)**: seen \(surface.observationCount)x, clicks \(surface.clickCount)x, activations \(surface.activationCount)x, last seen \(iso(surface.lastSeen))."
+                ]
+                if !surface.textHighlights.isEmpty {
+                    lines.append("  - Text highlights: \(surface.textHighlights.prefix(12).joined(separator: " | "))")
+                }
+                if !surface.semanticHighlights.isEmpty {
+                    lines.append("  - Learned UI summaries: \(surface.semanticHighlights.prefix(4).joined(separator: " | "))")
+                }
+                if !surface.controlHighlights.isEmpty {
+                    lines.append("  - Controls: \(surface.controlHighlights.prefix(10).joined(separator: " | "))")
+                }
+                if !surface.affordanceHighlights.isEmpty {
+                    lines.append("  - Affordances: \(surface.affordanceHighlights.prefix(8).joined(separator: " | "))")
+                }
+                if !surface.uncertaintyHighlights.isEmpty {
+                    lines.append("  - Uncertain: \(surface.uncertaintyHighlights.prefix(6).joined(separator: " | "))")
+                }
+                return lines.joined(separator: "\n")
             }
             .joined(separator: "\n")
 
