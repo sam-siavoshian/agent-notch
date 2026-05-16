@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Sam's slice: cursor companion + long-press tap + computer-use harness.
         // Wired into the notch and settings store via AgentInterfaces.
         CursorCompanion.shared.start()
+        ContextCoordinator.shared.start()
         AgentSession.shared.start()
     }
 }
