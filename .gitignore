@@ -18,3 +18,14 @@ Package.resolved
 
 # macOS
 .DS_Store
+
+# ArshanTesting sandbox
+ArshanTesting/.env
+ArshanTesting/node_modules/
+ArshanTesting/.npm-cache/
+ArshanTesting/dist/
+ArshanTesting/coverage/
+ArshanTesting/test-results/
+ArshanTesting/playwright-report/
+ArshanTesting/fixtures/private/
+ArshanTesting/memory/private/

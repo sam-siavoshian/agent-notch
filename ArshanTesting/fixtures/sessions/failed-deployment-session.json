@@ -1,0 +1,39 @@
+{
+  "task": "Find the failed deployment in the deployment dashboard.",
+  "states": [
+    "overview",
+    "deployments",
+    "filters-open",
+    "failed-detail"
+  ],
+  "simulatedActions": [
+    {
+      "from": "overview",
+      "action": "click blank center area",
+      "to": "overview",
+      "success": false,
+      "note": "Blank center area is not actionable."
+    },
+    {
+      "from": "overview",
+      "action": "click Deployments in the left navigation",
+      "to": "deployments",
+      "success": true,
+      "note": "Opens deployments table."
+    },
+    {
+      "from": "deployments",
+      "action": "click Status filter",
+      "to": "filters-open",
+      "success": true,
+      "note": "Opens filter panel."
+    },
+    {
+      "from": "filters-open",
+      "action": "select Failed status",
+      "to": "failed-detail",
+      "success": true,
+      "note": "Narrows to failed deployment and opens detail."
+    }
+  ]
+}

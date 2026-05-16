@@ -1,0 +1,24 @@
+{
+  "name": "arshan-ui-learning-experiment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "tsx src/syntheticScreens.ts",
+    "demo": "tsx src/replaySession.ts",
+    "test": "vitest run",
+    "test:live": "ARSHAN_LIVE_GEMINI=1 vitest run tests/geminiObservation.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "playwright": "^1.50.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
