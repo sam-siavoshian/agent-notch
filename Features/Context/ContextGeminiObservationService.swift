@@ -338,6 +338,16 @@ public actor ContextGeminiObservationService {
     }
 
     private func send(_ request: GeminiGenerateContentRequest, apiKey: String, timeoutSeconds: TimeInterval) async throws -> GeminiSendResult {
+        do {
+            return try await sendOnce(request, apiKey: apiKey, timeoutSeconds: timeoutSeconds)
+        } catch let error as Error where error.isRetryable {
+            NSLog("[ContextGeminiObservationService] Transient error, retrying in 1s: \(error)")
+            try await Task.sleep(for: .seconds(1))
+            return try await sendOnce(request, apiKey: apiKey, timeoutSeconds: timeoutSeconds)
+        }
+    }
+
+    private func sendOnce(_ request: GeminiGenerateContentRequest, apiKey: String, timeoutSeconds: TimeInterval) async throws -> GeminiSendResult {
         let base = endpointBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(base)/\(model):generateContent") else {
             throw Error(status: nil, body: "Invalid Gemini endpoint URL.", underlying: nil)
@@ -1101,6 +1111,13 @@ extension ContextGeminiObservationService {
 
         public var description: String {
             "ContextGeminiObservationService.Error(status: \(status.map(String.init) ?? "nil"), body: \(body ?? "nil"), underlying: \(underlying.map { "\($0)" } ?? "nil"))"
+        }
+
+        /// True for transient failures worth retrying once: network errors and 5xx server errors.
+        /// 4xx client errors (bad key, bad request) are not retried — they won't self-heal.
+        var isRetryable: Bool {
+            guard let status else { return true }  // nil = URLSession/network failure
+            return status >= 500
         }
     }
 }
