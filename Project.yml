@@ -1,0 +1,55 @@
+name: AgentNotch
+options:
+  bundleIdPrefix: com.agentnotch
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  AgentNotch:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: App
+        excludes:
+          - "Info.plist"
+          - "AgentNotch.entitlements"
+      - path: Core
+      - path: Features
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        LSUIElement: false
+        NSHumanReadableCopyright: "Copyright © 2026 Agent in the Notch team."
+        NSMicrophoneUsageDescription: "Agent in the Notch listens to your voice when you long-press the cursor companion."
+        NSAppleEventsUsageDescription: "Agent in the Notch sends events to other apps when performing computer-use actions."
+        NSScreenCaptureDescription: "Agent in the Notch captures screenshots on click events to build short context summaries for the agent."
+    entitlements:
+      path: App/AgentNotch.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.device.audio-input: true
+        com.apple.security.network.client: true
+        com.apple.security.automation.apple-events: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.agentnotch.app
+        PRODUCT_NAME: AgentNotch
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+        COMBINE_HIDPI_IMAGES: YES

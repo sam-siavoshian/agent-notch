@@ -8,18 +8,21 @@ See `AGENTS.md` for Swift coding conventions, architecture rules, and AI agent g
 
 ## Build & Run
 
-This is a fresh macOS SwiftUI app at the repo root. The `.xcodeproj` needs to be scaffolded in Xcode (File → New → Project → macOS → App) — the source files in `App/`, `Core/`, `Features/` are ready to drop in. Once the project exists:
+Fresh macOS SwiftUI app at the repo root. `.xcodeproj` is **generated** from `Project.yml` by [xcodegen](https://github.com/yonaskolb/XcodeGen) — gitignored so the three of us don't fight pbxproj merge conflicts.
 
-- Open `<repo>.xcodeproj` in Xcode and hit Run.
-- Requires macOS with a notch (M-series MacBook) and Accessibility permissions for cursor overlay and click hooks.
-
-The app **is not** a fork of boring.notch. We may clone boring.notch into `vendored/boring.notch/` locally as a read-only reference for how they implement the notch window, animations, etc. — but `vendored/` is gitignored and we do not modify it.
-
-To grab the reference clone:
+First time setup on a new machine:
 
 ```bash
-git clone https://github.com/TheBoredTeam/boring.notch.git vendored/boring.notch
+brew install xcodegen   # if not already installed
+xcodegen generate       # creates AgentNotch.xcodeproj from Project.yml
+open AgentNotch.xcodeproj
 ```
+
+After pulling changes that touch `Project.yml` or source layout, re-run `xcodegen generate`.
+
+Requires macOS 14+ with a notch (M-series MacBook). Microphone, automation, and screen capture entitlements live in `App/AgentNotch.entitlements`.
+
+The app **is not** a fork of boring.notch. The boring.notch source is checked in under `vendored/boring.notch/` as read-only reference material (window plumbing, animations, tab layout, music UI). Read it, learn from it — **do not modify it** and do not include any of its files in our app target.
 
 ---
 
