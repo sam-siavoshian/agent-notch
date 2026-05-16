@@ -87,6 +87,10 @@ struct ContextDebugView: View {
                 Task { await captureNow() }
             }
 
+            iconButton("rectangle.2.swap", help: "Compare latest screenshot across Gemini model configs") {
+                Task { await compareLatestScreenshot() }
+            }
+
             iconButton("arrow.clockwise", help: "Refresh context debug panel") {
                 Task { await refresh() }
             }
@@ -255,8 +259,8 @@ struct ContextDebugView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 8)], spacing: 8) {
                     pipelineCard("1. Capture", "\(snapshots.count) recent", "Screenshots stored with trigger, app, window, cursor, and OCR.", "camera.viewfinder", .cyan)
                     pipelineCard("2. OCR", "\(diagnostics?.latestRecognizedTextCount ?? 0) latest", "Vision text recognition produces the local text layer before AI.", "text.viewfinder", .mint)
-                    pipelineCard("3. Gemini", aiSummary?.latestStatusLine ?? "No AI observation yet", "Sends PNG screenshots at HIGH media resolution with minimal thinking; prompt/response paths are logged.", "brain.head.profile", .purple)
-                    pipelineCard("4. Memory", "\(memories.count) apps", "Durable UI knowledge is merged into app memories for future context packets.", "rectangle.stack.badge.person.crop", .orange)
+                    pipelineCard("3. Gemini", aiSummary?.latestStatusLine ?? "No AI observation yet", "Runs parallel Activity, UI Map, Entity, and Interaction lanes; each lane logs its own prompt, image, and raw output.", "brain.head.profile", .purple)
+                    pipelineCard("4. Memory", "\(memories.count) apps", "Lane outputs reduce into structured current-work, UI operation, entity, workflow, and caution memory.", "rectangle.stack.badge.person.crop", .orange)
                     pipelineCard("5. Injection", "\(activationPreview.count) chars", "This is the packet the computer-use agent sees at activation.", "text.badge.checkmark", .green)
                 }
             }
@@ -509,6 +513,9 @@ struct ContextDebugView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 statusPill(event.status.rawValue, color: statusColor(event.status))
+                if let laneName = event.laneName {
+                    statusPill(laneName, color: .purple)
+                }
                 if let latency = event.latencyMilliseconds {
                     statusPill("\(latency)ms", color: .blue)
                 }
@@ -530,6 +537,9 @@ struct ContextDebugView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 statusPill(event.status.rawValue.uppercased(), color: statusColor(event.status))
+                if let laneName = event.laneName {
+                    statusPill(laneName, color: .purple)
+                }
                 Text(event.happenedAt.formatted(date: .omitted, time: .standard))
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.42))
@@ -566,6 +576,8 @@ struct ContextDebugView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 detailLine("Model", event.model)
+                detailLine("Attempt", event.attemptID?.uuidString)
+                detailLine("Lane", event.laneName)
                 detailLine("Prompt version", event.promptVersion)
                 detailLine("MIME", event.requestMimeType)
                 detailLine("Media resolution", event.requestMediaResolution)
@@ -924,6 +936,12 @@ struct ContextDebugView: View {
                 if let source = event.source {
                     line += " source=\(source)"
                 }
+                if let laneName = event.laneName {
+                    line += " lane=\(laneName)"
+                }
+                if let attemptID = event.attemptID {
+                    line += " attempt=\(attemptID.uuidString)"
+                }
                 if let confidence = event.confidence {
                     line += " confidence=\(String(format: "%.2f", confidence))"
                 }
@@ -984,6 +1002,14 @@ struct ContextDebugView: View {
         await refresh()
         await MainActor.run {
             status = "Captured current screen and refreshed memory artifacts."
+        }
+    }
+
+    private func compareLatestScreenshot() async {
+        await ContextCoordinator.shared.compareLatestScreenshotForDebug()
+        await refresh()
+        await MainActor.run {
+            status = "Queued same-screenshot Gemini comparison. Check the Gemini pane for compare-* lanes."
         }
     }
 
@@ -1101,6 +1127,8 @@ struct ContextDebugView: View {
         append("requestMimeType", event.requestMimeType, to: &lines)
         append("requestMediaResolution", event.requestMediaResolution, to: &lines)
         append("requestThinkingLevel", event.requestThinkingLevel, to: &lines)
+        append("laneName", event.laneName, to: &lines)
+        append("attemptID", event.attemptID?.uuidString, to: &lines)
         append("imageHash", event.imageHash, to: &lines)
         append("requestImagePath", event.requestImagePath, to: &lines)
         append("requestMetadataPath", event.requestMetadataPath, to: &lines)

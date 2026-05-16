@@ -22,9 +22,11 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
     }
 
     public let id: UUID
+    public let attemptID: UUID?
     public let happenedAt: Date
     public let provider: Provider
     public let status: Status
+    public let laneName: String?
     public let model: String
     public let promptVersion: String
     public let trigger: ContextCaptureTrigger
@@ -79,6 +81,8 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         appName: String,
         windowTitle: String,
         reason: String,
+        attemptID: UUID? = nil,
+        laneName: String? = nil,
         source: String? = nil,
         latencyMilliseconds: Int? = nil,
         confidence: Double? = nil,
@@ -117,9 +121,11 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         entitiesCount: Int = 0
     ) {
         self.id = id
+        self.attemptID = attemptID
         self.happenedAt = happenedAt
         self.provider = provider
         self.status = status
+        self.laneName = laneName
         self.model = model
         self.promptVersion = promptVersion
         self.trigger = trigger
@@ -274,18 +280,19 @@ public actor ContextAIObservationLog {
         let app = event.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? event.appName
             : "\(event.appName), \(event.windowTitle)"
+        let lane = event.laneName.map { " \($0)" } ?? ""
         switch event.status {
         case .queued:
-            return "Queued Gemini for \(app)."
+            return "Queued Gemini\(lane) for \(app)."
         case .skipped:
-            return "Skipped Gemini for \(app): \(event.reason)."
+            return "Skipped Gemini\(lane) for \(app): \(event.reason)."
         case .completed:
             let source = event.source == ContextGeminiObservation.Source.cache.rawValue ? "cache" : "live"
             let latency = event.latencyMilliseconds.map { " in \($0)ms" } ?? ""
             let surface = event.surfaceLabel.map { " Surface: \($0)." } ?? ""
-            return "Gemini \(source) completed\(latency).\(surface)"
+            return "Gemini\(lane) \(source) completed\(latency).\(surface)"
         case .failed:
-            return "Gemini failed for \(app): \(event.reason)."
+            return "Gemini\(lane) failed for \(app): \(event.reason)."
         }
     }
 

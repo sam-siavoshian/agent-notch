@@ -240,3 +240,125 @@ public struct ContextGeminiObservation: Codable, Sendable, Identifiable {
         }
     }
 }
+
+public enum ContextGeminiObservationLane: String, Codable, Sendable, CaseIterable, Identifiable {
+    case activity
+    case uiMap
+    case entityContent
+    case interaction
+    case reducer
+
+    public var id: String { rawValue }
+
+    public var label: String {
+        switch self {
+        case .activity:
+            return "Activity"
+        case .uiMap:
+            return "UI Map"
+        case .entityContent:
+            return "Entities"
+        case .interaction:
+            return "Interaction"
+        case .reducer:
+            return "Reducer"
+        }
+    }
+
+    public var shortGoal: String {
+        switch self {
+        case .activity:
+            return "what the user is doing now"
+        case .uiMap:
+            return "how this UI works"
+        case .entityContent:
+            return "files, people, records, errors, and content"
+        case .interaction:
+            return "what changed after the last action"
+        case .reducer:
+            return "merged activation-ready memory"
+        }
+    }
+}
+
+public struct ContextGeminiLaneObservation: Codable, Sendable, Identifiable {
+    public var id: String
+    public var observedAt: Date
+    public var source: ContextGeminiObservation.Source
+    public var model: String
+    public var promptVersion: String
+    public var imageHash: String
+    public var lane: ContextGeminiObservationLane
+    public var appLabel: String
+    public var windowTitle: String
+    public var surfaceID: String
+    public var surfaceLabel: String
+    public var screenType: String
+    public var summary: String
+    public var primaryTask: String
+    public var contentSummary: String
+    public var layoutRegions: [String]
+    public var controls: [ContextGeminiObservation.VisibleControl]
+    public var entities: [String]
+    public var stateIndicators: [String]
+    public var workflows: [String]
+    public var navigation: [String]
+    public var negativeCues: [String]
+    public var memoryCards: [String]
+    public var uncertainty: [String]
+    public var confidence: Double
+
+    public init(
+        id: String,
+        observedAt: Date,
+        source: ContextGeminiObservation.Source,
+        model: String,
+        promptVersion: String,
+        imageHash: String,
+        lane: ContextGeminiObservationLane,
+        appLabel: String,
+        windowTitle: String,
+        surfaceID: String,
+        surfaceLabel: String,
+        screenType: String,
+        summary: String,
+        primaryTask: String,
+        contentSummary: String,
+        layoutRegions: [String],
+        controls: [ContextGeminiObservation.VisibleControl],
+        entities: [String],
+        stateIndicators: [String],
+        workflows: [String],
+        navigation: [String],
+        negativeCues: [String],
+        memoryCards: [String],
+        uncertainty: [String],
+        confidence: Double
+    ) {
+        self.id = id
+        self.observedAt = observedAt
+        self.source = source
+        self.model = model
+        self.promptVersion = promptVersion
+        self.imageHash = imageHash
+        self.lane = lane
+        self.appLabel = appLabel
+        self.windowTitle = windowTitle
+        self.surfaceID = surfaceID
+        self.surfaceLabel = surfaceLabel
+        self.screenType = screenType
+        self.summary = summary
+        self.primaryTask = primaryTask
+        self.contentSummary = contentSummary
+        self.layoutRegions = layoutRegions
+        self.controls = controls
+        self.entities = entities
+        self.stateIndicators = stateIndicators
+        self.workflows = workflows
+        self.navigation = navigation
+        self.negativeCues = negativeCues
+        self.memoryCards = memoryCards
+        self.uncertainty = uncertainty
+        self.confidence = confidence
+    }
+}

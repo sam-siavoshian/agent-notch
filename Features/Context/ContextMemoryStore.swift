@@ -75,7 +75,8 @@ public actor ContextMemoryStore {
         let surfaceTitle = clean(observation.surfaceLabel)
             ?? clean(windowTitleHint)
             ?? Self.displayTitle(observation.windowTitle)
-        let surfaceID = Self.surfaceID(appName: appName, windowTitle: surfaceTitle)
+        let surfaceID = clean(observation.surfaceID)
+            ?? Self.surfaceID(appName: appName, windowTitle: surfaceTitle)
 
         memory.lastSeen = capturedAt
         recordSurface(

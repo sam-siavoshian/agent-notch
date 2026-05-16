@@ -13,7 +13,7 @@ public actor ContextGeminiObservationService {
     public static let shared = ContextGeminiObservationService()
 
     public static let defaultModel = "gemini-3.1-flash-lite"
-    public static let promptVersion = "context-gemini-observation-v4"
+    public static let promptVersion = "context-gemini-observation-v5"
     public static let defaultMediaResolution = "MEDIA_RESOLUTION_HIGH"
     public static let defaultThinkingLevel = "minimal"
     public static let defaultMaxOutputTokens = 2400
@@ -46,18 +46,22 @@ public actor ContextGeminiObservationService {
         )
     }
 
-    public static func debugPaths(for imageData: Data, mimeType: String = "image/png") -> ContextGeminiDebugPaths {
+    public static func debugPaths(
+        for imageData: Data,
+        mimeType: String = "image/png",
+        laneName: String? = nil
+    ) -> ContextGeminiDebugPaths {
         let imageHash = sha256Hex(imageData)
-        let shortHash = String(imageHash.prefix(16))
+        let prefix = debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
         let debugDirectoryURL = defaultCacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
         let imageExtension = mimeType == "image/png" ? "png" : "jpg"
         return ContextGeminiDebugPaths(
             imageHash: imageHash,
-            requestImagePath: debugDirectoryURL.appendingPathComponent("\(shortHash)-request-image.\(imageExtension)").path,
-            requestMetadataPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-request.txt").path,
-            promptPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-prompt.txt").path,
-            rawResponsePath: debugDirectoryURL.appendingPathComponent("\(shortHash)-raw-response.json").path,
-            errorPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-error.txt").path
+            requestImagePath: debugDirectoryURL.appendingPathComponent("\(prefix)-request-image.\(imageExtension)").path,
+            requestMetadataPath: debugDirectoryURL.appendingPathComponent("\(prefix)-request.txt").path,
+            promptPath: debugDirectoryURL.appendingPathComponent("\(prefix)-prompt.txt").path,
+            rawResponsePath: debugDirectoryURL.appendingPathComponent("\(prefix)-raw-response.json").path,
+            errorPath: debugDirectoryURL.appendingPathComponent("\(prefix)-error.txt").path
         )
     }
 
@@ -66,18 +70,24 @@ public actor ContextGeminiObservationService {
     private let debugDirectoryURL: URL
     private let endpointBaseURL: URL
     private let model: String
+    private let mediaResolutionOverride: String?
+    private let thinkingLevelOverride: String?
     private let session: URLSession
 
     public init(
         model: String = ContextGeminiObservationService.defaultModel,
         cacheDirectoryURL: URL = ContextGeminiObservationService.defaultCacheDirectoryURL,
         endpointBaseURL: URL = URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!,
+        mediaResolutionOverride: String? = nil,
+        thinkingLevelOverride: String? = nil,
         session: URLSession = .shared,
         apiKeyProvider: @escaping @Sendable () -> String? = {
             Env.value("GEMINI_API_KEY")
         }
     ) {
         self.model = model
+        self.mediaResolutionOverride = mediaResolutionOverride
+        self.thinkingLevelOverride = thinkingLevelOverride
         self.cacheDirectoryURL = cacheDirectoryURL
         self.debugDirectoryURL = cacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
         self.endpointBaseURL = endpointBaseURL
@@ -88,7 +98,7 @@ public actor ContextGeminiObservationService {
     }
 
     public func observe(_ input: ContextGeminiObservationInput) async -> ContextGeminiObservation? {
-        let config = Self.requestConfig()
+        let config = requestConfig()
         let imageHash = Self.sha256Hex(input.imageData)
         let cacheURL = cacheURL(imageHash: imageHash, input: input, config: config)
 
@@ -189,6 +199,134 @@ public actor ContextGeminiObservationService {
         ))
     }
 
+    public func observeLane(
+        _ lane: ContextGeminiObservationLane,
+        input: ContextGeminiObservationInput,
+        previousSnapshot: ContextSnapshot? = nil,
+        debugLaneName: String? = nil
+    ) async -> ContextGeminiLaneObservation? {
+        let config = requestConfig(for: lane)
+        let imageHash = Self.sha256Hex(input.imageData)
+        let cacheURL = laneCacheURL(imageHash: imageHash, lane: lane, input: input, config: config)
+        let debugName = debugLaneName ?? lane.rawValue
+
+        if let cached = readCachedLaneObservation(at: cacheURL) {
+            var observation = cached
+            observation.source = .cache
+            return observation
+        }
+
+        guard let apiKey = apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+            NSLog("[ContextGeminiObservationService] GEMINI_API_KEY is not set; skipping \(lane.rawValue) lane.")
+            return nil
+        }
+
+        do {
+            let prompt = Self.lanePrompt(for: lane, input: input, previousSnapshot: previousSnapshot)
+            writeDebugData(input.imageData, imageHash: imageHash, mimeType: input.mimeType, laneName: debugName)
+            writeDebugText(requestMetadata(for: input, config: config, lane: lane), imageHash: imageHash, suffix: "request.txt", laneName: debugName)
+            writeDebugText(prompt, imageHash: imageHash, suffix: "prompt.txt", laneName: debugName)
+
+            let request = GeminiGenerateContentRequest(
+                contents: [
+                    .init(parts: [
+                        .inlineData(mimeType: input.mimeType, data: input.imageData.base64EncodedString()),
+                        .text(prompt)
+                    ])
+                ],
+                generationConfig: .init(
+                    maxOutputTokens: config.maxOutputTokens,
+                    responseMimeType: "application/json",
+                    mediaResolution: config.mediaResolution,
+                    thinkingConfig: .init(thinkingLevel: config.thinkingLevel)
+                )
+            )
+
+            let result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
+            writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json", laneName: debugName)
+            guard let text = result.response.firstText else {
+                NSLog("[ContextGeminiObservationService] \(lane.rawValue) lane response had no text candidate.")
+                return nil
+            }
+            writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json", laneName: debugName)
+
+            let observation = try Self.parseLaneObservation(
+                text,
+                lane: lane,
+                input: input,
+                imageHash: imageHash,
+                model: model,
+                promptVersion: Self.promptVersion
+            )
+            writeCachedLaneObservation(observation, to: cacheURL)
+            return observation
+        } catch {
+            writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt", laneName: debugName)
+            NSLog("[ContextGeminiObservationService] \(lane.rawValue) lane failed: \(error)")
+            return nil
+        }
+    }
+
+    public static func reduceLaneObservations(
+        _ lanes: [ContextGeminiLaneObservation],
+        input: ContextGeminiObservationInput,
+        imageHash: String,
+        model: String = ContextGeminiObservationService.defaultModel,
+        promptVersion: String = ContextGeminiObservationService.promptVersion
+    ) -> ContextGeminiObservation? {
+        guard !lanes.isEmpty else { return nil }
+
+        let byLane = Dictionary(grouping: lanes, by: \.lane)
+        let ui = byLane[.uiMap]?.first
+        let activity = byLane[.activity]?.first
+        let entities = byLane[.entityContent]?.first
+        let interaction = byLane[.interaction]?.first
+        let primary = ui ?? activity ?? entities ?? lanes[0]
+
+        let controls = Array(uniqueControls(lanes.flatMap(\.controls)).prefix(24))
+        let confidenceValues = lanes.map(\.confidence).filter { $0.isFinite }
+        let confidence = confidenceValues.isEmpty ? 0.5 : confidenceValues.reduce(0, +) / Double(confidenceValues.count)
+        let summaryParts = [
+            activity?.summary,
+            ui?.summary,
+            entities?.summary,
+            interaction?.summary
+        ].compactMap { clean($0) }
+
+        return ContextGeminiObservation(
+            id: cacheObservationID(imageHash: imageHash, model: model, promptVersion: promptVersion),
+            observedAt: Date(),
+            source: lanes.contains(where: { $0.source == .gemini }) ? .gemini : .cache,
+            model: model,
+            promptVersion: promptVersion,
+            imageHash: imageHash,
+            appLabel: clean(primary.appLabel) ?? clean(input.appName) ?? "Unknown app",
+            windowTitle: clean(primary.windowTitle) ?? clean(input.windowTitle) ?? "Unknown window",
+            surfaceID: clean(primary.surfaceID) ?? slug([primary.appLabel, primary.surfaceLabel].joined(separator: "-")),
+            surfaceLabel: clean(primary.surfaceLabel) ?? "Visible surface",
+            summary: summaryParts.prefix(3).joined(separator: " "),
+            screenType: clean(primary.screenType) ?? "",
+            primaryTask: clean(activity?.primaryTask) ?? clean(primary.primaryTask) ?? "",
+            layoutSummary: clean(ui?.layoutRegions.joined(separator: " | ")) ?? clean(primary.layoutRegions.joined(separator: " | ")) ?? "",
+            contentSummary: clean(entities?.contentSummary) ?? clean(activity?.contentSummary) ?? clean(primary.contentSummary) ?? "",
+            visibleControls: controls,
+            landmarks: cleanStrings(lanes.flatMap(\.layoutRegions), maxCount: 18),
+            entities: cleanStrings(lanes.flatMap(\.entities), maxCount: 28),
+            affordances: cleanStrings((ui?.controls ?? []).map { control in
+                let hint = clean(control.actionHint) ?? "use visible control"
+                return "\(control.label): \(hint)"
+            }, maxCount: 18),
+            stateIndicators: cleanStrings(lanes.flatMap(\.stateIndicators), maxCount: 16),
+            navigationPaths: cleanStrings(lanes.flatMap(\.navigation), maxCount: 16),
+            dataRegions: cleanStrings((entities?.layoutRegions ?? []) + (ui?.layoutRegions ?? []), maxCount: 14),
+            workflowHints: cleanStrings(lanes.flatMap(\.workflows), maxCount: 18),
+            negativeCues: cleanStrings(lanes.flatMap(\.negativeCues), maxCount: 16),
+            memoryCandidates: cleanStrings(lanes.flatMap(\.memoryCards), maxCount: 24),
+            uncertainty: cleanStrings(lanes.flatMap(\.uncertainty), maxCount: 16),
+            confidence: clamp(confidence)
+        )
+    }
+
     private func send(_ request: GeminiGenerateContentRequest, apiKey: String, timeoutSeconds: TimeInterval) async throws -> GeminiSendResult {
         let base = endpointBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(base)/\(model):generateContent") else {
@@ -235,6 +373,17 @@ public actor ContextGeminiObservationService {
         return cacheDirectoryURL.appendingPathComponent("\(key).json")
     }
 
+    private func laneCacheURL(
+        imageHash: String,
+        lane: ContextGeminiObservationLane,
+        input: ContextGeminiObservationInput,
+        config: GeminiObservationRequestConfig
+    ) -> URL {
+        let metadataHash = Self.sha256Hex(Self.cacheMetadataString(for: input).data(using: .utf8) ?? Data())
+        let key = Self.sha256Hex("\(imageHash)|\(metadataHash)|\(Self.promptVersion)|\(model)|\(input.mimeType)|\(lane.rawValue)|\(config.cacheKey)".data(using: .utf8) ?? Data())
+        return cacheDirectoryURL.appendingPathComponent("\(key)-\(lane.rawValue).json")
+    }
+
     private static func cacheMetadataString(for input: ContextGeminiObservationInput) -> String {
         let usefulText = ContextTextSignalFilter.usefulText(from: input.recognizedText, maxCount: 32)
         let metadata = input.metadata.keys.sorted()
@@ -255,6 +404,11 @@ public actor ContextGeminiObservationService {
         return try? Self.decoder.decode(ContextGeminiObservation.self, from: data)
     }
 
+    private func readCachedLaneObservation(at url: URL) -> ContextGeminiLaneObservation? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? Self.decoder.decode(ContextGeminiLaneObservation.self, from: data)
+    }
+
     private func writeCachedObservation(_ observation: ContextGeminiObservation, to url: URL) {
         do {
             let data = try Self.encoder.encode(observation)
@@ -264,20 +418,29 @@ public actor ContextGeminiObservationService {
         }
     }
 
-    private func writeDebugData(_ data: Data, imageHash: String, mimeType: String) {
-        let shortHash = String(imageHash.prefix(16))
+    private func writeCachedLaneObservation(_ observation: ContextGeminiLaneObservation, to url: URL) {
+        do {
+            let data = try Self.encoder.encode(observation)
+            try data.write(to: url, options: .atomic)
+        } catch {
+            NSLog("[ContextGeminiObservationService] Failed to write Gemini lane cache: \(error)")
+        }
+    }
+
+    private func writeDebugData(_ data: Data, imageHash: String, mimeType: String, laneName: String? = nil) {
+        let prefix = Self.debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
         let fileExtension = mimeType == "image/png" ? "png" : "jpg"
         do {
-            try data.write(to: debugDirectoryURL.appendingPathComponent("\(shortHash)-request-image.\(fileExtension)"), options: .atomic)
+            try data.write(to: debugDirectoryURL.appendingPathComponent("\(prefix)-request-image.\(fileExtension)"), options: .atomic)
             try data.write(to: debugDirectoryURL.appendingPathComponent("latest-request-image.\(fileExtension)"), options: .atomic)
         } catch {
             NSLog("[ContextGeminiObservationService] Failed to write Gemini debug image: \(error)")
         }
     }
 
-    private func writeDebugText(_ text: String, imageHash: String, suffix: String) {
-        let shortHash = String(imageHash.prefix(16))
-        let url = debugDirectoryURL.appendingPathComponent("\(shortHash)-\(suffix)")
+    private func writeDebugText(_ text: String, imageHash: String, suffix: String, laneName: String? = nil) {
+        let prefix = Self.debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
+        let url = debugDirectoryURL.appendingPathComponent("\(prefix)-\(suffix)")
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
             try text.write(to: debugDirectoryURL.appendingPathComponent("latest-\(suffix)"), atomically: true, encoding: .utf8)
@@ -286,21 +449,58 @@ public actor ContextGeminiObservationService {
         }
     }
 
-    private static func requestConfig() -> GeminiObservationRequestConfig {
-        GeminiObservationRequestConfig(
-            mediaResolution: configuredMediaResolution,
-            thinkingLevel: configuredThinkingLevel,
-            maxOutputTokens: defaultMaxOutputTokens,
+    private func requestConfig(for lane: ContextGeminiObservationLane? = nil) -> GeminiObservationRequestConfig {
+        Self.requestConfig(
+            for: lane,
+            mediaResolutionOverride: mediaResolutionOverride,
+            thinkingLevelOverride: thinkingLevelOverride
+        )
+    }
+
+    private static func requestConfig(
+        for lane: ContextGeminiObservationLane?,
+        mediaResolutionOverride: String? = nil,
+        thinkingLevelOverride: String? = nil
+    ) -> GeminiObservationRequestConfig {
+        let laneMaxOutput: Int
+        switch lane {
+        case .activity:
+            laneMaxOutput = 900
+        case .uiMap:
+            laneMaxOutput = 1200
+        case .entityContent:
+            laneMaxOutput = 1000
+        case .interaction:
+            laneMaxOutput = 800
+        case .reducer:
+            laneMaxOutput = 900
+        case nil:
+            laneMaxOutput = defaultMaxOutputTokens
+        }
+
+        return GeminiObservationRequestConfig(
+            mediaResolution: normalizedMediaResolution(mediaResolutionOverride) == defaultMediaResolution && mediaResolutionOverride == nil
+                ? configuredMediaResolution
+                : normalizedMediaResolution(mediaResolutionOverride),
+            thinkingLevel: normalizedThinkingLevel(thinkingLevelOverride) == defaultThinkingLevel && thinkingLevelOverride == nil
+                ? configuredThinkingLevel
+                : normalizedThinkingLevel(thinkingLevelOverride),
+            maxOutputTokens: laneMaxOutput,
             timeoutSeconds: 20
         )
     }
 
-    private func requestMetadata(for input: ContextGeminiObservationInput, config: GeminiObservationRequestConfig) -> String {
+    private func requestMetadata(
+        for input: ContextGeminiObservationInput,
+        config: GeminiObservationRequestConfig,
+        lane: ContextGeminiObservationLane? = nil
+    ) -> String {
         let imageKB = input.imageData.count / 1024
         return """
         Gemini observation request
         model: \(model)
         promptVersion: \(Self.promptVersion)
+        lane: \(lane?.rawValue ?? "monolith")
         mimeType: \(input.mimeType)
         imageBytes: \(input.imageData.count) (\(imageKB)KB)
         mediaResolution: \(config.mediaResolution)
@@ -375,6 +575,120 @@ public actor ContextGeminiObservationService {
         """
     }
 
+    private static func lanePrompt(
+        for lane: ContextGeminiObservationLane,
+        input: ContextGeminiObservationInput,
+        previousSnapshot: ContextSnapshot?
+    ) -> String {
+        let metadataLines = metadataLines(for: input)
+        let previous = previousSnapshot.map(previousSnapshotLines) ?? "- No previous screen supplied."
+        let base = """
+        You are one lane in a modular screen-understanding pipeline for a macOS computer-use agent.
+        Analyze the full-display screenshot, but separate the active/frontmost work surface from background windows and AgentNotch/dev overlays.
+        Your job is to preprocess useful reasoning so the future computer-use model spends fewer tokens discovering what the user is doing or how the UI works.
+
+        Rules:
+        - Use only visible evidence plus metadata. Prefer uncertainty over guessing.
+        - Be specific and operational. Do not write generic labels like "button" or "sidebar" without saying what it helps do.
+        - Keep output compact. Short, dense strings are better than paragraphs.
+        - Mention private content only as short visible labels/entities needed for operation.
+        - Return strict JSON only.
+
+        Metadata:
+        \(metadataLines)
+
+        Previous screen for interaction reasoning:
+        \(previous)
+        """
+
+        switch lane {
+        case .activity:
+            return base + """
+
+            Lane goal: understand what the user is actively doing, the current work state, and what the agent should know if asked to jump in.
+            Focus on task, visible content, active app/page, current state, likely intent, and recent work context. Do not catalog every control.
+
+            JSON fields:
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary, primaryTask, contentSummary,
+            stateIndicators: [string],
+            entities: [string],
+            memoryCards: [string],
+            uncertainty: [string],
+            confidence: number
+            """
+        case .uiMap:
+            return base + """
+
+            Lane goal: learn how this UI can be operated so a future computer-use agent can act faster.
+            Focus on visible regions, controls, navigation, workflows, successful next actions, and negative/no-op cues. Treat UI/UX memory as an accelerator, not a screenshot caption.
+
+            JSON fields:
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary,
+            layoutRegions: [string],
+            controls: [{ "label": string, "role": string, "region": string, "actionHint": string, "confidence": number }],
+            workflows: [string],
+            navigation: [string],
+            negativeCues: [string],
+            memoryCards: [string],
+            uncertainty: [string],
+            confidence: number
+
+            Every workflow must name the visible control or region it would use and the expected result.
+            Every negative cue must explain what wasted action it prevents.
+            """
+        case .entityContent:
+            return base + """
+
+            Lane goal: harvest useful content and entities from the screen.
+            Focus on files, docs, URLs, people, tickets, records, errors, messages, terminal output, selected/current items, and app-specific objects. Capture what the user is working with, not just what app is open.
+
+            JSON fields:
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary, contentSummary,
+            layoutRegions: [string],
+            entities: [string],
+            stateIndicators: [string],
+            memoryCards: [string],
+            negativeCues: [string],
+            uncertainty: [string],
+            confidence: number
+            """
+        case .interaction:
+            return base + """
+
+            Lane goal: compare previous and current screen hints to infer what changed after the last click/app switch/manual capture.
+            Focus on action effect, transition, changed state, likely clicked target, success/failure signal, and whether the action taught a reusable navigation/workflow fact.
+
+            JSON fields:
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary,
+            primaryTask,
+            workflows: [string],
+            navigation: [string],
+            stateIndicators: [string],
+            negativeCues: [string],
+            memoryCards: [string],
+            uncertainty: [string],
+            confidence: number
+            """
+        case .reducer:
+            return base + """
+
+            Lane goal: merge previously extracted lane outputs. If you receive a screenshot here, still keep output compact and activation-ready.
+            JSON fields:
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary, primaryTask, contentSummary,
+            layoutRegions: [string],
+            controls: [{ "label": string, "role": string, "region": string, "actionHint": string, "confidence": number }],
+            entities: [string],
+            stateIndicators: [string],
+            workflows: [string],
+            navigation: [string],
+            negativeCues: [string],
+            memoryCards: [string],
+            uncertainty: [string],
+            confidence: number
+            """
+        }
+    }
+
     private static func metadataLines(for input: ContextGeminiObservationInput) -> String {
         var lines: [String] = []
         if let appName = clean(input.appName) {
@@ -386,9 +700,10 @@ public actor ContextGeminiObservationService {
         if let width = input.width, let height = input.height {
             lines.append("- Screenshot size: \(width)x\(height)")
         }
-        let ocrItems = ContextTextSignalFilter.usefulText(from: input.recognizedText, maxCount: 32)
+        let ocrItems = regionOCRLines(from: input.recognizedText)
         if !ocrItems.isEmpty {
-            lines.append("- Useful OCR text: \(ocrItems.joined(separator: " | "))")
+            lines.append("- OCR by screen region:")
+            lines.append(contentsOf: ocrItems)
             lines.append("- Raw OCR item count: \(input.recognizedText.count)")
         }
         for key in input.metadata.keys.sorted() {
@@ -396,6 +711,73 @@ public actor ContextGeminiObservationService {
             lines.append("- \(key): \(value)")
         }
         return lines.isEmpty ? "- No metadata provided." : lines.joined(separator: "\n")
+    }
+
+    private static func previousSnapshotLines(_ snapshot: ContextSnapshot) -> String {
+        let text = ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: 10)
+        var lines = [
+            "- Previous app: \(snapshot.appName)",
+            "- Previous window: \(snapshot.windowTitle)",
+            "- Previous trigger: \(snapshot.trigger.rawValue)"
+        ]
+        if !text.isEmpty {
+            lines.append("- Previous useful OCR: \(text.joined(separator: " | "))")
+        }
+        if let cursorLocation = snapshot.cursorLocation {
+            lines.append("- Previous cursor: x=\(Int(cursorLocation.x)), y=\(Int(cursorLocation.y))")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func regionOCRLines(from recognizedText: [ContextRecognizedText]) -> [String] {
+        guard !recognizedText.isEmpty else { return [] }
+        let useful = recognizedText
+            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { lhs, rhs in
+                if abs(lhs.y - rhs.y) > 0.03 {
+                    return lhs.y > rhs.y
+                }
+                return lhs.x < rhs.x
+            }
+
+        var buckets: [String: [String]] = [
+            "top": [],
+            "left": [],
+            "center": [],
+            "right": [],
+            "bottom": []
+        ]
+
+        for item in useful {
+            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let bucket: String
+            if item.y > 0.82 {
+                bucket = "top"
+            } else if item.y < 0.18 {
+                bucket = "bottom"
+            } else if item.x < 0.24 {
+                bucket = "left"
+            } else if item.x > 0.76 {
+                bucket = "right"
+            } else {
+                bucket = "center"
+            }
+            if buckets[bucket, default: []].count < 12 {
+                buckets[bucket, default: []].append(text)
+            }
+        }
+
+        return ["top", "left", "center", "right", "bottom"].compactMap { key in
+            let values = ContextTextSignalFilter.usefulText(
+                from: buckets[key, default: []].map {
+                    ContextRecognizedText(text: $0, confidence: 1, x: 0, y: 0, width: 0, height: 0)
+                },
+                maxCount: 10
+            )
+            guard !values.isEmpty else { return nil }
+            return "  - \(key): \(values.joined(separator: " | "))"
+        }
     }
 
     private static func parseObservation(
@@ -448,6 +830,59 @@ public actor ContextGeminiObservationService {
             negativeCues: cleanStrings(payload.negativeCues, maxCount: 12),
             memoryCandidates: cleanStrings(payload.memoryCandidates, maxCount: 16),
             uncertainty: cleanStrings(payload.uncertainty, maxCount: 12),
+            confidence: clamp(payload.confidence)
+        )
+    }
+
+    private static func parseLaneObservation(
+        _ rawText: String,
+        lane: ContextGeminiObservationLane,
+        input: ContextGeminiObservationInput,
+        imageHash: String,
+        model: String,
+        promptVersion: String
+    ) throws -> ContextGeminiLaneObservation {
+        let data = cleanedJSONString(rawText).data(using: .utf8) ?? Data()
+        let payload = try decoder.decode(LaneObservationPayload.self, from: data)
+        let fallbackApp = clean(input.appName) ?? "Unknown app"
+        let fallbackWindow = clean(input.windowTitle) ?? "Unknown window"
+        let appLabel = clean(payload.appLabel) ?? fallbackApp
+        let windowTitle = clean(payload.windowTitle) ?? fallbackWindow
+        let surfaceLabel = clean(payload.surfaceLabel) ?? clean(payload.summary) ?? "Visible surface"
+
+        return ContextGeminiLaneObservation(
+            id: cacheObservationID(imageHash: imageHash, model: model, promptVersion: "\(promptVersion)-\(lane.rawValue)"),
+            observedAt: Date(),
+            source: .gemini,
+            model: model,
+            promptVersion: promptVersion,
+            imageHash: imageHash,
+            lane: lane,
+            appLabel: appLabel,
+            windowTitle: windowTitle,
+            surfaceID: clean(payload.surfaceID) ?? slug([appLabel, surfaceLabel, lane.rawValue].joined(separator: "-")),
+            surfaceLabel: surfaceLabel,
+            screenType: clean(payload.screenType) ?? "",
+            summary: clean(payload.summary) ?? "\(lane.label) observation unavailable.",
+            primaryTask: clean(payload.primaryTask) ?? "",
+            contentSummary: clean(payload.contentSummary) ?? "",
+            layoutRegions: cleanStrings(payload.layoutRegions, maxCount: 18),
+            controls: payload.controls.prefix(24).map {
+                ContextGeminiObservation.VisibleControl(
+                    label: clean($0.label) ?? "Unlabeled control",
+                    role: clean($0.role) ?? "control",
+                    region: clean($0.region) ?? "unknown-region",
+                    actionHint: clean($0.actionHint),
+                    confidence: clamp($0.confidence)
+                )
+            },
+            entities: cleanStrings(payload.entities, maxCount: 28),
+            stateIndicators: cleanStrings(payload.stateIndicators, maxCount: 18),
+            workflows: cleanStrings(payload.workflows, maxCount: 18),
+            navigation: cleanStrings(payload.navigation, maxCount: 18),
+            negativeCues: cleanStrings(payload.negativeCues, maxCount: 18),
+            memoryCards: cleanStrings(payload.memoryCards, maxCount: 24),
+            uncertainty: cleanStrings(payload.uncertainty, maxCount: 16),
             confidence: clamp(payload.confidence)
         )
     }
@@ -508,6 +943,29 @@ public actor ContextGeminiObservationService {
 
     private static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func debugArtifactPrefix(imageHash: String, laneName: String?) -> String {
+        let shortHash = String(imageHash.prefix(16))
+        guard let laneName = clean(laneName) else { return shortHash }
+        let safeLane = slug(laneName)
+        return "\(shortHash)-\(safeLane)"
+    }
+
+    private static func uniqueControls(_ controls: [ContextGeminiObservation.VisibleControl]) -> [ContextGeminiObservation.VisibleControl] {
+        var seen = Set<String>()
+        var output: [ContextGeminiObservation.VisibleControl] = []
+        for control in controls {
+            let key = [
+                control.label.lowercased(),
+                control.role.lowercased(),
+                control.region.lowercased()
+            ].joined(separator: "|")
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            output.append(control)
+        }
+        return output
     }
 
     private static func normalizedMediaResolution(_ rawValue: String?) -> String {
@@ -645,6 +1103,97 @@ private struct ObservationPayload: Decodable {
         workflowHints = try container.decodeStringArrayIfPresent(forKey: .workflowHints)
         negativeCues = try container.decodeStringArrayIfPresent(forKey: .negativeCues)
         memoryCandidates = try container.decodeStringArrayIfPresent(forKey: .memoryCandidates)
+        uncertainty = try container.decodeStringArrayIfPresent(forKey: .uncertainty)
+        confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
+    }
+}
+
+private struct LaneObservationPayload: Decodable {
+    var appLabel: String?
+    var windowTitle: String?
+    var surfaceID: String?
+    var surfaceLabel: String?
+    var screenType: String?
+    var summary: String?
+    var primaryTask: String?
+    var contentSummary: String?
+    var layoutRegions: [String]
+    var controls: [ControlPayload]
+    var entities: [String]
+    var stateIndicators: [String]
+    var workflows: [String]
+    var navigation: [String]
+    var negativeCues: [String]
+    var memoryCards: [String]
+    var uncertainty: [String]
+    var confidence: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case appLabel
+        case app
+        case windowTitle
+        case surfaceID
+        case surfaceId
+        case surfaceLabel
+        case screenType
+        case summary
+        case primaryTask
+        case contentSummary
+        case layoutRegions
+        case landmarks
+        case controls
+        case visibleControls
+        case entities
+        case visibleEntities
+        case stateIndicators
+        case workflows
+        case workflowHints
+        case navigation
+        case navigationPaths
+        case negativeCues
+        case memoryCards
+        case memoryCandidates
+        case uncertainty
+        case confidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        appLabel = try container.decodeIfPresent(String.self, forKey: .appLabel)
+            ?? container.decodeIfPresent(String.self, forKey: .app)
+        windowTitle = try container.decodeIfPresent(String.self, forKey: .windowTitle)
+        surfaceID = try container.decodeIfPresent(String.self, forKey: .surfaceID)
+            ?? container.decodeIfPresent(String.self, forKey: .surfaceId)
+        surfaceLabel = try container.decodeIfPresent(String.self, forKey: .surfaceLabel)
+        screenType = try container.decodeIfPresent(String.self, forKey: .screenType)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        primaryTask = try container.decodeIfPresent(String.self, forKey: .primaryTask)
+        contentSummary = try container.decodeIfPresent(String.self, forKey: .contentSummary)
+        layoutRegions = try container.decodeStringArrayIfPresent(forKey: .layoutRegions)
+        if layoutRegions.isEmpty {
+            layoutRegions = try container.decodeStringArrayIfPresent(forKey: .landmarks)
+        }
+        controls = try container.decodeIfPresent([ControlPayload].self, forKey: .controls)
+            ?? container.decodeIfPresent([ControlPayload].self, forKey: .visibleControls)
+            ?? []
+        entities = try container.decodeStringArrayIfPresent(forKey: .entities)
+        if entities.isEmpty {
+            entities = try container.decodeStringArrayIfPresent(forKey: .visibleEntities)
+        }
+        stateIndicators = try container.decodeStringArrayIfPresent(forKey: .stateIndicators)
+        workflows = try container.decodeStringArrayIfPresent(forKey: .workflows)
+        if workflows.isEmpty {
+            workflows = try container.decodeStringArrayIfPresent(forKey: .workflowHints)
+        }
+        navigation = try container.decodeStringArrayIfPresent(forKey: .navigation)
+        if navigation.isEmpty {
+            navigation = try container.decodeStringArrayIfPresent(forKey: .navigationPaths)
+        }
+        negativeCues = try container.decodeStringArrayIfPresent(forKey: .negativeCues)
+        memoryCards = try container.decodeStringArrayIfPresent(forKey: .memoryCards)
+        if memoryCards.isEmpty {
+            memoryCards = try container.decodeStringArrayIfPresent(forKey: .memoryCandidates)
+        }
         uncertainty = try container.decodeStringArrayIfPresent(forKey: .uncertainty)
         confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
     }
