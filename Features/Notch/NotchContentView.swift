@@ -151,12 +151,17 @@ struct NotchContentView: View {
                 scheduleClose()
             }
         }
-        .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.90, blendDuration: 0),
+        // Single spring drives box size + content opacity + height changes.
+        // High damping kills bounce so top edge can't punch into the real
+        // hardware notch. Response ~0.32 feels organic without feeling slow.
+        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
                    value: isOpen)
-        .animation(.spring(response: 0.34, dampingFraction: 0.78, blendDuration: 0),
+        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
                    value: measuredOpenHeight)
         .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
-            guard isOpen, newHeight > 1,
+            // Update even while closed so the first open animates to the
+            // right size in a single motion (no two-step pop).
+            guard newHeight > 1,
                   abs(newHeight - measuredOpenHeight) > 0.5 else { return }
             measuredOpenHeight = newHeight
         }
@@ -191,7 +196,7 @@ struct NotchContentView: View {
                 }
             }
             .id(selectedTabRaw)
-            .transition(.scale(scale: 0.8, anchor: .top).combined(with: .opacity))
+            .transition(.opacity)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
