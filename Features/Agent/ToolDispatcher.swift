@@ -208,7 +208,14 @@ public actor ToolDispatcher {
     }
 
     private func postUnicode(_ scalar: Unicode.Scalar) {
-        let chars: [UniChar] = [UniChar(scalar.value & 0xFFFF)]
+        // Non-BMP scalars (emoji, some CJK) require a UTF-16 surrogate pair.
+        let chars: [UniChar]
+        if scalar.value <= 0xFFFF {
+            chars = [UniChar(scalar.value)]
+        } else {
+            let offset = scalar.value - 0x10000
+            chars = [UniChar(0xD800 + (offset >> 10)), UniChar(0xDC00 + (offset & 0x3FF))]
+        }
         if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) {
             chars.withUnsafeBufferPointer { ptr in
                 down.keyboardSetUnicodeString(stringLength: ptr.count, unicodeString: ptr.baseAddress)
@@ -331,6 +338,23 @@ public actor ToolDispatcher {
         case "7": return CGKeyCode(kVK_ANSI_7)
         case "8": return CGKeyCode(kVK_ANSI_8)
         case "9": return CGKeyCode(kVK_ANSI_9)
+        case "f1":  return CGKeyCode(kVK_F1)
+        case "f2":  return CGKeyCode(kVK_F2)
+        case "f3":  return CGKeyCode(kVK_F3)
+        case "f4":  return CGKeyCode(kVK_F4)
+        case "f5":  return CGKeyCode(kVK_F5)
+        case "f6":  return CGKeyCode(kVK_F6)
+        case "f7":  return CGKeyCode(kVK_F7)
+        case "f8":  return CGKeyCode(kVK_F8)
+        case "f9":  return CGKeyCode(kVK_F9)
+        case "f10": return CGKeyCode(kVK_F10)
+        case "f11": return CGKeyCode(kVK_F11)
+        case "f12": return CGKeyCode(kVK_F12)
+        case "home":      return CGKeyCode(kVK_Home)
+        case "end":       return CGKeyCode(kVK_End)
+        case "pageup":    return CGKeyCode(kVK_PageUp)
+        case "pagedown":  return CGKeyCode(kVK_PageDown)
+        case "forwarddelete", "del": return CGKeyCode(kVK_ForwardDelete)
         default: return nil
         }
     }

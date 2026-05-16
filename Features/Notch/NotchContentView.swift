@@ -38,10 +38,15 @@ enum NotchTab: String, CaseIterable, Identifiable {
 }
 
 struct NotchContentView: View {
-    @State private var selected: NotchTab = .home
+    @AppStorage("notch.selectedTab") private var selectedTabRaw: String = NotchTab.home.rawValue
     @State private var isOpen = false
     @State private var closeTask: Task<Void, Never>?
     @State private var hoverTask: Task<Void, Never>?
+
+    private var selectedTab: NotchTab { NotchTab(rawValue: selectedTabRaw) ?? .home }
+    private var selectedTabBinding: Binding<NotchTab> {
+        Binding(get: { selectedTab }, set: { selectedTabRaw = $0.rawValue })
+    }
 
     private let closedWidth: CGFloat = 220
     private let closedHeight: CGFloat = 32
@@ -126,10 +131,10 @@ struct NotchContentView: View {
     @ViewBuilder
     private var openContent: some View {
         VStack(spacing: 8) {
-            NotchTabBar(selected: $selected)
+            NotchTabBar(selected: selectedTabBinding)
                 .padding(.top, 4)
             Group {
-                switch selected {
+                switch selectedTab {
                 case .home:
                     NotchHomeView()
                 case .settings:
@@ -141,7 +146,7 @@ struct NotchContentView: View {
                     ContextDebugView()
                 }
             }
-            .id(selected)
+            .id(selectedTabRaw)
             .transition(.scale(scale: 0.8, anchor: .top).combined(with: .opacity))
             .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -150,7 +150,11 @@ public final class VoiceRecordingService {
 
         guard !transcript.isEmpty else {
             NSLog("[VoiceRecordingService] No transcript — agent not fired.")
-            AgentState.shared.set(.idle)
+            AgentState.shared.set(.error(message: "Nothing captured — try speaking again"))
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                AgentState.shared.set(.idle)
+            }
             return
         }
 

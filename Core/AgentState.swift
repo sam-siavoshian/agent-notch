@@ -58,7 +58,17 @@ public final class AgentState: ObservableObject {
 
     public func set(_ activity: AgentActivity, detail: String = "") {
         switch activity {
-        case .idle: break
+        case .idle:
+            // Log run completion when transitioning from an active state so the
+            // activity feed shows a "done" entry rather than stopping mid-stream.
+            switch self.activity {
+            case .thinking, .toolCall:
+                let entry = AgentLogEntry(timestamp: Date(), activity: .idle, detail: detail.isEmpty ? "Done" : detail)
+                activityLog.insert(entry, at: 0)
+                if activityLog.count > 30 { activityLog.removeLast() }
+            default:
+                break
+            }
         default:
             let entry = AgentLogEntry(timestamp: Date(), activity: activity, detail: detail)
             activityLog.insert(entry, at: 0)
