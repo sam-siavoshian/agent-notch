@@ -135,22 +135,21 @@ a {
   min-height: 100vh;
   position: relative;
   overflow-x: clip;
-  background-color: #6fb6f0;
+  background-color: #8ec4ee;
   background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='3' height='3'><rect width='1' height='1' fill='rgba(255,255,255,0.16)'/><rect x='2' y='2' width='1' height='1' fill='rgba(20,30,60,0.08)'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='3' height='3'><rect width='1' height='1' fill='rgba(255,255,255,0.12)'/></svg>"),
     linear-gradient(
       180deg,
-      rgba(10, 20, 40, 0.08) 0%,
-      rgba(10, 20, 40, 0) 22%,
-      rgba(10, 20, 40, 0) 55%,
-      rgba(237, 238, 240, 0.35) 82%,
-      rgba(237, 238, 240, 0.85) 96%,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0) 45%,
+      rgba(237, 238, 240, 0.55) 78%,
+      rgba(237, 238, 240, 0.95) 94%,
       var(--canvas) 100%
     ),
     url("/hero.jpg");
   background-repeat: repeat, no-repeat, no-repeat;
-  background-position: 0 0, 0 0, center top;
-  background-size: 3px 3px, 100% 100%, cover;
+  background-position: 0 0, 0 0, center 8%;
+  background-size: 3px 3px, 100% 100%, 130% auto;
   background-attachment: fixed, fixed, fixed;
 }
 
@@ -257,19 +256,12 @@ a {
   padding-inline: 0.06em;
 }
 .sub {
-  display: inline-block;
   font-size: 17px;
   line-height: 1.55;
-  color: #1a2540;
+  color: rgba(255, 255, 255, 0.96);
   margin-bottom: 36px;
-  max-width: 540px;
-  padding: 14px 20px;
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(14px) saturate(1.05);
-  -webkit-backdrop-filter: blur(14px) saturate(1.05);
-  border-radius: 20px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9),
-    0 1px 2px rgba(20, 30, 60, 0.08), 0 12px 28px rgba(20, 30, 60, 0.14);
+  max-width: 480px;
+  text-shadow: 0 1px 2px rgba(20, 35, 70, 0.35);
 }
 .cta-row {
   display: flex;

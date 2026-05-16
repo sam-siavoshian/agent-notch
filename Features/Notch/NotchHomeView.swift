@@ -11,6 +11,7 @@
 import AppKit
 import ApplicationServices
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct NotchHomeView: View {
     @ObservedObject private var state = AgentState.shared
@@ -100,6 +101,8 @@ struct NotchHomeView: View {
             }
             Spacer(minLength: 0)
             if let fix = missingPermission {
+                DraggableAgentIcon(size: 26)
+                    .help("Drag onto the privacy list in System Settings to add AgentNotch")
                 GrantPermissionButton(target: fix)
             }
         }
@@ -341,6 +344,46 @@ private struct GrantPermissionButton: View {
             }
         }
     }
+}
+
+// MARK: - Draggable app icon
+//
+// Real Finder-style drag source. Drag this onto System Settings →
+// Privacy & Security → (Accessibility | Screen Recording | Microphone)
+// and macOS adds AgentNotch to the list, exactly like a Finder drag.
+
+private struct DraggableAgentIcon: View {
+    var size: CGFloat = 26
+    @State private var hover = false
+
+    var body: some View {
+        AgentAppIconImage()
+            .frame(width: size, height: size)
+            .shadow(color: .black.opacity(hover ? 0.35 : 0.20),
+                    radius: hover ? 6 : 3, y: hover ? 3 : 1)
+            .scaleEffect(hover ? 1.06 : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.75), value: hover)
+            .onHover { h in hover = h }
+            .onDrag {
+                let url = Bundle.main.bundleURL as NSURL
+                let provider = NSItemProvider(object: url)
+                provider.suggestedName = Bundle.main.bundleURL.lastPathComponent
+                return provider
+            } preview: {
+                AgentAppIconImage().frame(width: 80, height: 80)
+            }
+    }
+}
+
+private struct AgentAppIconImage: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSImageView {
+        let v = NSImageView()
+        v.image = NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName)
+        v.imageScaling = .scaleProportionallyUpOrDown
+        v.unregisterDraggedTypes()
+        return v
+    }
+    func updateNSView(_ nsView: NSImageView, context: Context) {}
 }
 
 /// Tiny ButtonStyle that exposes isPressed via a binding so the label can
