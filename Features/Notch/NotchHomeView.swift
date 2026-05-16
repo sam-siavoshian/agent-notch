@@ -2,7 +2,7 @@
 //  NotchHomeView.swift
 //  Agent in the Notch
 //
-//  Home tab: agent presence orb, last spoken request, scrollable action log.
+//  Home tab in compact soft-pill form.
 //
 
 import SwiftUI
@@ -19,13 +19,11 @@ struct NotchHomeView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             statusHero
-
             if !state.lastTranscript.isEmpty {
                 lastRequestCard
             }
-
             if !state.activityLog.isEmpty {
                 activityFeed
             } else if !isActive && state.lastTranscript.isEmpty {
@@ -34,227 +32,138 @@ struct NotchHomeView: View {
         }
     }
 
-    // MARK: – Status hero
-
     private var statusHero: some View {
-        HStack(spacing: 14) {
-            AgentOrb(color: store.cursorColor.swatch, isActive: isActive)
-
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 8) {
+            StatusBadge(
+                color: SoftPill.activityHue(state.activity),
+                symbol: state.activity.symbol,
+                size: 20
+            )
+            VStack(alignment: .leading, spacing: 1) {
                 Text(state.activity.label)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(SoftPill.activityHue(state.activity))
                     .animation(nil, value: state.activity.label)
-
                 Group {
                     if !state.detail.isEmpty {
-                        Text(state.detail)
-                            .foregroundStyle(.white.opacity(0.55))
+                        Text(state.detail).foregroundStyle(SoftPill.Text.secondary)
                     } else {
                         Text(isActive ? "Working on it…" : "Ready when you are")
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(SoftPill.Text.muted)
                     }
                 }
-                .font(.caption)
+                .font(.system(size: 9.5))
                 .lineLimit(1)
                 .truncationMode(.tail)
             }
-
             Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+            PillBackground(
+                fill: AnyShapeStyle(SoftPill.Surface.base),
+                glow: SoftPill.activityHue(state.activity),
+                cornerRadius: 11
+            )
         )
     }
-
-    // MARK: – Last request
 
     private var lastRequestCard: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 5) {
             Image(systemName: "quote.bubble.fill")
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.35))
+                .font(.system(size: 9))
+                .foregroundStyle(SoftPill.Text.muted)
                 .padding(.top, 1)
             Text(state.lastTranscript)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.72))
+                .font(.system(size: 10.5))
+                .foregroundStyle(SoftPill.Text.primary.opacity(0.78))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+            PillBackground(
+                fill: AnyShapeStyle(SoftPill.Surface.inset),
+                cornerRadius: 9
+            )
         )
     }
 
-    // MARK: – Activity feed
-
     private var activityFeed: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("Recent")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.35))
-                .padding(.leading, 2)
-
+        VStack(alignment: .leading, spacing: 3) {
+            Text("RECENT")
+                .font(.system(size: 8.5, weight: .semibold))
+                .tracking(0.9)
+                .foregroundStyle(SoftPill.Text.muted)
+                .padding(.leading, 4)
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 4) {
+                VStack(spacing: 3) {
                     ForEach(state.activityLog) { entry in
                         ActivityLogRow(entry: entry)
                     }
                 }
             }
-            .frame(maxHeight: 164)
+            .frame(maxHeight: 110)
         }
     }
 
-    // MARK: – Empty state
-
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             if AgentInterfaces.cursor == nil {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.orange.opacity(0.75))
+                StatusBadge(color: SoftPill.Status.amber, symbol: "exclamationmark", size: 22)
                 Text("Cursor companion not connected")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text("Waiting for Sam's module to register.")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.28))
-                    .multilineTextAlignment(.center)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(SoftPill.Text.secondary)
             } else {
                 Image(systemName: "hand.tap.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(store.cursorColor.swatch.opacity(0.65))
-                Text("Long-press the cursor companion to get started")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.38))
+                    .font(.system(size: 18))
+                    .foregroundStyle(store.cursorColor.swatch.opacity(0.8))
+                Text("Long-press cursor to start")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(SoftPill.Text.secondary)
                     .multilineTextAlignment(.center)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 24)
+        .padding(.top, 12)
     }
 }
-
-// MARK: – Agent orb
-
-private struct AgentOrb: View {
-    let color: Color
-    let isActive: Bool
-
-    var body: some View {
-        ZStack {
-            if isActive {
-                PulsingHalo(color: color)
-            } else {
-                Circle()
-                    .fill(color.opacity(0.15))
-                    .frame(width: 44, height: 44)
-            }
-
-            Circle()
-                .fill(RadialGradient(
-                    colors: [color, color.opacity(0.6)],
-                    center: .topLeading,
-                    startRadius: 2,
-                    endRadius: 20
-                ))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 1))
-                .frame(width: 26, height: 26)
-                .shadow(color: color.opacity(0.65), radius: 8)
-
-            if isActive {
-                SpinnerArc()
-                    .frame(width: 38, height: 38)
-            }
-        }
-        .frame(width: 44, height: 44)
-    }
-}
-
-private struct PulsingHalo: View {
-    let color: Color
-    @State private var scale: CGFloat = 1.0
-
-    var body: some View {
-        Circle()
-            .fill(color.opacity(0.18))
-            .frame(width: 44, height: 44)
-            .scaleEffect(scale)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                    scale = 1.22
-                }
-            }
-    }
-}
-
-private struct SpinnerArc: View {
-    @State private var angle: Double = 0
-
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.27)
-            .stroke(Color.white.opacity(0.8), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-            .rotationEffect(.degrees(angle))
-            .onAppear {
-                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
-                    angle = 360
-                }
-            }
-    }
-}
-
-// MARK: – Activity log row
 
 private struct ActivityLogRow: View {
     let entry: AgentLogEntry
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: entry.activity.symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(rowColor)
-                .frame(width: 14, alignment: .center)
-
+        HStack(spacing: 6) {
+            StatusBadge(
+                color: SoftPill.activityHue(entry.activity),
+                symbol: entry.activity.symbol,
+                size: 12
+            )
             Text(rowLabel)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.7))
+                .font(.system(size: 10))
+                .foregroundStyle(SoftPill.Text.primary.opacity(0.78))
                 .lineLimit(1)
                 .truncationMode(.tail)
-
             Spacer(minLength: 0)
-
             Text(entry.timestamp, style: .relative)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.28))
+                .font(.system(size: 8.5))
+                .foregroundStyle(SoftPill.Text.muted)
                 .fixedSize()
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
         .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+            PillBackground(
+                fill: AnyShapeStyle(SoftPill.Surface.inset),
+                cornerRadius: 8
+            )
         )
     }
 
     private var rowLabel: String {
         entry.detail.isEmpty ? entry.activity.label : entry.detail
-    }
-
-    private var rowColor: Color {
-        switch entry.activity {
-        case .idle:             return .gray
-        case .listening:        return .blue
-        case .thinking:         return .purple
-        case .toolCall:         return .green
-        case .error:            return .red
-        }
     }
 }

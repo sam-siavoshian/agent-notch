@@ -15,6 +15,9 @@ final class NotchWindowController: NSObject {
 
     private var window: NotchWindow?
     private var screenObserver: NSObjectProtocol?
+    private var spaceObserver: NSObjectProtocol?
+    private var followTimer: DispatchSourceTimer?
+    private var lastScreen: NSScreen?
     private var cmdDMonitor: Any?
 
     func install() {
@@ -40,8 +43,18 @@ final class NotchWindowController: NSObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.position() }
+            Task { @MainActor in self?.position(animated: true) }
         }
+
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.position(animated: true) }
+        }
+
+        startFollowingActiveScreen()
 
         cmdDMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -52,14 +65,61 @@ final class NotchWindowController: NSObject {
         }
     }
 
-    private func position() {
-        guard let window, let screen = NSScreen.main else { return }
+    private func position(animated: Bool = false) {
+        guard let window, let screen = preferredScreen() else { return }
         let frame = screen.frame
-        let origin = NSPoint(
-            x: frame.midX - window.frame.width / 2,
-            y: frame.maxY - window.frame.height
+        let size = window.frame.size
+        let target = NSRect(
+            x: frame.midX - size.width / 2,
+            y: frame.maxY - size.height,
+            width: size.width,
+            height: size.height
         )
-        window.setFrameOrigin(origin)
+        let screenChanged = (lastScreen != screen)
+        lastScreen = screen
+
+        if animated && screenChanged {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.28
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                window.animator().setFrame(target, display: true)
+            }
+        } else {
+            window.setFrame(target, display: true)
+        }
+    }
+
+    /// Pick the screen the user is currently on. Prefer the screen with a
+    /// real notch (auxiliaryTopLeftArea). Fall back to the screen under the
+    /// cursor, then main.
+    private func preferredScreen() -> NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        let screenUnderCursor = NSScreen.screens.first { NSPointInRect(mouse, $0.frame) }
+        if let s = screenUnderCursor, s.auxiliaryTopLeftArea != nil { return s }
+        if let s = screenUnderCursor { return s }
+        if let notched = NSScreen.screens.first(where: { $0.auxiliaryTopLeftArea != nil }) {
+            return notched
+        }
+        return NSScreen.main
+    }
+
+    /// Re-check active screen at ~10Hz so the notch slides to whatever
+    /// display the cursor is on. Cheap: a timer + an origin check.
+    private func startFollowingActiveScreen() {
+        followTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + .milliseconds(100),
+                       repeating: .milliseconds(100),
+                       leeway: .milliseconds(20))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let target = self.preferredScreen()
+            if target != self.lastScreen {
+                self.position(animated: true)
+            }
+        }
+        followTimer = timer
+        timer.resume()
     }
 }
 
@@ -70,7 +130,7 @@ enum NotchSizing {
     static let shadowPadding: CGFloat = 24
 
     static func windowSize(for screen: NSScreen?) -> CGSize {
-        CGSize(width: openWidth, height: openHeight + shadowPadding)
+        CGSize(width: openWidth + shadowPadding * 2, height: openHeight + shadowPadding)
     }
 
     static func notchHeight(for screen: NSScreen?) -> CGFloat {

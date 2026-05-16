@@ -2,8 +2,7 @@
 //  AgentSettingsView.swift
 //  Agent in the Notch
 //
-//  The four-knob settings panel (PRD §6.2). User-facing inputs only; nothing
-//  about JSON shape leaks into the UI.
+//  Four-knob settings panel in compact soft-pill form.
 //
 
 import SwiftUI
@@ -17,7 +16,7 @@ struct AgentSettingsView: View {
     @State private var contextHealth = "Checking context..."
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 9) {
             reasoningEffortRow
             cursorColorRow
             preferencesRow
@@ -30,139 +29,117 @@ struct AgentSettingsView: View {
                 savedOpacity = 0
             }
         }
-        .task {
-            await refreshContextHealth()
-        }
+        .task { await refreshContextHealth() }
     }
-
-    // MARK: Saved badge
 
     private var savedBadge: some View {
         HStack {
             Spacer()
-            Text("Saved")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.green.opacity(0.85))
-                .opacity(savedOpacity)
+            HStack(spacing: 5) {
+                StatusBadge(color: SoftPill.Status.green, symbol: "checkmark", size: 12)
+                Text("Saved")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(SoftPill.Status.green)
+            }
+            .opacity(savedOpacity)
         }
     }
-
-    // MARK: Reasoning effort
 
     private var reasoningEffortRow: some View {
-        SettingRow(title: "Reasoning effort") {
-            Picker("", selection: Binding(
-                get: { store.reasoningEffort },
-                set: { store.reasoningEffort = $0 }
-            )) {
+        SettingRow(title: "Reasoning") {
+            PillToolbar {
                 ForEach(AgentReasoningEffort.allCases) { effort in
-                    Text(effort.displayName).tag(effort)
+                    ToolbarIconButton(
+                        systemImage: effortIcon(effort),
+                        label: effort.displayName,
+                        isActive: store.reasoningEffort == effort
+                    ) {
+                        store.reasoningEffort = effort
+                    }
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
         }
     }
 
-    // MARK: Cursor color
+    private func effortIcon(_ effort: AgentReasoningEffort) -> String {
+        switch effort {
+        case .low:    return "bolt.fill"
+        case .medium: return "scalemass.fill"
+        case .high:   return "brain.head.profile"
+        }
+    }
 
     private var cursorColorRow: some View {
-        SettingRow(title: "Cursor color") {
-            HStack(spacing: 8) {
+        SettingRow(title: "Cursor") {
+            HStack(spacing: 2) {
                 ForEach(CursorColor.allCases) { color in
-                    Button {
+                    SwatchPillButton(
+                        color: color.swatch,
+                        isSelected: store.cursorColor == color
+                    ) {
                         store.cursorColor = color
                         AgentInterfaces.cursor?.setCursorColor(color)
-                    } label: {
-                        Circle()
-                            .fill(color.swatch)
-                            .frame(width: 18, height: 18)
-                            .overlay(
-                                Circle()
-                                    .stroke(
-                                        store.cursorColor == color ? Color.white : Color.white.opacity(0.18),
-                                        lineWidth: store.cursorColor == color ? 2 : 1
-                                    )
-                            )
                     }
-                    .buttonStyle(.plain)
                     .help(color.displayName)
                 }
-
-                Spacer(minLength: 6)
-
+                Spacer(minLength: 4)
                 Image(systemName: "cursorarrow")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(store.cursorColor.swatch)
-                    .shadow(color: store.cursorColor.swatch.opacity(0.6), radius: 5)
+                    .shadow(color: store.cursorColor.swatch.opacity(0.7), radius: 5)
                     .animation(.smooth(duration: 0.25), value: store.cursorColor)
             }
         }
     }
 
-    // MARK: Preferences
-
     private var preferencesRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Preferences")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.7))
-            TextEditor(text: Binding(
-                get: { store.preferences },
-                set: { store.preferences = $0 }
-            ))
-            .font(.system(size: 12))
-            .scrollContentBackground(.hidden)
-            .padding(8)
-            .frame(minHeight: 70, maxHeight: 90)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(SoftPill.Text.secondary)
+                .padding(.leading, 2)
+            pillEditor(
+                text: Binding(get: { store.preferences }, set: { store.preferences = $0 }),
+                placeholder: "e.g. \u{201C}open Twitter\u{201D} means x.com",
+                monospaced: false,
+                minHeight: 44,
+                maxHeight: 64
             )
-            .overlay(alignment: .topLeading) {
-                if store.preferences.isEmpty {
-                    Text("e.g. \u{201C}When I say \u{2018}open Twitter\u{2019}, I mean x.com.\u{201D}")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.25))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-                        .allowsHitTesting(false)
-                }
-            }
         }
     }
-
-    // MARK: Advanced (system prompt + diagnostics)
 
     private var advancedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
                 withAnimation(.smooth(duration: 0.2)) { showAdvanced.toggle() }
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                    Text("Advanced")
-                        .font(.caption.weight(.semibold))
+                GhostPill(tint: SoftPill.Text.secondary) {
+                    HStack(spacing: 4) {
+                        Image(systemName: showAdvanced ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                        Text("Advanced")
+                    }
                 }
-                .foregroundStyle(.white.opacity(0.38))
             }
             .buttonStyle(.plain)
 
             if showAdvanced {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
                     systemPromptEditor
                     diagnosticsRow
-                    Text(contextHealth)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.42))
-                        .lineLimit(2)
+                    if !contextHealth.isEmpty {
+                        Text(contextHealth)
+                            .font(.system(size: 9))
+                            .foregroundStyle(SoftPill.Text.muted)
+                            .lineLimit(2)
+                            .padding(.horizontal, 4)
+                    }
                     if !diagnosticsStatus.isEmpty {
                         Text(diagnosticsStatus)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.38))
+                            .font(.system(size: 9))
+                            .foregroundStyle(SoftPill.Text.muted)
                             .lineLimit(1)
+                            .padding(.horizontal, 4)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -171,57 +148,69 @@ struct AgentSettingsView: View {
     }
 
     private var systemPromptEditor: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("System prompt override")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.55))
-            TextEditor(text: Binding(
-                get: { store.systemPrompt },
-                set: { store.systemPrompt = $0 }
-            ))
-            .font(.system(size: 12, design: .monospaced))
-            .scrollContentBackground(.hidden)
-            .padding(8)
-            .frame(minHeight: 60, maxHeight: 80)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(SoftPill.Text.secondary)
+                .padding(.leading, 2)
+            pillEditor(
+                text: Binding(get: { store.systemPrompt }, set: { store.systemPrompt = $0 }),
+                placeholder: "Override agent system prompt…",
+                monospaced: true,
+                minHeight: 44,
+                maxHeight: 64
             )
         }
     }
 
+    @ViewBuilder
+    private func pillEditor(
+        text: Binding<String>,
+        placeholder: String,
+        monospaced: Bool,
+        minHeight: CGFloat,
+        maxHeight: CGFloat
+    ) -> some View {
+        TextEditor(text: text)
+            .font(.system(size: 11, design: monospaced ? .monospaced : .default))
+            .foregroundStyle(SoftPill.Text.primary)
+            .scrollContentBackground(.hidden)
+            .padding(8)
+            .frame(minHeight: minHeight, maxHeight: maxHeight)
+            .background(
+                PillBackground(
+                    fill: AnyShapeStyle(SoftPill.Surface.inset),
+                    cornerRadius: 11
+                )
+            )
+            .overlay(alignment: .topLeading) {
+                if text.wrappedValue.isEmpty {
+                    Text(placeholder)
+                        .font(.system(size: 11, design: monospaced ? .monospaced : .default))
+                        .foregroundStyle(SoftPill.Text.muted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+
     private var diagnosticsRow: some View {
         SettingRow(title: "Context") {
-            HStack(spacing: 8) {
-                Button {
+            PillToolbar {
+                ToolbarIconButton(systemImage: "folder") {
                     openDirectory(ContextMemoryStore.defaultDirectoryURL)
-                } label: {
-                    Image(systemName: "folder")
                 }
-                .help("Open learned UI memory")
-
-                Button {
+                ToolbarIconButton(systemImage: "chart.xyaxis.line") {
                     openDirectory(AgentMetricsStore.defaultDirectoryURL)
-                } label: {
-                    Image(systemName: "chart.xyaxis.line")
                 }
-                .help("Open computer-use run metrics")
-
-                Button {
+                ToolbarIconButton(systemImage: "doc.on.doc") {
                     copyActivationContext()
-                } label: {
-                    Image(systemName: "doc.on.doc")
                 }
-                .help("Copy current activation context packet")
-
-                Button {
+                ToolbarIconButton(systemImage: "arrow.clockwise") {
                     Task { await refreshContextHealth() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh context health")
             }
-            .buttonStyle(.borderless)
         }
     }
 
@@ -244,9 +233,7 @@ struct AgentSettingsView: View {
 
     private func refreshContextHealth() async {
         let diagnostics = await ContextCoordinator.shared.diagnostics()
-        await MainActor.run {
-            contextHealth = diagnostics.summary
-        }
+        await MainActor.run { contextHealth = diagnostics.summary }
     }
 }
 
@@ -255,11 +242,11 @@ private struct SettingRow<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 8) {
             Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.7))
-            Spacer(minLength: 12)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(SoftPill.Text.secondary)
+            Spacer(minLength: 6)
             content
         }
     }

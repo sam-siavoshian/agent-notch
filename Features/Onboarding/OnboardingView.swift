@@ -81,13 +81,13 @@ private struct SoftPillBg: ViewModifier {
             .shadow(color: pressed
                         ? .clear
                         : (hovered ? Pill.shadowHover : Pill.shadowAmbient),
-                    radius: hovered ? 22 : 12,
-                    x: 0, y: hovered ? 14 : 8)
-            .shadow(color: glow.opacity((hovered && !pressed) ? glowIntensity : 0),
-                    radius: 26, x: 0, y: 0)
-            .scaleEffect(pressed ? 0.97 : (hovered ? 1.025 : 1.0))
-            .brightness(pressed ? -0.04 : (hovered ? 0.03 : 0))
-            .saturation(pressed ? 0.98 : (hovered ? 1.04 : 1.0))
+                    radius: hovered ? 14 : 12,
+                    x: 0, y: hovered ? 9 : 8)
+            .shadow(color: glow.opacity((hovered && !pressed) ? glowIntensity * 0.5 : 0),
+                    radius: 14, x: 0, y: 0)
+            .scaleEffect(pressed ? 0.98 : (hovered ? 1.005 : 1.0))
+            .brightness(pressed ? -0.04 : (hovered ? 0.015 : 0))
+            .saturation(pressed ? 0.98 : (hovered ? 1.02 : 1.0))
             .animation(pressed
                         ? .easeOut(duration: 0.08)
                         : .timingCurve(0.2, 0.7, 0.2, 1, duration: 0.18),
@@ -127,7 +127,7 @@ private struct PressSpringStyle: ButtonStyle {
 /// Button style that wraps its label in a SoftPillBg and pipes press state
 /// straight into it — so the inset flips, glow dies, and scale drops in one
 /// place. Pass `hovered` from the caller's @State.
-private struct SoftPillButtonStyle: ButtonStyle {
+private struct OnbSoftPillButtonStyle: ButtonStyle {
     var hovered: Bool = false
     var fill: Color = Pill.surface
     var radius: CGFloat = 999
@@ -471,13 +471,13 @@ private struct CTAStyle: ButtonStyle {
             // Contact shadow always; ambient + bloom only when not pressed.
             .shadow(color: Pill.ctaShadow1, radius: 2, x: 0, y: 1)
             .shadow(color: pressed ? .clear : Pill.ctaShadow2,
-                    radius: hover ? 36 : 20,
-                    x: 0, y: hover ? 14 : 9)
-            .shadow(color: pressed ? .clear : Pill.ctaFrom.opacity(hover ? 0.55 : 0.30),
-                    radius: hover ? 40 : 18, x: 0, y: 0)
-            .scaleEffect(pressed ? 0.97 : (hover ? 1.03 : 1.0))
-            .brightness(pressed ? -0.06 : (hover ? 0.06 : 0))
-            .saturation(pressed ? 0.95 : (hover ? 1.08 : 1.0))
+                    radius: hover ? 24 : 20,
+                    x: 0, y: hover ? 10 : 9)
+            .shadow(color: pressed ? .clear : Pill.ctaFrom.opacity(hover ? 0.38 : 0.30),
+                    radius: hover ? 22 : 18, x: 0, y: 0)
+            .scaleEffect(pressed ? 0.98 : (hover ? 1.01 : 1.0))
+            .brightness(pressed ? -0.05 : (hover ? 0.025 : 0))
+            .saturation(pressed ? 0.95 : (hover ? 1.03 : 1.0))
             .animation(pressed
                         ? .easeOut(duration: 0.08)
                         : .timingCurve(0.2, 0.7, 0.2, 1, duration: 0.18),
@@ -499,7 +499,7 @@ private struct PermPill: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            StatusBadge(status: status)
+            PermStatusBadge(status: status)
                 .frame(width: 26, height: 26)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -571,7 +571,7 @@ private struct GrantButton: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 8)
         }
-        .buttonStyle(SoftPillButtonStyle(
+        .buttonStyle(OnbSoftPillButtonStyle(
             hovered: hover,
             fill: Pill.hoverFill,
             glow: Pill.ctaFrom,
@@ -583,7 +583,7 @@ private struct GrantButton: View {
 
 // MARK: - Animated status badge
 
-private struct StatusBadge: View {
+private struct PermStatusBadge: View {
     let status: PermissionChecker.Status
 
     var body: some View {
@@ -626,7 +626,7 @@ private struct SettingsCogButton: View {
                 .foregroundStyle(Pill.muted)
                 .frame(width: 32, height: 32)
         }
-        .buttonStyle(SoftPillButtonStyle(
+        .buttonStyle(OnbSoftPillButtonStyle(
             hovered: hover,
             fill: Pill.hoverFill,
             radius: 16,
@@ -645,10 +645,10 @@ private struct DraggableAppIcon: View {
 
     var body: some View {
         AppIconImage()
-            .shadow(color: .black.opacity(hover ? 0.28 : 0.18),
-                    radius: hover ? 14 : 10,
-                    x: 0, y: hover ? 9 : 6)
-            .scaleEffect(hover ? 1.04 : 1.0)
+            .shadow(color: .black.opacity(hover ? 0.22 : 0.18),
+                    radius: hover ? 11 : 10,
+                    x: 0, y: hover ? 7 : 6)
+            .scaleEffect(hover ? 1.015 : 1.0)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: hover)
             .onHover { h in hover = h }
         .onDrag {
