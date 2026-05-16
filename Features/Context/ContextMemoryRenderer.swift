@@ -107,7 +107,7 @@ enum ContextMemoryRenderer {
 
         ## Stale Or Uncertain Notes
 
-        - Surface identity is currently based on app name and window title. Screenshot/VLM recognition should refine this for dashboards, browser apps, and layout drift.
+        - Surface identity is currently based on app name and window title. Screenshot/VLM recognition should refine this for native apps, browser apps, documents, editors, settings screens, and layout drift.
         """
     }
 

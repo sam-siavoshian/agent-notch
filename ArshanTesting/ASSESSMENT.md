@@ -35,7 +35,7 @@ What was too optimistic:
 
 - It does not yet infer a transition from visual before/after deltas plus a click location.
 - It does not yet maintain a durable app memory with `lastSeen`, `supersededBy`, or contradicted stale facts.
-- It does not yet test real screenshots from messy production dashboards.
+- It does not yet test real screenshots from messy production apps and websites.
 - It does not yet measure whether a live computer-use agent completes real UI tasks faster.
 
 ## Next Layer
@@ -43,5 +43,5 @@ What was too optimistic:
 1. Add visual transition observations: before screenshot, click/action, after screenshot, changed regions, inferred destination surface.
 2. Add memory lifecycle metadata: `lastSeen`, `confidence`, `status`, `contradictedBy`, and `supersededBy`.
 3. Build a blinded live eval over all synthetic screenshots with repeated Gemini trials and variance reporting.
-4. Add one real-but-fake complex dashboard fixture with modals, hidden menus, disabled controls, and ambiguous labels.
+4. Add one real-but-fake complex app fixture with modals, hidden menus, disabled controls, and ambiguous labels.
 5. Replace scripted second-run transitions with a small planner that chooses from visible affordances and learned memory.

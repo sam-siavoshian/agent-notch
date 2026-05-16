@@ -11,6 +11,12 @@ import Foundation
 
 public actor ContextMemoryStore {
     public static let shared = ContextMemoryStore()
+    public static var defaultDirectoryURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AgentNotch", isDirectory: true)
+            .appendingPathComponent("ContextMemory", isDirectory: true)
+    }
 
     private let appDirectoryURL: URL
     private let observationsURL: URL
@@ -18,10 +24,7 @@ public actor ContextMemoryStore {
     private var previousSnapshot: ContextSnapshot?
 
     public init(rootURL: URL? = nil) {
-        let baseURL = rootURL ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("AgentNotch", isDirectory: true)
-            .appendingPathComponent("ContextMemory", isDirectory: true)
+        let baseURL = rootURL ?? Self.defaultDirectoryURL
         self.appDirectoryURL = baseURL.appendingPathComponent("Apps", isDirectory: true)
         self.observationsURL = baseURL.appendingPathComponent("observations.jsonl")
 

@@ -31,14 +31,17 @@ public struct AgentRunMetricsRecord: Codable, Sendable {
 
 public actor AgentMetricsStore {
     public static let shared = AgentMetricsStore()
+    public static var defaultDirectoryURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AgentNotch", isDirectory: true)
+            .appendingPathComponent("AgentMetrics", isDirectory: true)
+    }
 
     private let metricsURL: URL
 
     public init(rootURL: URL? = nil) {
-        let directory = rootURL ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("AgentNotch", isDirectory: true)
-            .appendingPathComponent("AgentMetrics", isDirectory: true)
+        let directory = rootURL ?? Self.defaultDirectoryURL
         self.metricsURL = directory.appendingPathComponent("runs.jsonl")
 
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

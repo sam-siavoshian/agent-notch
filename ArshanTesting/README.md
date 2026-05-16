@@ -9,10 +9,10 @@ This folder is intentionally at the repo root. Do not move it under `Features/`,
 The core claim:
 
 ```txt
-After the agent observes a dashboard once, learned UI memory should reduce exploration on the next similar task.
+After the agent observes an application or website once, learned UI/UX memory should reduce exploration on the next similar task.
 ```
 
-The first demo is a synthetic deployment dashboard. The first run explores the UI. The second run uses learned app memory to find the failed deployment with fewer actions and screenshots.
+The first demo uses a synthetic deployment dashboard because it is deterministic and easy to score. That fixture is not the product boundary. The target is general app knowledge: surfaces, landmarks, controls, affordances, transitions, task recipes, no-ops, stale notes, and user-specific usage patterns across native apps and browser apps.
 
 For the larger system direction, see `SYSTEM_BLUEPRINT.md`. It lays out the path from screenshot ingestion to transition learning, activation bundles, and computer-use performance benchmarks.
 

@@ -7,15 +7,18 @@
 //
 
 import SwiftUI
+import AppKit
 
 struct AgentSettingsView: View {
     @ObservedObject private var store = AgentSettingsStore.shared
     @State private var showSystemPrompt = false
+    @State private var diagnosticsStatus = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             reasoningEffortRow
             cursorColorRow
+            contextDiagnosticsRow
             preferencesRow
             systemPromptRow
         }
@@ -63,6 +66,45 @@ struct AgentSettingsView: View {
                     .buttonStyle(.plain)
                     .help(color.displayName)
                 }
+            }
+        }
+    }
+
+    // MARK: Context diagnostics
+
+    private var contextDiagnosticsRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SettingRow(title: "Context") {
+                HStack(spacing: 8) {
+                    Button {
+                        openDirectory(ContextMemoryStore.defaultDirectoryURL)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .help("Open learned UI memory")
+
+                    Button {
+                        openDirectory(AgentMetricsStore.defaultDirectoryURL)
+                    } label: {
+                        Image(systemName: "chart.xyaxis.line")
+                    }
+                    .help("Open computer-use run metrics")
+
+                    Button {
+                        copyActivationContext()
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .help("Copy current activation context packet")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if !diagnosticsStatus.isEmpty {
+                Text(diagnosticsStatus)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1)
             }
         }
     }
@@ -130,6 +172,22 @@ struct AgentSettingsView: View {
                         .fill(Color.white.opacity(0.05))
                 )
             }
+        }
+    }
+
+    private func openDirectory(_ url: URL) {
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(url)
+        diagnosticsStatus = "Opened \(url.lastPathComponent)."
+    }
+
+    private func copyActivationContext() {
+        Task { @MainActor in
+            let context = await AgentInterfaces.context?.getRecentActivityContext() ?? ""
+            let text = context.isEmpty ? "No activation context available yet." : context
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            diagnosticsStatus = "Copied activation context."
         }
     }
 }

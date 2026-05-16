@@ -11,6 +11,8 @@ The agent should receive:
 - learned UI/UX memory for the current app
 - known routes, affordances, no-ops, and stale notes
 
+This is not dashboard-specific. Dashboards are only the first controlled fixture. The same memory model should apply to native apps, browser apps, editors, documents, settings screens, file pickers, chat tools, design tools, and internal tools.
+
 The hot path should not wait on a fresh live VLM call unless the cached/background memory is missing or clearly stale.
 
 ## System Loop
@@ -115,7 +117,7 @@ TransitionObservation {
 }
 ```
 
-Examples:
+Fixture examples:
 
 - `overview -- click Deployments in left nav --> deployments`
 - `overview -- click blank center area --> overview` as a no-op
@@ -231,7 +233,7 @@ The product wins when mode 2 or 3 reduces first-action latency and exploratory a
 3. Memory-driven planner that chooses next action from the bundle.
 4. Synthetic computer-use benchmark: no-memory vs memory.
 5. Live Gemini multi-screenshot eval.
-6. Local browser/dashboard benchmark with Playwright as a computer-use stand-in.
+6. Local browser app benchmark with Playwright as a computer-use stand-in.
 7. Real macOS capture integration.
 8. Real computer-use agent benchmark.
 
@@ -239,7 +241,7 @@ The product wins when mode 2 or 3 reduces first-action latency and exploratory a
 
 The smallest persuasive demo:
 
-1. User performs a task once in a synthetic dashboard.
+1. User performs a task once in a synthetic app.
 2. System learns surfaces, transitions, recipe, and no-op.
 3. Same goal is issued again.
 4. Agent chooses the right first action immediately from memory.
