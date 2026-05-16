@@ -71,13 +71,16 @@ public final class VoiceRecordingService {
     // MARK: - Private
 
     private func initWhisper() async {
+        // Model names follow argmaxinc/whisperkit-coreml folder paths
+        // (e.g. "openai_whisper-tiny"), not the OpenAI repo slugs.
+        let modelName = "openai_whisper-tiny"
         do {
-            whisper = try await WhisperKit(model: "openai/whisper-tiny")
-            NSLog("[VoiceRecordingService] WhisperKit ready (whisper-tiny)")
-            log.info("voice.whisper_ready model=whisper-tiny")
+            whisper = try await WhisperKit(model: modelName)
+            NSLog("[VoiceRecordingService] WhisperKit ready (\(modelName))")
+            log.info("voice.whisper_ready model=\(modelName, privacy: .public)")
         } catch {
             NSLog("[VoiceRecordingService] WhisperKit init failed: \(error)")
-            log.error("voice.whisper_failed error=\(String(describing: error), privacy: .public)")
+            log.error("voice.whisper_failed model=\(modelName, privacy: .public) error=\(String(describing: error), privacy: .public)")
         }
     }
 
