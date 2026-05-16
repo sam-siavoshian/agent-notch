@@ -19,6 +19,7 @@ public final class ContextCoordinator: RecentActivityContext {
     private let geminiObservationService: ContextGeminiObservationService
     private let aiObservationLog: ContextAIObservationLog
     private let geminiGate: ContextGeminiObservationGate
+    private let debugArtifactStore: ContextDebugArtifactStore
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
 
@@ -30,7 +31,8 @@ public final class ContextCoordinator: RecentActivityContext {
         ocrService: ContextOCRService = .shared,
         geminiObservationService: ContextGeminiObservationService = .shared,
         aiObservationLog: ContextAIObservationLog = .shared,
-        geminiGate: ContextGeminiObservationGate = ContextGeminiObservationGate()
+        geminiGate: ContextGeminiObservationGate = ContextGeminiObservationGate(),
+        debugArtifactStore: ContextDebugArtifactStore = .shared
     ) {
         self.capture = capture
         self.memoryStore = memoryStore
@@ -38,6 +40,7 @@ public final class ContextCoordinator: RecentActivityContext {
         self.geminiObservationService = geminiObservationService
         self.aiObservationLog = aiObservationLog
         self.geminiGate = geminiGate
+        self.debugArtifactStore = debugArtifactStore
         self.clickMonitor = ContextClickMonitor { location in
             Task {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
@@ -153,7 +156,7 @@ public final class ContextCoordinator: RecentActivityContext {
         }
 
         do {
-            let snapshot = try await capture.snapshot(quality: 0.55)
+            let snapshot = try await capture.snapshot(quality: 0.35)
             let recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
             let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
@@ -168,18 +171,20 @@ public final class ContextCoordinator: RecentActivityContext {
             )
             await store.record(contextSnapshot)
             await memoryStore.record(contextSnapshot)
-            scheduleGeminiObservation(for: contextSnapshot)
+            let captureArtifact = await debugArtifactStore.recordCapture(contextSnapshot)
+            scheduleGeminiObservation(for: contextSnapshot, captureArtifact: captureArtifact)
             NSLog("[ContextCoordinator] Captured \(trigger.rawValue) context for \(metadata.appName) with \(recognizedText.count) OCR text items")
         } catch {
             NSLog("[ContextCoordinator] Capture failed: \(error)")
         }
     }
 
-    private func scheduleGeminiObservation(for snapshot: ContextSnapshot) {
+    private func scheduleGeminiObservation(for snapshot: ContextSnapshot, captureArtifact: ContextCaptureDebugArtifact?) {
         let geminiObservationService = geminiObservationService
         let memoryStore = memoryStore
         let aiObservationLog = aiObservationLog
         let geminiGate = geminiGate
+        let debugPaths = ContextGeminiObservationService.debugPaths(for: snapshot.jpegData)
 
         Task(priority: .utility) { [snapshot] in
             let decision = await geminiGate.startDecision(
@@ -194,7 +199,15 @@ public final class ContextCoordinator: RecentActivityContext {
                     trigger: snapshot.trigger,
                     appName: snapshot.appName,
                     windowTitle: snapshot.windowTitle,
-                    reason: reason
+                    reason: reason,
+                    imageBytes: snapshot.jpegData.count,
+                    ocrCount: snapshot.recognizedText.count,
+                    imageHash: debugPaths.imageHash,
+                    captureImagePath: captureArtifact?.jpegPath,
+                    captureJSONPath: captureArtifact?.jsonPath,
+                    promptPath: debugPaths.promptPath,
+                    rawResponsePath: debugPaths.rawResponsePath,
+                    errorPath: debugPaths.errorPath
                 ))
                 NSLog("[ContextCoordinator] Gemini skipped for \(snapshot.appName) / \(snapshot.windowTitle): \(reason)")
                 return
@@ -208,7 +221,15 @@ public final class ContextCoordinator: RecentActivityContext {
                 trigger: snapshot.trigger,
                 appName: snapshot.appName,
                 windowTitle: snapshot.windowTitle,
-                reason: "queued for visual UI/UX observation"
+                reason: "queued for visual UI/UX observation",
+                imageBytes: snapshot.jpegData.count,
+                ocrCount: snapshot.recognizedText.count,
+                imageHash: debugPaths.imageHash,
+                captureImagePath: captureArtifact?.jpegPath,
+                captureJSONPath: captureArtifact?.jsonPath,
+                promptPath: debugPaths.promptPath,
+                rawResponsePath: debugPaths.rawResponsePath,
+                errorPath: debugPaths.errorPath
             ))
             NSLog("[ContextCoordinator] Gemini observation queued for \(snapshot.appName) / \(snapshot.windowTitle)")
             let observation = await geminiObservationService.observe(
@@ -232,7 +253,15 @@ public final class ContextCoordinator: RecentActivityContext {
                     appName: snapshot.appName,
                     windowTitle: snapshot.windowTitle,
                     reason: "Gemini returned no valid observation",
-                    latencyMilliseconds: elapsedMilliseconds
+                    latencyMilliseconds: elapsedMilliseconds,
+                    imageBytes: snapshot.jpegData.count,
+                    ocrCount: snapshot.recognizedText.count,
+                    imageHash: debugPaths.imageHash,
+                    captureImagePath: captureArtifact?.jpegPath,
+                    captureJSONPath: captureArtifact?.jsonPath,
+                    promptPath: debugPaths.promptPath,
+                    rawResponsePath: debugPaths.rawResponsePath,
+                    errorPath: debugPaths.errorPath
                 ))
                 return
             }
@@ -243,6 +272,12 @@ public final class ContextCoordinator: RecentActivityContext {
                 windowTitle: snapshot.windowTitle,
                 capturedAt: snapshot.capturedAt
             )
+            let controls = observation.visibleControls.map { control -> String in
+                if let actionHint = control.actionHint, !actionHint.isEmpty {
+                    return "\(control.label) (\(control.role), \(control.region)): \(actionHint)"
+                }
+                return "\(control.label) (\(control.role), \(control.region))"
+            }
             await aiObservationLog.record(ContextAIObservationEvent(
                 status: .completed,
                 trigger: snapshot.trigger,
@@ -254,6 +289,29 @@ public final class ContextCoordinator: RecentActivityContext {
                 confidence: observation.confidence,
                 surfaceLabel: observation.surfaceLabel,
                 summary: observation.summary,
+                screenType: observation.screenType,
+                primaryTask: observation.primaryTask,
+                layoutSummary: observation.layoutSummary,
+                contentSummary: observation.contentSummary,
+                controls: controls,
+                landmarks: observation.landmarks,
+                entities: observation.entities,
+                affordances: observation.affordances,
+                stateIndicators: observation.stateIndicators,
+                navigationPaths: observation.navigationPaths,
+                dataRegions: observation.dataRegions,
+                workflowHints: observation.workflowHints,
+                negativeCues: observation.negativeCues,
+                memoryCandidates: observation.memoryCandidates,
+                uncertainty: observation.uncertainty,
+                imageBytes: snapshot.jpegData.count,
+                ocrCount: snapshot.recognizedText.count,
+                imageHash: debugPaths.imageHash,
+                captureImagePath: captureArtifact?.jpegPath,
+                captureJSONPath: captureArtifact?.jsonPath,
+                promptPath: debugPaths.promptPath,
+                rawResponsePath: debugPaths.rawResponsePath,
+                errorPath: debugPaths.errorPath,
                 controlsCount: observation.visibleControls.count,
                 affordancesCount: observation.affordances.count,
                 entitiesCount: observation.entities.count

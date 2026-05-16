@@ -89,6 +89,10 @@ struct ContextDebugView: View {
             iconButton("waveform.path.ecg", help: "Open AI observation log") {
                 openDirectory(ContextAIObservationLog.defaultDirectoryURL)
             }
+
+            iconButton("photo.stack", help: "Open persisted capture artifacts") {
+                openDirectory(ContextDebugArtifactStore.defaultDirectoryURL)
+            }
         }
     }
 
@@ -274,6 +278,7 @@ struct ContextDebugView: View {
                     line += " summary=\"\(summary)\""
                 }
                 lines.append(line)
+                appendDetails(for: event, to: &lines)
             }
         }
 
@@ -324,16 +329,38 @@ struct ContextDebugView: View {
                     .lineLimit(1)
             }
 
-            Text(event.summary ?? event.reason)
+            Text(primaryEventText(event))
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.48))
                 .lineLimit(3)
                 .textSelection(.enabled)
 
             if event.status == .completed {
-                Text("\(event.controlsCount) controls - \(event.affordancesCount) affordances - \(event.entitiesCount) entities\(confidenceText(event.confidence))")
+                Text("\(event.controlsCount) controls - \(event.affordancesCount) affordances - \(event.entitiesCount) entities\(confidenceText(event.confidence))\(imageText(event))")
                     .font(.system(size: 9.5, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.38))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    detailLine("Task", event.primaryTask)
+                    detailLine("Layout", event.layoutSummary)
+                    detailLine("Content", event.contentSummary)
+                    detailList("Controls", event.controls)
+                    detailList("Landmarks", event.landmarks)
+                    detailList("State", event.stateIndicators)
+                    detailList("Navigation", event.navigationPaths)
+                    detailList("Data", event.dataRegions)
+                    detailList("Workflow", event.workflowHints)
+                    detailList("Memory", event.memoryCandidates)
+                    detailList("Entities", event.entities)
+                    detailList("Affordances", event.affordances)
+                    detailList("Negative", event.negativeCues)
+                    detailList("Uncertain", event.uncertainty)
+                    detailLine("Capture image", event.captureImagePath)
+                    detailLine("Capture JSON", event.captureJSONPath)
+                    detailLine("Prompt", event.promptPath)
+                    detailLine("Raw response", event.rawResponsePath)
+                    detailLine("Error", event.errorPath)
+                }
             }
         }
         .padding(7)
@@ -455,6 +482,89 @@ struct ContextDebugView: View {
     private func confidenceText(_ confidence: Double?) -> String {
         guard let confidence else { return "" }
         return " - conf \(String(format: "%.2f", confidence))"
+    }
+
+    private func imageText(_ event: ContextAIObservationEvent) -> String {
+        var parts: [String] = []
+        if let imageBytes = event.imageBytes {
+            parts.append("\(imageBytes / 1024)KB img")
+        }
+        if let ocrCount = event.ocrCount {
+            parts.append("\(ocrCount) OCR")
+        }
+        return parts.isEmpty ? "" : " - \(parts.joined(separator: ", "))"
+    }
+
+    private func primaryEventText(_ event: ContextAIObservationEvent) -> String {
+        if let summary = event.summary, !summary.isEmpty {
+            return summary
+        }
+        return event.reason
+    }
+
+    @ViewBuilder
+    private func detailLine(_ label: String, _ value: String?) -> some View {
+        if let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Text("\(label): \(value)")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.46))
+                .lineLimit(3)
+                .textSelection(.enabled)
+        }
+    }
+
+    @ViewBuilder
+    private func detailList(_ label: String, _ values: [String]?) -> some View {
+        let cleanValues = (values ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !cleanValues.isEmpty {
+            Text("\(label): \(cleanValues.prefix(8).joined(separator: " | "))")
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(4)
+                .textSelection(.enabled)
+        }
+    }
+
+    private func appendDetails(for event: ContextAIObservationEvent, to lines: inout [String]) {
+        append("screenType", event.screenType, to: &lines)
+        append("primaryTask", event.primaryTask, to: &lines)
+        append("layoutSummary", event.layoutSummary, to: &lines)
+        append("contentSummary", event.contentSummary, to: &lines)
+        append("controls", event.controls, to: &lines)
+        append("landmarks", event.landmarks, to: &lines)
+        append("stateIndicators", event.stateIndicators, to: &lines)
+        append("navigationPaths", event.navigationPaths, to: &lines)
+        append("dataRegions", event.dataRegions, to: &lines)
+        append("workflowHints", event.workflowHints, to: &lines)
+        append("memoryCandidates", event.memoryCandidates, to: &lines)
+        append("entities", event.entities, to: &lines)
+        append("affordances", event.affordances, to: &lines)
+        append("negativeCues", event.negativeCues, to: &lines)
+        append("uncertainty", event.uncertainty, to: &lines)
+        append("imageHash", event.imageHash, to: &lines)
+        append("captureImagePath", event.captureImagePath, to: &lines)
+        append("captureJSONPath", event.captureJSONPath, to: &lines)
+        append("promptPath", event.promptPath, to: &lines)
+        append("rawResponsePath", event.rawResponsePath, to: &lines)
+        append("errorPath", event.errorPath, to: &lines)
+    }
+
+    private func append(_ label: String, _ value: String?, to lines: inout [String]) {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        lines.append("  \(label): \(value)")
+    }
+
+    private func append(_ label: String, _ values: [String]?, to lines: inout [String]) {
+        let cleanValues = (values ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleanValues.isEmpty else { return }
+        lines.append("  \(label):")
+        for value in cleanValues.prefix(16) {
+            lines.append("    - \(value)")
+        }
     }
 }
 

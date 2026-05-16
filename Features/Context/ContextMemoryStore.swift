@@ -244,7 +244,7 @@ public actor ContextMemoryStore {
 
         memory.surfaces[index].semanticHighlights = mergedHighlights(
             existing: memory.surfaces[index].semanticHighlights,
-            new: [observation.summary],
+            new: semanticHighlights(from: observation),
             maxCount: 8
         )
         memory.surfaces[index].controlHighlights = mergedHighlights(
@@ -254,14 +254,23 @@ public actor ContextMemoryStore {
         )
         memory.surfaces[index].affordanceHighlights = mergedHighlights(
             existing: memory.surfaces[index].affordanceHighlights,
-            new: observation.affordances,
+            new: observation.affordances + observation.workflowHints + observation.navigationPaths,
             maxCount: 16
         )
         memory.surfaces[index].uncertaintyHighlights = mergedHighlights(
             existing: memory.surfaces[index].uncertaintyHighlights,
-            new: observation.uncertainty,
+            new: observation.uncertainty + observation.negativeCues,
             maxCount: 10
         )
+    }
+
+    private func semanticHighlights(from observation: ContextGeminiObservation) -> [String] {
+        [
+            observation.summary,
+            observation.primaryTask.isEmpty ? nil : "Task: \(observation.primaryTask)",
+            observation.layoutSummary.isEmpty ? nil : "Layout: \(observation.layoutSummary)",
+            observation.contentSummary.isEmpty ? nil : "Content: \(observation.contentSummary)"
+        ].compactMap { $0 } + observation.memoryCandidates + observation.stateIndicators + observation.dataRegions
     }
 
     private func persist(_ memory: ContextAppMemory, appKey: String) {

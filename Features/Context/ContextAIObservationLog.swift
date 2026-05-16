@@ -36,6 +36,29 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
     public let confidence: Double?
     public let surfaceLabel: String?
     public let summary: String?
+    public let screenType: String?
+    public let primaryTask: String?
+    public let layoutSummary: String?
+    public let contentSummary: String?
+    public let controls: [String]?
+    public let landmarks: [String]?
+    public let entities: [String]?
+    public let affordances: [String]?
+    public let stateIndicators: [String]?
+    public let navigationPaths: [String]?
+    public let dataRegions: [String]?
+    public let workflowHints: [String]?
+    public let negativeCues: [String]?
+    public let memoryCandidates: [String]?
+    public let uncertainty: [String]?
+    public let imageBytes: Int?
+    public let ocrCount: Int?
+    public let imageHash: String?
+    public let captureImagePath: String?
+    public let captureJSONPath: String?
+    public let promptPath: String?
+    public let rawResponsePath: String?
+    public let errorPath: String?
     public let controlsCount: Int
     public let affordancesCount: Int
     public let entitiesCount: Int
@@ -56,6 +79,29 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         confidence: Double? = nil,
         surfaceLabel: String? = nil,
         summary: String? = nil,
+        screenType: String? = nil,
+        primaryTask: String? = nil,
+        layoutSummary: String? = nil,
+        contentSummary: String? = nil,
+        controls: [String]? = nil,
+        landmarks: [String]? = nil,
+        entities: [String]? = nil,
+        affordances: [String]? = nil,
+        stateIndicators: [String]? = nil,
+        navigationPaths: [String]? = nil,
+        dataRegions: [String]? = nil,
+        workflowHints: [String]? = nil,
+        negativeCues: [String]? = nil,
+        memoryCandidates: [String]? = nil,
+        uncertainty: [String]? = nil,
+        imageBytes: Int? = nil,
+        ocrCount: Int? = nil,
+        imageHash: String? = nil,
+        captureImagePath: String? = nil,
+        captureJSONPath: String? = nil,
+        promptPath: String? = nil,
+        rawResponsePath: String? = nil,
+        errorPath: String? = nil,
         controlsCount: Int = 0,
         affordancesCount: Int = 0,
         entitiesCount: Int = 0
@@ -75,6 +121,29 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         self.confidence = confidence
         self.surfaceLabel = surfaceLabel
         self.summary = summary
+        self.screenType = screenType
+        self.primaryTask = primaryTask
+        self.layoutSummary = layoutSummary
+        self.contentSummary = contentSummary
+        self.controls = controls
+        self.landmarks = landmarks
+        self.entities = entities
+        self.affordances = affordances
+        self.stateIndicators = stateIndicators
+        self.navigationPaths = navigationPaths
+        self.dataRegions = dataRegions
+        self.workflowHints = workflowHints
+        self.negativeCues = negativeCues
+        self.memoryCandidates = memoryCandidates
+        self.uncertainty = uncertainty
+        self.imageBytes = imageBytes
+        self.ocrCount = ocrCount
+        self.imageHash = imageHash
+        self.captureImagePath = captureImagePath
+        self.captureJSONPath = captureJSONPath
+        self.promptPath = promptPath
+        self.rawResponsePath = rawResponsePath
+        self.errorPath = errorPath
         self.controlsCount = controlsCount
         self.affordancesCount = affordancesCount
         self.entitiesCount = entitiesCount

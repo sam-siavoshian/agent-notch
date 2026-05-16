@@ -13,7 +13,7 @@ public actor ContextGeminiObservationService {
     public static let shared = ContextGeminiObservationService()
 
     public static let defaultModel = "gemini-3.1-flash-lite"
-    public static let promptVersion = "context-gemini-observation-v1"
+    public static let promptVersion = "context-gemini-observation-v3"
 
     public static var isAPIKeyConfigured: Bool {
         guard let apiKey = ProcessInfo.processInfo.environment["GEMINI_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines) else {
@@ -29,8 +29,21 @@ public actor ContextGeminiObservationService {
             .appendingPathComponent("ContextGeminiCache", isDirectory: true)
     }
 
+    public static func debugPaths(for jpegData: Data) -> ContextGeminiDebugPaths {
+        let imageHash = sha256Hex(jpegData)
+        let shortHash = String(imageHash.prefix(16))
+        let debugDirectoryURL = defaultCacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
+        return ContextGeminiDebugPaths(
+            imageHash: imageHash,
+            promptPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-prompt.txt").path,
+            rawResponsePath: debugDirectoryURL.appendingPathComponent("\(shortHash)-raw-response.json").path,
+            errorPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-error.txt").path
+        )
+    }
+
     private let apiKeyProvider: @Sendable () -> String?
     private let cacheDirectoryURL: URL
+    private let debugDirectoryURL: URL
     private let endpointBaseURL: URL
     private let model: String
     private let session: URLSession
@@ -46,15 +59,17 @@ public actor ContextGeminiObservationService {
     ) {
         self.model = model
         self.cacheDirectoryURL = cacheDirectoryURL
+        self.debugDirectoryURL = cacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
         self.endpointBaseURL = endpointBaseURL
         self.session = session
         self.apiKeyProvider = apiKeyProvider
         try? FileManager.default.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: debugDirectoryURL, withIntermediateDirectories: true)
     }
 
     public func observe(_ input: ContextGeminiObservationInput) async -> ContextGeminiObservation? {
         let imageHash = Self.sha256Hex(input.jpegData)
-        let cacheURL = cacheURL(imageHash: imageHash)
+        let cacheURL = cacheURL(imageHash: imageHash, input: input)
 
         if let cached = readCachedObservation(at: cacheURL) {
             var observation = cached
@@ -69,6 +84,7 @@ public actor ContextGeminiObservationService {
 
         do {
             let prompt = Self.prompt(for: input)
+            writeDebugText(prompt, imageHash: imageHash, suffix: "prompt.txt")
             let request = GeminiGenerateContentRequest(
                 contents: [
                     .init(parts: [
@@ -78,16 +94,18 @@ public actor ContextGeminiObservationService {
                 ],
                 generationConfig: .init(
                     temperature: 0,
-                    maxOutputTokens: 1600,
+                    maxOutputTokens: 3200,
                     responseMimeType: "application/json"
                 )
             )
 
-            let response = try await send(request, apiKey: apiKey)
-            guard let text = response.firstText else {
+            let result = try await send(request, apiKey: apiKey)
+            writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json")
+            guard let text = result.response.firstText else {
                 NSLog("[ContextGeminiObservationService] Gemini response had no text candidate.")
                 return nil
             }
+            writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json")
 
             let observation = try Self.parseObservation(
                 text,
@@ -99,6 +117,7 @@ public actor ContextGeminiObservationService {
             writeCachedObservation(observation, to: cacheURL)
             return observation
         } catch {
+            writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt")
             NSLog("[ContextGeminiObservationService] Gemini observation failed: \(error)")
             return nil
         }
@@ -124,7 +143,7 @@ public actor ContextGeminiObservationService {
         ))
     }
 
-    private func send(_ request: GeminiGenerateContentRequest, apiKey: String) async throws -> GeminiGenerateContentResponse {
+    private func send(_ request: GeminiGenerateContentRequest, apiKey: String) async throws -> GeminiSendResult {
         let base = endpointBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(base)/\(model):generateContent") else {
             throw Error(status: nil, body: "Invalid Gemini endpoint URL.", underlying: nil)
@@ -155,15 +174,34 @@ public actor ContextGeminiObservationService {
         }
 
         do {
-            return try Self.decoder.decode(GeminiGenerateContentResponse.self, from: data)
+            return GeminiSendResult(
+                response: try Self.decoder.decode(GeminiGenerateContentResponse.self, from: data),
+                rawBody: String(data: data, encoding: .utf8) ?? ""
+            )
         } catch {
             throw Error(status: http.statusCode, body: String(data: data, encoding: .utf8), underlying: error)
         }
     }
 
-    private func cacheURL(imageHash: String) -> URL {
-        let key = Self.sha256Hex("\(imageHash)|\(Self.promptVersion)|\(model)".data(using: .utf8) ?? Data())
+    private func cacheURL(imageHash: String, input: ContextGeminiObservationInput) -> URL {
+        let metadataHash = Self.sha256Hex(Self.cacheMetadataString(for: input).data(using: .utf8) ?? Data())
+        let key = Self.sha256Hex("\(imageHash)|\(metadataHash)|\(Self.promptVersion)|\(model)".data(using: .utf8) ?? Data())
         return cacheDirectoryURL.appendingPathComponent("\(key).json")
+    }
+
+    private static func cacheMetadataString(for input: ContextGeminiObservationInput) -> String {
+        let usefulText = ContextTextSignalFilter.usefulText(from: input.recognizedText, maxCount: 32)
+        let metadata = input.metadata.keys.sorted()
+            .map { "\($0)=\(input.metadata[$0] ?? "")" }
+            .joined(separator: "|")
+        return [
+            input.appName ?? "",
+            input.windowTitle ?? "",
+            input.width.map(String.init) ?? "",
+            input.height.map(String.init) ?? "",
+            usefulText.joined(separator: "|"),
+            metadata
+        ].joined(separator: "\n")
     }
 
     private func readCachedObservation(at url: URL) -> ContextGeminiObservation? {
@@ -180,28 +218,66 @@ public actor ContextGeminiObservationService {
         }
     }
 
+    private func writeDebugText(_ text: String, imageHash: String, suffix: String) {
+        let shortHash = String(imageHash.prefix(16))
+        let url = debugDirectoryURL.appendingPathComponent("\(shortHash)-\(suffix)")
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            try text.write(to: debugDirectoryURL.appendingPathComponent("latest-\(suffix)"), atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("[ContextGeminiObservationService] Failed to write Gemini debug text: \(error)")
+        }
+    }
+
     private static func prompt(for input: ContextGeminiObservationInput) -> String {
         let metadataLines = metadataLines(for: input)
         return """
-        You are observing a macOS screenshot for a computer-use agent.
-        Extract durable UI/UX facts that help the agent operate this app later.
-        Use only visible evidence plus the provided metadata. Prefer uncertainty over guessing.
+        You are building a reusable UI/UX memory layer for a macOS computer-use agent.
+        Observe this screenshot like a careful operator learning how the visible app works.
+        Extract durable, action-relevant facts that would reduce future exploration.
+
+        Prioritize:
+        - visible navigation structure, tabs, panels, sidebars, toolbar regions, overlays, tables, forms, lists, modals, search fields, and status chips
+        - exact visible control labels and what using them likely does
+        - page/surface state: selected tabs, filters, active records, empty/error/loading states, warnings, disabled controls
+        - visible data objects/entities that may be referenced later
+        - workflow hints: how a user would accomplish tasks from this surface
+        - negative cues: things that look clickable but are probably status text, no-op areas, stale overlays, debug chrome, or unrelated background windows
+        - memory candidates: durable facts a future computer-use agent should remember
+
+        Use only visible evidence plus the metadata. Prefer uncertainty over guessing.
+        Do not describe private content beyond short visible labels/entities needed for UI operation.
+        If an AgentNotch context/debug overlay is visible, separate overlay facts from the underlying app facts.
+        Reject generic observations. Do not say "there is a sidebar" unless you name what is in it and why it matters.
+        Prefer action memory over visual description.
 
         Return strict JSON only with these fields:
         appLabel: string
         windowTitle: string
-        surfaceID: short stable slug for this visible surface
+        surfaceID: short stable slug for this visible surface, based on visible app/product/screen, not transient window text
         surfaceLabel: short human label for the surface
-        summary: one sentence
+        screenType: short category such as dashboard, document, chat, terminal, browser-page, settings, modal, table, form, editor, overlay
+        primaryTask: what the user appears able to do here, one short sentence
+        layoutSummary: concise map of important regions and what each region contains
+        contentSummary: concise summary of visible page/content state, avoiding noisy OCR fragments
+        summary: one dense sentence combining what this screen is and why it matters operationally
         visibleControls: array of { "label": string, "role": string, "region": string, "actionHint": string, "confidence": number }
         landmarks: array of short strings
         entities: array of short strings
         affordances: array of short strings
+        stateIndicators: array of short strings
+        navigationPaths: array of short strings, e.g. "left sidebar > Settings opens preferences"
+        dataRegions: array of short strings, e.g. "center table lists deployments with status chips"
+        workflowHints: array of short strings, e.g. "Use Filters to narrow failed deployments"
+        negativeCues: array of short strings, e.g. "debug overlay partially obscures page"
+        memoryCandidates: array of short durable facts formatted like "stable: Settings is in the left sidebar" or "transient: debug overlay is covering the page"
         uncertainty: array of short strings
         confidence: number from 0 to 1
 
-        Use approximate regions such as top-bar, top-right, left-sidebar, center-table, right-panel, bottom-sheet, modal.
-        Keep strings short. Do not invent hidden controls. If metadata conflicts with the image, mention that in uncertainty.
+        Use approximate regions such as top-bar, top-right, left-sidebar, center-table, right-panel, bottom-sheet, modal, overlay, browser-chrome, terminal.
+        Keep each string short but information-dense. Return up to 20 controls, 16 landmarks, 24 entities, and 12 items for each other array.
+        Every workflowHint should name a visible control, region, or state. Every negativeCue should explain what mistaken action it prevents.
+        Do not invent hidden controls. If metadata conflicts with the image, mention that in uncertainty.
 
         Metadata:
         \(metadataLines)
@@ -219,12 +295,10 @@ public actor ContextGeminiObservationService {
         if let width = input.width, let height = input.height {
             lines.append("- Screenshot size: \(width)x\(height)")
         }
-        let ocrItems = input.recognizedText
-            .prefix(24)
-            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let ocrItems = ContextTextSignalFilter.usefulText(from: input.recognizedText, maxCount: 32)
         if !ocrItems.isEmpty {
-            lines.append("- OCR text: \(ocrItems.joined(separator: " | "))")
+            lines.append("- Useful OCR text: \(ocrItems.joined(separator: " | "))")
+            lines.append("- Raw OCR item count: \(input.recognizedText.count)")
         }
         for key in input.metadata.keys.sorted() {
             guard let value = clean(input.metadata[key]) else { continue }
@@ -260,6 +334,10 @@ public actor ContextGeminiObservationService {
             surfaceID: clean(payload.surfaceID) ?? slug([appLabel, surfaceLabel].joined(separator: "-")),
             surfaceLabel: surfaceLabel,
             summary: clean(payload.summary) ?? "Screen observation unavailable.",
+            screenType: clean(payload.screenType) ?? "",
+            primaryTask: clean(payload.primaryTask) ?? "",
+            layoutSummary: clean(payload.layoutSummary) ?? "",
+            contentSummary: clean(payload.contentSummary) ?? "",
             visibleControls: payload.visibleControls.prefix(24).map {
                 ContextGeminiObservation.VisibleControl(
                     label: clean($0.label) ?? "Unlabeled control",
@@ -272,6 +350,12 @@ public actor ContextGeminiObservationService {
             landmarks: cleanStrings(payload.landmarks, maxCount: 16),
             entities: cleanStrings(payload.entities, maxCount: 24),
             affordances: cleanStrings(payload.affordances, maxCount: 16),
+            stateIndicators: cleanStrings(payload.stateIndicators, maxCount: 12),
+            navigationPaths: cleanStrings(payload.navigationPaths, maxCount: 12),
+            dataRegions: cleanStrings(payload.dataRegions, maxCount: 12),
+            workflowHints: cleanStrings(payload.workflowHints, maxCount: 12),
+            negativeCues: cleanStrings(payload.negativeCues, maxCount: 12),
+            memoryCandidates: cleanStrings(payload.memoryCandidates, maxCount: 16),
             uncertainty: cleanStrings(payload.uncertainty, maxCount: 12),
             confidence: clamp(payload.confidence)
         )
@@ -367,10 +451,20 @@ private struct ObservationPayload: Decodable {
     var surfaceID: String?
     var surfaceLabel: String?
     var summary: String?
+    var screenType: String?
+    var primaryTask: String?
+    var layoutSummary: String?
+    var contentSummary: String?
     var visibleControls: [ControlPayload]
     var landmarks: [String]
     var entities: [String]
     var affordances: [String]
+    var stateIndicators: [String]
+    var navigationPaths: [String]
+    var dataRegions: [String]
+    var workflowHints: [String]
+    var negativeCues: [String]
+    var memoryCandidates: [String]
     var uncertainty: [String]
     var confidence: Double?
 
@@ -382,12 +476,22 @@ private struct ObservationPayload: Decodable {
         case surfaceId
         case surfaceLabel
         case summary
+        case screenType
+        case primaryTask
+        case layoutSummary
+        case contentSummary
         case visibleControls
         case landmarks
         case entities
         case visibleEntities
         case affordances
         case likelyAffordances
+        case stateIndicators
+        case navigationPaths
+        case dataRegions
+        case workflowHints
+        case negativeCues
+        case memoryCandidates
         case uncertainty
         case confidence
     }
@@ -401,6 +505,10 @@ private struct ObservationPayload: Decodable {
             ?? container.decodeIfPresent(String.self, forKey: .surfaceId)
         surfaceLabel = try container.decodeIfPresent(String.self, forKey: .surfaceLabel)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        screenType = try container.decodeIfPresent(String.self, forKey: .screenType)
+        primaryTask = try container.decodeIfPresent(String.self, forKey: .primaryTask)
+        layoutSummary = try container.decodeIfPresent(String.self, forKey: .layoutSummary)
+        contentSummary = try container.decodeIfPresent(String.self, forKey: .contentSummary)
         visibleControls = try container.decodeIfPresent([ControlPayload].self, forKey: .visibleControls) ?? []
         landmarks = try container.decodeStringArrayIfPresent(forKey: .landmarks)
         entities = try container.decodeStringArrayIfPresent(forKey: .entities)
@@ -411,9 +519,22 @@ private struct ObservationPayload: Decodable {
         if affordances.isEmpty {
             affordances = try container.decodeStringArrayIfPresent(forKey: .likelyAffordances)
         }
+        stateIndicators = try container.decodeStringArrayIfPresent(forKey: .stateIndicators)
+        navigationPaths = try container.decodeStringArrayIfPresent(forKey: .navigationPaths)
+        dataRegions = try container.decodeStringArrayIfPresent(forKey: .dataRegions)
+        workflowHints = try container.decodeStringArrayIfPresent(forKey: .workflowHints)
+        negativeCues = try container.decodeStringArrayIfPresent(forKey: .negativeCues)
+        memoryCandidates = try container.decodeStringArrayIfPresent(forKey: .memoryCandidates)
         uncertainty = try container.decodeStringArrayIfPresent(forKey: .uncertainty)
         confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
     }
+}
+
+public struct ContextGeminiDebugPaths: Sendable {
+    public let imageHash: String
+    public let promptPath: String
+    public let rawResponsePath: String
+    public let errorPath: String
 }
 
 private struct ControlPayload: Decodable {
@@ -487,6 +608,11 @@ private struct GeminiGenerateContentResponse: Decodable {
     struct PartText: Decodable {
         var text: String?
     }
+}
+
+private struct GeminiSendResult {
+    var response: GeminiGenerateContentResponse
+    var rawBody: String
 }
 
 private extension KeyedDecodingContainer {
