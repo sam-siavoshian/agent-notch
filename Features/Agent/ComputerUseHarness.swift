@@ -14,7 +14,7 @@ import AppKit
 public final class ComputerUseHarness {
     public static let shared = ComputerUseHarness()
 
-    public var modelID: String = AnthropicModel.haiku45
+    public var modelID: String = AnthropicModel.sonnet46
     public var fallbackModelID: String = AnthropicModel.sonnet46
     public var maxTurns: Int = 10
     public var maxOutputTokens: Int = 1024

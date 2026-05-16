@@ -141,6 +141,8 @@ struct NotchContentView: View {
                     ContextDebugView()
                 }
             }
+            .id(selected)
+            .transition(.scale(scale: 0.8, anchor: .top).combined(with: .opacity))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
