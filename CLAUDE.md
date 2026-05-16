@@ -87,12 +87,13 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `NotchContentView.swift` | Root view — open/closed (420×280), Home/Settings tabs, Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
+| `NotchContentView.swift` | Root view — open/closed (420×280), Home/Settings/Spotify tabs, Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
 | `NotchHomeView.swift` | Home tab — agent orb, last transcript, activity feed |
 | `AgentSettingsView.swift` | Settings tab — 4 knobs + Advanced section (system prompt, context diagnostics) |
 | `ClosedNotchView.swift` | Resting dot/waveform in the closed notch |
 | `NotchShape.swift` | Custom `Shape` for the notch geometry |
 | `AgentStateView.swift` | Standalone status row (available but not used in current tab layout) |
+| `SoftPill.swift` | Reusable pill-style UI component used across Notch views |
 
 ### Features/Cursor/ (Sam)
 
@@ -110,19 +111,21 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `ContextCoordinator.swift` | Entry point; implements `RecentActivityContext`; owns click-triggered capture |
+| `ContextCoordinator.swift` | Entry point; implements `RecentActivityContext`; owns click-triggered + app-switch capture |
 | `ContextClickMonitor.swift` | Debounced click hook via Accessibility API |
+| `ContextAppSwitchMonitor.swift` | Capture trigger on `NSWorkspace.didActivateApplicationNotification` (v2 stretch, implemented) |
 | `ContextSnapshotStore.swift` | Rolling buffer of screenshots (max 20) |
 | `ContextMemoryStore.swift` | Learned UI memory persistence |
 | `ContextOCRService.swift` | Native OCR via Vision framework |
 | `ContextGeminiObservationService.swift` | Gemini multimodal analysis per screenshot |
 | `ContextGeminiObservationModels.swift` | Input/output types for Gemini calls |
-| `ContextActivationBuilder.swift` | Converts screenshot buffer → compact prompt packet |
+| `ContextActivationBuilder.swift` | Converts screenshot buffer → compact `ContextActivationPacket` (recentTimeline, observedTransitions, learnedUIMemory, firstActionGuidance) |
 | `ContextMemoryRenderer.swift` | Renders learned UI memory to text |
 | `ContextModels.swift` | Data types: `ContextSnapshot`, `ContextDiagnostics`, etc. |
 | `ContextWindowMetadataReader.swift` | Reads active app name + window title |
 | `ContextTextSignalFilter.swift` | Cleans OCR output |
 | `ContextAIObservationLog.swift` | In-memory log of Gemini observation events; includes `ContextGeminiObservationGate` (rate limiter) |
+| `ContextDebugArtifactStore.swift` | Persists debug artifacts (images, prompts, responses) for Dev Tools inspection |
 | `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
 | `ContextDebugView.swift` | Dev Tools console — pause/resume gathering, overview, injected packet, captures/OCR, Gemini I/O, learned memory, metrics |
 | `ContextPerformanceReporter.swift` | Reads stored artifacts and summarizes diagnostics |
@@ -146,6 +149,18 @@ All features should use these — never duplicate them.
 | `OnboardingView.swift` | Three permission cards (Accessibility, Screen Recording, Microphone) |
 | `OnboardingWindowController.swift` | Presents onboarding at first launch; calls `bootAgent()` on dismiss |
 | `PermissionChecker.swift` | Polls permission statuses live |
+| `LucideIcons.swift` | Lucide icon name constants used by onboarding cards |
+
+### Features/Music/ (Wyatt)
+
+| File | What it is |
+|---|---|
+| `NotchMusicView.swift` | Spotify tab in the notch — now-playing card + lyrics scroll |
+| `SpotifyController.swift` | Reads Spotify playback state via AppleScript; subscribes to `com.spotify.client.PlaybackStateChanged` |
+| `SpotifyNowPlayingView.swift` | Now-playing row: album art, track name, artist |
+| `LyricsView.swift` | Scrolling lyrics display |
+| `LyricsService.swift` | Fetches lyrics for the current track |
+| `AppleScriptHelper.swift` | Thin AppleScript execution wrapper |
 
 ---
 

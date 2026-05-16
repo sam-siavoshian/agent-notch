@@ -97,16 +97,20 @@ public final class VoiceRecordingService {
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
 
+        let file: AVAudioFile
         do {
-            audioFile = try AVAudioFile(forWriting: url, settings: format.settings)
+            file = try AVAudioFile(forWriting: url, settings: format.settings)
+            audioFile = file
         } catch {
             NSLog("[VoiceRecordingService] Failed to create audio file: \(error)")
             AgentState.shared.set(.idle)
             return
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            try? self?.audioFile?.write(from: buffer)
+        // Capture `file` by value so the tap closure holds its own strong
+        // reference independent of self.audioFile (which gets nilled on stop).
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            try? file.write(from: buffer)
         }
 
         do {
@@ -144,6 +148,7 @@ public final class VoiceRecordingService {
         AgentState.shared.set(.listening, detail: "Transcribing…")
 
         var transcript = ""
+        var transcriptError: Error? = nil
         if let whisper {
             do {
                 let results = try await whisper.transcribe(audioPath: url.path)
@@ -151,6 +156,7 @@ public final class VoiceRecordingService {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             } catch {
                 NSLog("[VoiceRecordingService] Transcription failed: \(error)")
+                transcriptError = error
             }
         }
 
@@ -161,7 +167,8 @@ public final class VoiceRecordingService {
 
         guard !transcript.isEmpty else {
             NSLog("[VoiceRecordingService] No transcript — agent not fired.")
-            AgentState.shared.set(.error(message: "Nothing captured — try speaking again"))
+            let msg = transcriptError != nil ? "Transcription error — try again" : "Nothing captured — try speaking again"
+            AgentState.shared.set(.error(message: msg))
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(2))
                 AgentState.shared.set(.idle)

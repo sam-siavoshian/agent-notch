@@ -521,9 +521,9 @@ public actor ContextMemoryStore {
             let data = try Self.jsonlEncoder.encode(record) + Data([0x0A])
             if FileManager.default.fileExists(atPath: observationsURL.path) {
                 let handle = try FileHandle(forWritingTo: observationsURL)
+                defer { try? handle.close() }
                 try handle.seekToEnd()
                 try handle.write(contentsOf: data)
-                try handle.close()
             } else {
                 try data.write(to: observationsURL, options: .atomic)
             }

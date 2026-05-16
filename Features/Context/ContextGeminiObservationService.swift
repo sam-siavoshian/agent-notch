@@ -81,10 +81,13 @@ public actor ContextGeminiObservationService {
     private let thinkingLevelOverride: String?
     private let session: URLSession
 
+    // swiftlint:disable:next force_unwrapping — hardcoded literal, never nil
+    public static let defaultEndpointBaseURL = URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!
+
     public init(
         model: String = ContextGeminiObservationService.configuredModel,
         cacheDirectoryURL: URL = ContextGeminiObservationService.defaultCacheDirectoryURL,
-        endpointBaseURL: URL = URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!,
+        endpointBaseURL: URL = ContextGeminiObservationService.defaultEndpointBaseURL,
         mediaResolutionOverride: String? = nil,
         thinkingLevelOverride: String? = nil,
         session: URLSession = .shared,

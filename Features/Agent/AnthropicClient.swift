@@ -23,10 +23,13 @@ public struct AnthropicClient: Sendable {
     public var endpoint: URL
     public var betaHeaders: [String]
 
+    // swiftlint:disable:next force_unwrapping — hardcoded literal, never nil
+    public static let defaultEndpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+
     public init(
         apiKey: String,
         session: URLSession = .shared,
-        endpoint: URL = URL(string: "https://api.anthropic.com/v1/messages")!,
+        endpoint: URL = AnthropicClient.defaultEndpoint,
         betaHeaders: [String] = ["computer-use-2025-11-24"]
     ) {
         self.apiKey = apiKey

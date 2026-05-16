@@ -36,12 +36,12 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 
 **Approach:** Hybrid screenshot → summary pipeline.
 
-1. **Capture trigger:** Screenshots are taken on **click events**, not on a 5-second timer. Time-based is stale (user watching Netflix = 720 useless screenshots/hour) and brittle. Click-based is deterministic and free of redundancy.
+1. **Capture trigger:** Screenshots are taken on **click events** and **app switches**, not on a 5-second timer. Time-based is stale (user watching Netflix = 720 useless screenshots/hour) and brittle. Click-based is deterministic and free of redundancy.
 1. **Debounce:** ~1 second between captures to avoid spam from rapid clicks / drag selections.
 1. **Cap:** Maintain a rolling buffer, max ~20 screenshots.
-1. **Summarization:** Batch the buffer (batches of ~10) into Gemini multimodal in parallel. Output: short text summaries per batch.
-1. **Merge:** Concatenate / synthesize the batch summaries into **max 2 paragraphs of plain text** describing what the user has been doing. ("User has been editing a spreadsheet in Excel, then switched to Chrome and opened three tabs about Italian rentals…")
-1. **Inject:** That text is passed as system context to Sonnet alongside the live voice transcript.
+1. **Summarization:** One Gemini call per snapshot (not batched), gated by `ContextGeminiObservationGate` to avoid API spam. Each snapshot runs up to 4 parallel lane calls (Activity, UIMap, EntityContent, Interaction) for modular analysis.
+1. **Merge:** `ContextActivationBuilder` converts the buffer into a `ContextActivationPacket` with four structured fields: `recentTimeline` (up to 5 facts), `observedTransitions` (up to 3 interactions), `learnedUIMemory` (persistent app/surface memory), and `firstActionGuidance` (suggested first actions).
+1. **Inject:** The packet is rendered to a compact text block passed as system context to Sonnet alongside the live voice transcript.
 
 **Why not embeddings:** ML self-embedding image → vectors → reconstruction is ugly. Won't ship in time. Text summary is good enough and inspectable.
 
@@ -126,9 +126,9 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 
 | Owner | Status | Deliverable | Notes |
 |-------|--------|-------------|-------|
-| **Wyatt** | ✅ done | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. | Settings persisted at `~/Library/Application Support/AgentInTheNotch/agent_settings.json`. Read via `AgentSettingsStore.shared`. |
+| **Wyatt** | ✅ done | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. Music tab (Spotify now-playing + lyrics). | Settings persisted at `~/Library/Application Support/AgentNotch/agent_settings.json`. Read via `AgentSettingsStore.shared`. |
 | **Sam** | ✅ done | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Long-press listener, listening/thinking/idle visual states. Computer use integration: Sonnet-driven OS actions (click, type, scroll). | Exposes `setCursorColor(color)` via `AgentInterfaces.cursor`. Set `AgentInterfaces.cursor = self` on init. |
-| **Ashan** | ✅ done | Long-press detection → Whisper voice transcription (WhisperKit, on-device). Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, Gemini multimodal per snapshot, merge to ≤2 paragraphs. Core Sonnet agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
+| **Ashan** | ✅ done | Long-press detection → Whisper voice transcription (WhisperKit, on-device). Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, modular Gemini lane pipeline per snapshot, merge to `ContextActivationPacket`. Core Sonnet agent wiring — assembles transcript + packet + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
 
 **Interfaces are the contract.**
 - Wyatt's settings panel calls `setCursorColor(color)` on Sam's cursor module.
@@ -146,7 +146,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 - ~~What's the actual click-hook API on macOS, and does it require accessibility permissions?~~ **Resolved:** `CGEvent.tapCreate` with `.listenOnly` — yes, requires Accessibility.
 - ~~Gemini batch latency at 10 images?~~ **Resolved:** We run one Gemini call per snapshot, not batched; gated by `ContextGeminiObservationGate` to avoid spam.
 - ~~Does the cursor PNG overlay need a transparent always-on-top window?~~ **Resolved:** Yes — `CursorCompanionWindow` is a borderless `NSPanel` at `.screenSaverWindowLevel`.
-- ~~Where do user preferences live on disk?~~ **Resolved:** `~/Library/Application Support/AgentInTheNotch/agent_settings.json` — see `Core/AgentSettingsStore.swift`.
+- ~~Where do user preferences live on disk?~~ **Resolved:** `~/Library/Application Support/AgentNotch/agent_settings.json` — see `Core/AgentSettingsStore.swift`.
 
 ## 12. Non-Goals
 

@@ -15,6 +15,7 @@ final class ContextClickMonitor {
     private let queue = DispatchQueue(label: "agentnotch.context.click-monitor", qos: .utility)
     private let onClick: @Sendable (CGPoint) -> Void
 
+    private let tapLock = NSLock()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var lastCaptureAt: Date = .distantPast
@@ -53,26 +54,36 @@ final class ContextClickMonitor {
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
+        tapLock.lock()
         eventTap = tap
         runLoopSource = source
+        tapLock.unlock()
     }
 
     func stop() {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
+        tapLock.lock()
+        let tap = eventTap
+        let source = runLoopSource
         eventTap = nil
         runLoopSource = nil
+        tapLock.unlock()
+
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+        }
+        if let source {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let tap = eventTap {
-                CGEvent.tapEnable(tap: tap, enable: true)
+            tapLock.lock()
+            let currentTap = eventTap
+            tapLock.unlock()
+            if let currentTap {
+                CGEvent.tapEnable(tap: currentTap, enable: true)
             }
 
         case .leftMouseUp:

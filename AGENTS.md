@@ -294,7 +294,7 @@ Before editing:
 | `Features/Notch/` | Wyatt | ✅ done |
 | `Features/Cursor/` | Sam | ✅ done |
 | `Features/Context/` | Ashan | ✅ done |
-| `Features/Agent/` | Ashan | ✅ done (voice/Whisper pending) |
+| `Features/Agent/` | Ashan | ✅ done |
 | `Features/Onboarding/` | shared | ✅ done |
 | `Core/` | shared | ✅ done |
 | `App/` | shared | ✅ done |

@@ -239,7 +239,7 @@ public final class ComputerUseHarness {
     }
 
     private func primaryDisplayPixelSize() -> CGSize {
-        guard let screen = NSScreen.main else { return CGSize(width: 1920, height: 1080) }
+        guard let screen = NSScreen.main else { return CGSize(width: 2560, height: 1664) }
         let scale = screen.backingScaleFactor
         let size = screen.frame.size
         return CGSize(width: size.width * scale, height: size.height * scale)

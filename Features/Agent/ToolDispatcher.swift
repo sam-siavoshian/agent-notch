@@ -176,10 +176,13 @@ public actor ToolDispatcher {
 
     private func postDrag(from: CGPoint, to: CGPoint) {
         let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
+        if down == nil { NSLog("[ToolDispatcher] CGEvent alloc failed for leftMouseDown") }
         down?.post(tap: .cghidEventTap)
         let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left)
+        if drag == nil { NSLog("[ToolDispatcher] CGEvent alloc failed for leftMouseDragged") }
         drag?.post(tap: .cghidEventTap)
         let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
+        if up == nil { NSLog("[ToolDispatcher] CGEvent alloc failed for leftMouseUp") }
         up?.post(tap: .cghidEventTap)
     }
 

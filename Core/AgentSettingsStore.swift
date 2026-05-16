@@ -41,7 +41,7 @@ public final class AgentSettingsStore: ObservableObject {
             appropriateFor: nil,
             create: true
         )) ?? fm.temporaryDirectory
-        let dir = appSupport.appendingPathComponent("AgentInTheNotch", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("AgentNotch", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("agent_settings.json")
         load()
