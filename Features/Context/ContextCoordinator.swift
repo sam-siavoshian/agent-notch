@@ -8,6 +8,7 @@
 
 import Foundation
 import CoreGraphics
+import AppKit
 
 public final class ContextCoordinator: RecentActivityContext {
     public static let shared = ContextCoordinator()
@@ -50,7 +51,11 @@ public final class ContextCoordinator: RecentActivityContext {
     }
 
     public func getRecentActivityContext() async -> String {
-        await store.recentActivityContext()
+        let cursorLocation = await MainActor.run {
+            NSEvent.mouseLocation
+        }
+        await capture(trigger: .activation, cursorLocation: cursorLocation)
+        return await store.recentActivityContext()
     }
 
     public func recentSnapshots() async -> [ContextSnapshot] {

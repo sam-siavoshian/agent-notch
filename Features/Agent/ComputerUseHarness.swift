@@ -146,7 +146,12 @@ public final class ComputerUseHarness {
         """)
 
         if !contextSummary.isEmpty {
-            parts.append("Recent activity context:\n\(contextSummary)")
+            parts.append("""
+            Local activation context:
+            \(contextSummary)
+
+            Use this context to reduce UI exploration and choose a better first action. Treat it as recent learned context, not exact coordinates. If the current screen is ambiguous or the context looks stale, take a screenshot before acting.
+            """)
         }
 
         if !settings.preferences.isEmpty {

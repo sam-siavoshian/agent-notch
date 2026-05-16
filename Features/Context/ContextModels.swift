@@ -12,6 +12,7 @@ import CoreGraphics
 public enum ContextCaptureTrigger: String, Sendable {
     case startup
     case click
+    case activation
     case manual
 }
 
@@ -52,4 +53,37 @@ public struct ContextSnapshot: Identifiable, Sendable {
 public struct ContextWindowMetadata: Sendable {
     public let appName: String
     public let windowTitle: String
+}
+
+public struct ContextActivationPacket: Sendable {
+    public let generatedAt: Date
+    public let capturedCount: Int
+    public let elapsedSeconds: Int
+    public let currentApp: String
+    public let currentWindow: String
+    public let recentTimeline: [String]
+    public let observedTransitions: [String]
+    public let firstActionGuidance: [String]
+
+    public var promptText: String {
+        let timeline = recentTimeline.isEmpty ? "- No recent captures." : recentTimeline.joined(separator: "\n")
+        let transitions = observedTransitions.isEmpty ? "- No window/app transitions observed yet." : observedTransitions.joined(separator: "\n")
+        let guidance = firstActionGuidance.isEmpty ? "- Use the computer screenshot tool before acting if the screen is ambiguous." : firstActionGuidance.joined(separator: "\n")
+
+        return """
+        Activation context packet:
+        Captures: \(capturedCount) over \(elapsedSeconds)s.
+        Current app: \(currentApp)
+        Current window: \(currentWindow)
+
+        Recent screen timeline:
+        \(timeline)
+
+        Learned navigation hints from recent use:
+        \(transitions)
+
+        First-action guidance:
+        \(guidance)
+        """
+    }
 }
