@@ -24,7 +24,7 @@ private struct NotchContentHeightKey: PreferenceKey {
 
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
-    case music
+    case spotify
     case settings
 
     var id: String { rawValue }
@@ -32,7 +32,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .home: return "Home"
-        case .music: return "Music"
+        case .spotify: return "Spotify"
         case .settings: return "Settings"
         }
     }
@@ -40,7 +40,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .music: return "music.note"
+        case .spotify: return "music.note"   // unused for spotify — rendered as brand mark
         case .settings: return "gearshape.fill"
         }
     }
@@ -191,10 +191,8 @@ struct NotchContentView: View {
                 switch selectedTab {
                 case .home:
                     NotchHomeView()
-                case .music:
-                    SpotifyNowPlayingView()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 4)
+                case .spotify:
+                    NotchMusicView()
                 case .settings:
                     ScrollView(.vertical, showsIndicators: false) {
                         AgentSettingsView()
@@ -248,14 +246,81 @@ private struct NotchTabBar: View {
     var body: some View {
         PillToolbar {
             ForEach(NotchTab.allCases) { tab in
-                ToolbarIconButton(
-                    systemImage: tab.icon,
-                    label: tab.label,
-                    isActive: selected == tab
-                ) {
-                    withAnimation(.easeOut(duration: 0.14)) { selected = tab }
+                if tab == .spotify {
+                    SpotifyTabButton(isActive: selected == tab) {
+                        withAnimation(.easeOut(duration: 0.14)) { selected = tab }
+                    }
+                } else {
+                    ToolbarIconButton(
+                        systemImage: tab.icon,
+                        label: tab.label,
+                        isActive: selected == tab
+                    ) {
+                        withAnimation(.easeOut(duration: 0.14)) { selected = tab }
+                    }
                 }
             }
         }
+    }
+}
+
+/// Spotify-branded tab — green mark + "Spotify" label. Matches the active
+/// pill chrome of `ToolbarIconButton` so it lines up cleanly in the toolbar.
+private struct SpotifyTabButton: View {
+    let isActive: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                SpotifyTabMark(size: 11)
+                Text("Spotify")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(isActive ? SoftPill.Text.primary : SoftPill.Text.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(minHeight: 20)
+            .background(
+                Group {
+                    if isActive {
+                        Capsule(style: .continuous).fill(SoftPill.Surface.inset)
+                    }
+                }
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Mini Spotify glyph (green circle + 3 white arcs). Local copy so the
+/// tab bar doesn't depend on NotchMusicView.
+private struct SpotifyTabMark: View {
+    var size: CGFloat = 11
+    private let green = Color(red: 0.114, green: 0.725, blue: 0.329)
+    var body: some View {
+        ZStack {
+            Circle().fill(green)
+            GeometryReader { geo in
+                let w = geo.size.width
+                let lw = w * 0.13
+                arc(in: geo, yOffset: -0.18, radius: 0.34, lineWidth: lw)
+                arc(in: geo, yOffset: -0.04, radius: 0.27, lineWidth: lw * 0.85)
+                arc(in: geo, yOffset:  0.08, radius: 0.20, lineWidth: lw * 0.72)
+            }
+            .padding(size * 0.12)
+        }
+        .frame(width: size, height: size)
+    }
+    private func arc(in geo: GeometryProxy, yOffset: CGFloat,
+                     radius: CGFloat, lineWidth: CGFloat) -> some View {
+        let w = geo.size.width, h = geo.size.height
+        return Path { p in
+            let c = CGPoint(x: w / 2, y: h / 2 + yOffset * h)
+            p.addArc(center: c, radius: w * radius,
+                     startAngle: .degrees(200), endAngle: .degrees(-20),
+                     clockwise: false)
+        }
+        .stroke(Color.white, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
     }
 }

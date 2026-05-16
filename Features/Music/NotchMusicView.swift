@@ -18,7 +18,7 @@ struct NotchMusicView: View {
     @ObservedObject private var controller = SpotifyController.shared
 
     var body: some View {
-        ZStack {
+        Group {
             if !controller.isConnected {
                 disconnectedState
             } else if !controller.isRunning {
@@ -27,7 +27,7 @@ struct NotchMusicView: View {
                 playingState
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .top)
         .animation(.easeOut(duration: 0.22), value: controller.isConnected)
         .animation(.easeOut(duration: 0.22), value: controller.isRunning)
         .animation(.easeOut(duration: 0.22), value: controller.state.hasTrack)
