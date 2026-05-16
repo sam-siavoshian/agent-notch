@@ -16,7 +16,7 @@ public final class ComputerUseHarness {
 
     public var modelID: String = AnthropicModel.sonnet46
     public var fallbackModelID: String = AnthropicModel.sonnet46
-    public var maxTurns: Int = 10
+    public var maxTurns: Int = 100
     public var maxOutputTokens: Int = 1024
 
     private init() {}
