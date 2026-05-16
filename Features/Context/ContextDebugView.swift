@@ -50,11 +50,12 @@ struct ContextDebugView: View {
         .task {
             await refreshLoop()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Label("Context", systemImage: "eye")
+            Label("Context Dev Tools", systemImage: "wrench.and.screwdriver")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.86))
 

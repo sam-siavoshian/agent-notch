@@ -43,7 +43,7 @@ Each feature owns its code. Keep related code together.
 
 ```txt
 Features/Notch/
-├── NotchContentView.swift      — root; open/closed (640×430); Home/Settings/Context tabs; Cmd+D + swipe; tab persisted via @AppStorage
+├── NotchContentView.swift      — root; open/closed (420×280); Home/Settings tabs; Cmd+D + swipe; tab persisted via @AppStorage
 ├── NotchHomeView.swift         — Home tab: orb, transcript, activity log (logs completion entry on run done)
 ├── AgentSettingsView.swift     — Settings tab: 4 knobs + Advanced section (system prompt, context diagnostics)
 ├── ClosedNotchView.swift       — resting dot states in closed notch
@@ -73,7 +73,8 @@ Features/Context/
 ├── ContextWindowMetadataReader.swift
 ├── ContextTextSignalFilter.swift
 ├── ContextAIObservationLog.swift   — in-memory Gemini event log + ContextGeminiObservationGate (rate limiter)
-├── ContextDebugView.swift          — Context tab in notch: live snapshots, AI observation log, diagnostics
+├── ContextDevToolsWindowController.swift — separate Dev Tools window for telemetry (Cmd+Option+D)
+├── ContextDebugView.swift          — Dev Tools content: live snapshots, AI observation log, diagnostics
 └── ContextPerformanceReporter.swift
 
 Features/Agent/

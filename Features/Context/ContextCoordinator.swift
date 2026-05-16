@@ -154,6 +154,10 @@ public final class ContextCoordinator: RecentActivityContext {
         let metadata = await MainActor.run {
             ContextWindowMetadataReader.current()
         }
+        guard !Self.shouldIgnoreCapture(metadata) else {
+            NSLog("[ContextCoordinator] Ignored \(trigger.rawValue) capture for AgentNotch UI.")
+            return
+        }
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.35)
@@ -323,5 +327,13 @@ public final class ContextCoordinator: RecentActivityContext {
     private static func textPreview(from snapshot: ContextSnapshot) -> String {
         ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: 8)
             .joined(separator: " | ")
+    }
+
+    private static func shouldIgnoreCapture(_ metadata: ContextWindowMetadata) -> Bool {
+        let appName = metadata.appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let windowTitle = metadata.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return appName == "agentnotch"
+            || appName == "agent in the notch"
+            || windowTitle.contains("agentnotch dev tools")
     }
 }

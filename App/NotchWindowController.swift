@@ -125,8 +125,8 @@ final class NotchWindowController: NSObject {
 
 @MainActor
 enum NotchSizing {
-    static let openWidth: CGFloat = 640
-    static let openHeight: CGFloat = 430
+    static let openWidth: CGFloat = 420
+    static let openHeight: CGFloat = 280
     static let shadowPadding: CGFloat = 24
 
     static func windowSize(for screen: NSScreen?) -> CGSize {

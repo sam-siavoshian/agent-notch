@@ -16,7 +16,6 @@ extension Notification.Name {
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
     case settings
-    case context
 
     var id: String { rawValue }
 
@@ -24,7 +23,6 @@ enum NotchTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "Home"
         case .settings: return "Settings"
-        case .context: return "Context"
         }
     }
 
@@ -32,7 +30,6 @@ enum NotchTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: return "house.fill"
         case .settings: return "gearshape.fill"
-        case .context: return "eye"
         }
     }
 }
@@ -51,10 +48,9 @@ struct NotchContentView: View {
     private let closedWidth: CGFloat = 220
     private let closedHeight: CGFloat = 32
 
-    // Compact open size — fits home/settings/context cleanly without
-    // overhanging the menu bar.
-    private let openWidth: CGFloat = 420
-    private let openHeight: CGFloat = 280
+    // Compact open size — user-facing home/settings only.
+    private let openWidth: CGFloat = NotchSizing.openWidth
+    private let openHeight: CGFloat = NotchSizing.openHeight
 
     private var width: CGFloat { isOpen ? openWidth : closedWidth }
     private var height: CGFloat { isOpen ? openHeight : closedHeight }
@@ -165,8 +161,6 @@ struct NotchContentView: View {
                         AgentSettingsView()
                             .padding(.bottom, 4)
                     }
-                case .context:
-                    ContextDebugView()
                 }
             }
             .id(selectedTabRaw)

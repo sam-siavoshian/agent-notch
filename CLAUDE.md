@@ -87,7 +87,7 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `NotchContentView.swift` | Root view — open/closed (640×430), three tabs (Home/Settings/Context), Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
+| `NotchContentView.swift` | Root view — open/closed (420×280), Home/Settings tabs, Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
 | `NotchHomeView.swift` | Home tab — agent orb, last transcript, activity feed |
 | `AgentSettingsView.swift` | Settings tab — 4 knobs + Advanced section (system prompt, context diagnostics) |
 | `ClosedNotchView.swift` | Resting dot/waveform in the closed notch |
@@ -123,7 +123,8 @@ All features should use these — never duplicate them.
 | `ContextWindowMetadataReader.swift` | Reads active app name + window title |
 | `ContextTextSignalFilter.swift` | Cleans OCR output |
 | `ContextAIObservationLog.swift` | In-memory log of Gemini observation events; includes `ContextGeminiObservationGate` (rate limiter) |
-| `ContextDebugView.swift` | Context tab in the notch — live snapshot list, AI observation log, diagnostics |
+| `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
+| `ContextDebugView.swift` | Dev Tools content — live snapshot list, AI observation log, diagnostics |
 | `ContextPerformanceReporter.swift` | Reads stored artifacts and summarizes diagnostics |
 
 ### Features/Agent/ (Ashan)
@@ -170,6 +171,7 @@ AppDelegate.applicationDidFinishLaunching
       → bootAgent()
           → CursorCompanion.shared.start()          // registers AgentInterfaces.cursor
           → ContextCoordinator.shared.start()       // registers AgentInterfaces.context
+          → ContextDevToolsWindowController.install() // optional telemetry window
           → VoiceRecordingService.shared.start()    // mic recording + WhisperKit init
           → AgentSession.shared.start()             // subscribes to .transcriptReady
 ```

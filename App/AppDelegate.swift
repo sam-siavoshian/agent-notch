@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func bootAgent() {
         CursorCompanion.shared.start()
         ContextCoordinator.shared.start()
+        ContextDevToolsWindowController.shared.install()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
     }

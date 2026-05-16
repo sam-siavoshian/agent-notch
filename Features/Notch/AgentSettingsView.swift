@@ -198,11 +198,8 @@ struct AgentSettingsView: View {
     private var diagnosticsRow: some View {
         SettingRow(title: "Context") {
             PillToolbar {
-                ToolbarIconButton(systemImage: "folder") {
-                    openDirectory(ContextMemoryStore.defaultDirectoryURL)
-                }
-                ToolbarIconButton(systemImage: "chart.xyaxis.line") {
-                    openDirectory(AgentMetricsStore.defaultDirectoryURL)
+                ToolbarIconButton(systemImage: "wrench.and.screwdriver") {
+                    openDevTools()
                 }
                 ToolbarIconButton(systemImage: "doc.on.doc") {
                     copyActivationContext()
@@ -214,10 +211,11 @@ struct AgentSettingsView: View {
         }
     }
 
-    private func openDirectory(_ url: URL) {
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(url)
-        diagnosticsStatus = "Opened \(url.lastPathComponent)."
+    private func openDevTools() {
+        Task { @MainActor in
+            ContextDevToolsWindowController.shared.present()
+            diagnosticsStatus = "Opened Dev Tools."
+        }
     }
 
     private func copyActivationContext() {
