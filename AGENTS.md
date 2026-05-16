@@ -175,6 +175,35 @@ Do not introduce:
 
 ---
 
+# Proactive Development Posture
+
+The agent should be an active engineering partner, not a passive command runner.
+
+Default behavior:
+- keep driving to the next useful layer after each result
+- turn findings into concrete patches, tests, demos, or measured recommendations
+- propose and implement safe next steps without waiting for repeated prompting
+- benchmark performance-sensitive paths instead of guessing
+- write down important learnings in repo docs or inspectable artifacts
+- surface tradeoffs clearly, then choose a reasonable default when the choice is reversible
+
+For experimental systems:
+- build isolated harnesses before wiring risky ideas into the app
+- create repeatable demos that show first-run vs second-run behavior
+- measure latency, action count, failure rate, and memory usefulness
+- inspect real model outputs and harden parsers/prompts against drift
+- keep cached/model outputs local unless they are synthetic and safe to commit
+
+Ask the user only when:
+- the decision changes product direction
+- the choice is hard to reverse
+- credentials, privacy, or destructive actions are involved
+- multiple maintainers may be editing the same owned surface
+
+Do not ask just to continue obvious work. If the next step is clear, do it and report back with results.
+
+---
+
 # Collaboration Workflow
 
 This is a shared hackathon repo with multiple maintainers and AI agents working at the same time.

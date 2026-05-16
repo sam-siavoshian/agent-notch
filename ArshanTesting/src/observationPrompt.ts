@@ -28,6 +28,48 @@ export const ObservationSchema = z.object({
 export type Observation = z.infer<typeof ObservationSchema>;
 export type Region = z.infer<typeof RegionSchema>;
 
+export const ObservationJsonSchema = {
+  type: "object",
+  properties: {
+    app: { type: "string" },
+    windowTitle: { type: "string" },
+    surfaceId: { type: "string" },
+    surfaceLabel: { type: "string" },
+    summary: { type: "string" },
+    visibleControls: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          role: { type: "string" },
+          region: { type: "string" },
+          confidence: { type: "number" }
+        },
+        required: ["label", "role", "region", "confidence"]
+      }
+    },
+    visibleEntities: { type: "array", items: { type: "string" } },
+    landmarks: { type: "array", items: { type: "string" } },
+    likelyAffordances: { type: "array", items: { type: "string" } },
+    uncertainty: { type: "array", items: { type: "string" } },
+    confidence: { type: "number" }
+  },
+  required: [
+    "app",
+    "windowTitle",
+    "surfaceId",
+    "surfaceLabel",
+    "summary",
+    "visibleControls",
+    "visibleEntities",
+    "landmarks",
+    "likelyAffordances",
+    "uncertainty",
+    "confidence"
+  ]
+} as const;
+
 export function buildObservationPrompt(stateHint?: string): string {
   return [
     "You are observing a macOS screenshot for a computer-use agent.",
@@ -41,6 +83,7 @@ export function buildObservationPrompt(stateHint?: string): string {
     "uncertainty must be an array of strings only, not a number.",
     "confidence must be a number from 0 to 1.",
     "Use approximate regions like left-sidebar, top-right, center-table, right-panel.",
+    "Keep summaries and strings short.",
     "Prefer uncertainty over guessing. Do not invent hidden UI.",
     stateHint ? `Known synthetic state hint: ${stateHint}` : "",
     "Return JSON only."

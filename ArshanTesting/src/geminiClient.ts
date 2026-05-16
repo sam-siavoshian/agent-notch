@@ -1,8 +1,8 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, MediaResolution } from "@google/genai";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { buildObservationPrompt, fixtureObservationForState, Observation, parseObservationJson } from "./observationPrompt";
+import { buildObservationPrompt, fixtureObservationForState, Observation, ObservationJsonSchema, parseObservationJson } from "./observationPrompt";
 import { projectRoot, stateForScreenshot } from "./syntheticScreens";
 
 export interface GeminiObservationOptions {
@@ -10,6 +10,9 @@ export interface GeminiObservationOptions {
   stateHint?: string;
   live?: boolean;
   allowFixtureFallback?: boolean;
+  useCache?: boolean;
+  model?: string;
+  mediaResolution?: MediaResolution;
 }
 
 export async function observeScreenshotWithGemini(
@@ -19,10 +22,18 @@ export async function observeScreenshotWithGemini(
   const rootDir = options.rootDir ?? projectRoot();
   const prompt = buildObservationPrompt(options.stateHint);
   const imageBytes = await readFile(screenshotPath);
-  const cachePath = await cacheFileFor(rootDir, imageBytes, prompt);
+  const model = options.model ?? process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite";
+  const mediaResolution = options.mediaResolution ?? mediaResolutionFromEnv();
+  const maxOutputTokens = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS ?? 1600);
+  const cachePath = await cacheFileFor(rootDir, imageBytes, {
+    prompt,
+    model,
+    mediaResolution,
+    maxOutputTokens
+  });
   const now = new Date().toISOString();
 
-  const cached = await readCached(cachePath, screenshotPath);
+  const cached = options.useCache === false ? undefined : await readCached(cachePath, screenshotPath);
   if (cached) {
     return cached;
   }
@@ -30,7 +41,6 @@ export async function observeScreenshotWithGemini(
   const shouldUseLive = options.live ?? process.env.ARSHAN_LIVE_GEMINI === "1";
   const apiKey = process.env.GEMINI_API_KEY;
   if (shouldUseLive && apiKey) {
-    const model = process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model,
@@ -44,13 +54,17 @@ export async function observeScreenshotWithGemini(
         { text: prompt }
       ],
       config: {
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseJsonSchema: ObservationJsonSchema,
+        mediaResolution,
+        maxOutputTokens,
+        temperature: 0
       }
     });
 
     const text = response.text ?? "";
     const observation = parseObservationJson(text, {
-      id: cacheId(imageBytes, prompt),
+      id: cacheId(imageBytes, { prompt, model, mediaResolution, maxOutputTokens }),
       timestamp: now,
       source: "gemini",
       screenshotPath
@@ -82,14 +96,21 @@ async function readCached(cachePath: string, screenshotPath: string): Promise<Ob
   }
 }
 
-async function cacheFileFor(rootDir: string, imageBytes: Buffer, prompt: string): Promise<string> {
+async function cacheFileFor(rootDir: string, imageBytes: Buffer, config: CacheConfig): Promise<string> {
   const dir = path.join(rootDir, "memory", "cache");
   await mkdir(dir, { recursive: true });
-  return path.join(dir, `gemini-${cacheId(imageBytes, prompt)}.json`);
+  return path.join(dir, `gemini-${cacheId(imageBytes, config)}.json`);
 }
 
-function cacheId(imageBytes: Buffer, prompt: string): string {
-  return createHash("sha256").update(imageBytes).update(prompt).digest("hex").slice(0, 24);
+interface CacheConfig {
+  prompt: string;
+  model: string;
+  mediaResolution: MediaResolution;
+  maxOutputTokens: number;
+}
+
+function cacheId(imageBytes: Buffer, config: CacheConfig): string {
+  return createHash("sha256").update(imageBytes).update(JSON.stringify(config)).digest("hex").slice(0, 24);
 }
 
 function mimeTypeFor(filePath: string): string {
@@ -99,4 +120,11 @@ function mimeTypeFor(filePath: string): string {
   if (ext === ".heic") return "image/heic";
   if (ext === ".heif") return "image/heif";
   return "image/png";
+}
+
+export function mediaResolutionFromEnv(): MediaResolution {
+  const value = (process.env.GEMINI_MEDIA_RESOLUTION ?? "low").toLowerCase();
+  if (value === "medium") return MediaResolution.MEDIA_RESOLUTION_MEDIUM;
+  if (value === "high") return MediaResolution.MEDIA_RESOLUTION_HIGH;
+  return MediaResolution.MEDIA_RESOLUTION_LOW;
 }

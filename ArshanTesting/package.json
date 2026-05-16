@@ -6,6 +6,7 @@
   "scripts": {
     "generate": "tsx src/syntheticScreens.ts",
     "demo": "tsx src/replaySession.ts",
+    "bench:gemini": "tsx src/benchmarkGemini.ts",
     "test": "vitest run",
     "test:live": "ARSHAN_LIVE_GEMINI=1 vitest run tests/geminiObservation.test.ts",
     "typecheck": "tsc --noEmit"
