@@ -107,14 +107,9 @@ public final class ContextCoordinator: RecentActivityContext {
     }
 
     public func getRecentActivityContext() async -> String {
-        let cursorLocation = await MainActor.run {
-            NSEvent.mouseLocation
-        }
+        let cursorLocation = await MainActor.run { NSEvent.mouseLocation }
         await capture(trigger: .activation, cursorLocation: cursorLocation)
-        let snapshots = await store.recentSnapshots()
-        let appName = snapshots.last?.appName ?? ""
-        let learnedMemory = await memoryStore.activationMemory(appName: appName)
-        return await store.recentActivityContext(learnedUIMemory: learnedMemory)
+        return await buildActivityContext()
     }
 
     public func recentSnapshots() async -> [ContextSnapshot] {
@@ -122,6 +117,10 @@ public final class ContextCoordinator: RecentActivityContext {
     }
 
     public func currentActivationPreview() async -> String {
+        await buildActivityContext()
+    }
+
+    private func buildActivityContext() async -> String {
         let snapshots = await store.recentSnapshots()
         let appName = snapshots.last?.appName ?? ""
         let learnedMemory = await memoryStore.activationMemory(appName: appName)
@@ -646,12 +645,7 @@ public final class ContextCoordinator: RecentActivityContext {
                 windowTitle: snapshot.windowTitle,
                 capturedAt: snapshot.capturedAt
             )
-            let controls = observation.visibleControls.map { control -> String in
-                if let actionHint = control.actionHint, !actionHint.isEmpty {
-                    return "\(control.label) (\(control.role), \(control.region)): \(actionHint)"
-                }
-                return "\(control.label) (\(control.role), \(control.region))"
-            }
+            let controls = Self.controlDescriptions(observation.visibleControls)
             await aiObservationLog.record(ContextAIObservationEvent(
                 status: .completed,
                 trigger: snapshot.trigger,

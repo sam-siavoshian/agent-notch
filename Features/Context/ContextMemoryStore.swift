@@ -612,23 +612,23 @@ public actor ContextMemoryStore {
             .joined(separator: "-")
     }
 
-    private static var encoder: JSONEncoder {
+    private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
-    }
+    }()
 
-    private static var jsonlEncoder: JSONEncoder {
+    private static let jsonlEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
         return encoder
-    }
+    }()
 
-    private static var decoder: JSONDecoder {
+    private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
-    }
+    }()
 }

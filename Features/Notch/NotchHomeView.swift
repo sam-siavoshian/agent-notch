@@ -356,7 +356,8 @@ private struct GrantPermissionButton: View {
             // reason we're asking them to relaunch. Show "Relaunch" on
             // return; if they actually didn't grant, the second tap still
             // does the right thing (restart → error reappears → loop).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
                 withAnimation(.easeOut(duration: 0.18)) { armed = true }
             }
         }

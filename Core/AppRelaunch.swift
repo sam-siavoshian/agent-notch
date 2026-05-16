@@ -13,7 +13,6 @@
 //
 
 import AppKit
-import Foundation
 
 @MainActor
 enum AppRelaunch {
