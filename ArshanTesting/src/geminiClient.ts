@@ -2,6 +2,7 @@ import { GoogleGenAI, MediaResolution } from "@google/genai";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { imageRequestFromEnv, prepareGeminiImage, type ImageRequestConfig } from "./imagePreprocess";
 import { buildObservationPrompt, fixtureObservationForState, Observation, ObservationJsonSchema, parseObservationJson } from "./observationPrompt";
 import { projectRoot, stateForScreenshot } from "./syntheticScreens";
 
@@ -13,6 +14,7 @@ export interface GeminiObservationOptions {
   useCache?: boolean;
   model?: string;
   mediaResolution?: MediaResolution;
+  imageConfig?: ImageRequestConfig;
 }
 
 export async function observeScreenshotWithGemini(
@@ -21,7 +23,9 @@ export async function observeScreenshotWithGemini(
 ): Promise<Observation> {
   const rootDir = options.rootDir ?? projectRoot();
   const prompt = buildObservationPrompt(options.stateHint);
-  const imageBytes = await readFile(screenshotPath);
+  const imageConfig = options.imageConfig ?? imageRequestFromEnv();
+  const imageRequest = await prepareGeminiImage(screenshotPath, rootDir, imageConfig);
+  const imageBytes = await readFile(imageRequest.path);
   const model = options.model ?? process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite";
   const mediaResolution = options.mediaResolution ?? mediaResolutionFromEnv();
   const maxOutputTokens = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS ?? 1600);
@@ -29,7 +33,8 @@ export async function observeScreenshotWithGemini(
     prompt,
     model,
     mediaResolution,
-    maxOutputTokens
+    maxOutputTokens,
+    imageConfig: imageRequest.cacheConfig
   });
   const now = new Date().toISOString();
 
@@ -47,7 +52,7 @@ export async function observeScreenshotWithGemini(
       contents: [
         {
           inlineData: {
-            mimeType: mimeTypeFor(screenshotPath),
+            mimeType: imageRequest.mimeType,
             data: imageBytes.toString("base64")
           }
         },
@@ -64,7 +69,7 @@ export async function observeScreenshotWithGemini(
 
     const text = response.text ?? "";
     const observation = parseObservationJson(text, {
-      id: cacheId(imageBytes, { prompt, model, mediaResolution, maxOutputTokens }),
+      id: cacheId(imageBytes, { prompt, model, mediaResolution, maxOutputTokens, imageConfig: imageRequest.cacheConfig }),
       timestamp: now,
       source: "gemini",
       screenshotPath
@@ -107,19 +112,11 @@ interface CacheConfig {
   model: string;
   mediaResolution: MediaResolution;
   maxOutputTokens: number;
+  imageConfig: string;
 }
 
 function cacheId(imageBytes: Buffer, config: CacheConfig): string {
   return createHash("sha256").update(imageBytes).update(JSON.stringify(config)).digest("hex").slice(0, 24);
-}
-
-function mimeTypeFor(filePath: string): string {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
-  if (ext === ".webp") return "image/webp";
-  if (ext === ".heic") return "image/heic";
-  if (ext === ".heif") return "image/heif";
-  return "image/png";
 }
 
 export function mediaResolutionFromEnv(): MediaResolution {

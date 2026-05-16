@@ -31,6 +31,7 @@ export interface ReplayRunResult {
   recognitions: RecognitionResult[];
   actions: ActionResult[];
   metrics: RunMetrics;
+  observationElapsedMs: number;
   memory?: AppMemory;
 }
 
@@ -44,6 +45,7 @@ export async function runRepeatedTaskDemo(options: {
   rootDir?: string;
   writeMemory?: boolean;
   liveGemini?: boolean;
+  useCache?: boolean;
 } = {}): Promise<ReplayDemoResult> {
   const rootDir = options.rootDir ?? projectRoot();
   await generateSyntheticScreens(rootDir);
@@ -55,7 +57,8 @@ export async function runRepeatedTaskDemo(options: {
     rootDir,
     actions: firstRunActions,
     memory: undefined,
-    liveGemini: options.liveGemini
+    liveGemini: options.liveGemini,
+    useCache: options.useCache
   });
 
   const learnedMemory = updateMemoryFromObservations(firstRun.observations, firstRunActions);
@@ -71,7 +74,8 @@ export async function runRepeatedTaskDemo(options: {
     rootDir,
     actions: secondRunActions,
     memory: learnedMemory,
-    liveGemini: options.liveGemini
+    liveGemini: options.liveGemini,
+    useCache: options.useCache
   });
 
   return {
@@ -87,23 +91,25 @@ async function runScenario(input: {
   actions: SimulatedAction[];
   memory?: AppMemory;
   liveGemini?: boolean;
+  useCache?: boolean;
 }): Promise<ReplayRunResult> {
   const startedAtMs = input.label === "first-run" ? 0 : 1000;
   const firstActionAtMs = input.label === "first-run" ? 620 : 1120;
   const stateOrder = uniqueStates(["overview", ...input.actions.map((action) => action.to)] as SyntheticStateId[]);
-  const observations: Observation[] = [];
-  const recognitions: RecognitionResult[] = [];
-
-  for (const state of stateOrder) {
+  const observationStartedAt = performance.now();
+  const observations: Observation[] = await Promise.all(stateOrder.map((state) => {
     const screenshotPath = screenshotPathForState(input.rootDir, state);
-    const observation = await observeScreenshotWithGemini(screenshotPath, {
+    return observeScreenshotWithGemini(screenshotPath, {
       rootDir: input.rootDir,
       stateHint: state,
-      live: input.liveGemini
+      live: input.liveGemini,
+      useCache: input.useCache
     });
-    observations.push(observation);
-    recognitions.push(recognizeState(observation, input.memory, TASK));
-  }
+  }));
+  const observationElapsedMs = Math.round(performance.now() - observationStartedAt);
+  const recognitions: RecognitionResult[] = observations.map((observation) =>
+    recognizeState(observation, input.memory, TASK)
+  );
 
   const actionResults: ActionResult[] = input.actions.map((action) => ({
     action: action.action,
@@ -125,6 +131,7 @@ async function runScenario(input: {
       screenshots: observations.length,
       actions: actionResults
     }),
+    observationElapsedMs,
     memory: input.memory
   };
 }
@@ -152,11 +159,17 @@ async function copyCommittedScreenshots(tempRoot: string): Promise<void> {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  runRepeatedTaskDemo({ writeMemory: true, liveGemini: process.env.ARSHAN_LIVE_GEMINI === "1" })
+  runRepeatedTaskDemo({
+    writeMemory: true,
+    liveGemini: process.env.ARSHAN_LIVE_GEMINI === "1",
+    useCache: process.env.ARSHAN_BYPASS_CACHE === "1" ? false : undefined
+  })
     .then((result) => {
       console.log(JSON.stringify({
         firstRun: result.firstRun.metrics,
+        firstRunObservationMs: result.firstRun.observationElapsedMs,
         secondRun: result.secondRun.metrics,
+        secondRunObservationMs: result.secondRun.observationElapsedMs,
         memorySurfaces: result.memory.surfaces.length,
         memoryTransitions: result.memory.transitions.length,
         negativeMemories: result.memory.negativeMemory.length
