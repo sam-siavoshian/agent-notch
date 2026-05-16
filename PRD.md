@@ -127,8 +127,8 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 | Owner | Status | Deliverable | Notes |
 |-------|--------|-------------|-------|
 | **Wyatt** | ✅ done | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. | Settings persisted at `~/Library/Application Support/AgentInTheNotch/agent_settings.json`. Read via `AgentSettingsStore.shared`. |
-| **Sam** | ❌ todo | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Computer use integration: Sonnet-driven OS actions (click, type, scroll). Click-hook OS plumbing. | Exposes `setCursorColor(color)` via `AgentInterfaces.cursor`. Set `AgentInterfaces.cursor = self` on init. |
-| **Ashan** | ❌ todo | Long-press detection → Whisper voice transcription. Context module: click-triggered screenshot capture (debounced 1s, rolling buffer of 20), Gemini multimodal batch summarizer, merge to ≤2 paragraphs. Core Sonnet agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
+| **Sam** | ✅ done | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Long-press listener, listening/thinking/idle visual states. Computer use integration: Sonnet-driven OS actions (click, type, scroll). | Exposes `setCursorColor(color)` via `AgentInterfaces.cursor`. Set `AgentInterfaces.cursor = self` on init. |
+| **Ashan** | ✅ done | Long-press detection → Whisper voice transcription (WhisperKit, on-device). Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, Gemini multimodal per snapshot, merge to ≤2 paragraphs. Core Sonnet agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
 
 **Interfaces are the contract.**
 - Wyatt's settings panel calls `setCursorColor(color)` on Sam's cursor module.
@@ -137,15 +137,15 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 
 ## 10. Milestones
 
-- **v0:** ✅ Notch shell up with four settings (persisted). ❌ Cursor PNG following real cursor. ❌ Long-press records voice. ❌ Screenshot-on-click writes to disk.
-- **v1 (MVP):** Click-with-debounce capture → Gemini summary → text injected into Sonnet → Sonnet acts via computer use. End-to-end loop working.
-- **v2 (stretch):** Richer capture hooks beyond clicks — foreground window change, tab change, app switch. Smarter cursor behavior (idle states, signaling).
+- **v0:** ✅ Notch shell up with four settings (persisted). ✅ Cursor PNG following real cursor. ✅ Long-press records voice. ✅ Screenshot-on-click writes to disk.
+- **v1 (MVP):** ✅ Click-with-debounce capture → Gemini summary → text injected into Sonnet → Sonnet acts via computer use. End-to-end loop working.
+- **v2 (stretch):** ✅ App-switch capture hook (`NSWorkspace.didActivateApplicationNotification`). ✅ Cursor idle float animation. ❌ Browser tab-change hook (out of scope — requires browser extension or Accessibility crawl).
 
 ## 11. Open Questions
 
-- What's the actual click-hook API on macOS, and does it require accessibility permissions? (Sam to confirm.)
-- Gemini batch latency at 10 images — does this stay under a few seconds? (Ashan to benchmark.)
-- Does the cursor PNG overlay need a transparent always-on-top window, and does that interfere with click capture? (Sam — see `App/NotchWindow.swift` for the transparent floating NSPanel pattern used by the notch.)
+- ~~What's the actual click-hook API on macOS, and does it require accessibility permissions?~~ **Resolved:** `CGEvent.tapCreate` with `.listenOnly` — yes, requires Accessibility.
+- ~~Gemini batch latency at 10 images?~~ **Resolved:** We run one Gemini call per snapshot, not batched; gated by `ContextGeminiObservationGate` to avoid spam.
+- ~~Does the cursor PNG overlay need a transparent always-on-top window?~~ **Resolved:** Yes — `CursorCompanionWindow` is a borderless `NSPanel` at `.screenSaverWindowLevel`.
 - ~~Where do user preferences live on disk?~~ **Resolved:** `~/Library/Application Support/AgentInTheNotch/agent_settings.json` — see `Core/AgentSettingsStore.swift`.
 
 ## 12. Non-Goals

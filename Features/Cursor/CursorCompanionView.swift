@@ -13,8 +13,12 @@ struct CursorCompanionView: View {
     @ObservedObject var viewModel: CursorCompanionViewModel
     @State private var pulse: CGFloat = 1.0
     @State private var orbit: Double = 0.0
+    @State private var idleOffset: CGFloat = 0.0
+    @State private var idleOpacity: Double = 1.0
 
     private let spriteSize: CGFloat = 18
+
+    private var isIdle: Bool { !viewModel.isListening && !viewModel.isThinking }
 
     var body: some View {
         ZStack {
@@ -38,6 +42,8 @@ struct CursorCompanionView: View {
                 .scaleEffect(pulse)
                 .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.04), radius: 1, x: 0, y: 1)
                 .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.06), radius: 4, x: 0, y: 2)
+                .offset(y: isIdle ? idleOffset : 0)
+                .opacity(isIdle ? idleOpacity : 1.0)
 
             if viewModel.isThinking {
                 Circle()
@@ -49,6 +55,7 @@ struct CursorCompanionView: View {
             }
         }
         .frame(width: spriteSize * 2.4, height: spriteSize * 2.4)
+        .onAppear { startIdleAnimation() }
         .onChange(of: viewModel.isListening) { _, listening in
             withAnimation(
                 listening
@@ -77,6 +84,15 @@ struct CursorCompanionView: View {
         case .blue:   return Color(red: 0.357, green: 0.486, blue: 0.980) // #5B7CFA
         case .green:  return Color(red: 0.490, green: 0.831, blue: 0.604) // #7DD49A
         case .yellow: return Color(red: 0.961, green: 0.725, blue: 0.278) // #F5B947
+        }
+    }
+
+    private func startIdleAnimation() {
+        withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
+            idleOffset = -2.5
+        }
+        withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
+            idleOpacity = 0.7
         }
     }
 }

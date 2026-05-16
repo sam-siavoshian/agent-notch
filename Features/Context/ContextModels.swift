@@ -14,6 +14,7 @@ public enum ContextCaptureTrigger: String, Codable, Sendable {
     case click
     case activation
     case manual
+    case appSwitch
 }
 
 public struct ContextSnapshot: Identifiable, Sendable {

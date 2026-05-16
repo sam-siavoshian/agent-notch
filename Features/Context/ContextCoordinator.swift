@@ -22,6 +22,7 @@ public final class ContextCoordinator: RecentActivityContext {
     private let debugArtifactStore: ContextDebugArtifactStore
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
+    private let appSwitchMonitor: ContextAppSwitchMonitor
 
     private var isStarted = false
 
@@ -46,6 +47,11 @@ public final class ContextCoordinator: RecentActivityContext {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
             }
         }
+        self.appSwitchMonitor = ContextAppSwitchMonitor { _ in
+            Task {
+                await ContextCoordinator.shared.capture(trigger: .appSwitch, cursorLocation: nil)
+            }
+        }
     }
 
     @MainActor
@@ -54,6 +60,7 @@ public final class ContextCoordinator: RecentActivityContext {
         isStarted = true
         AgentInterfaces.context = self
         clickMonitor.start()
+        appSwitchMonitor.start()
 
         Task {
             await capture(trigger: .startup, cursorLocation: nil)
@@ -65,6 +72,7 @@ public final class ContextCoordinator: RecentActivityContext {
         guard isStarted else { return }
         isStarted = false
         clickMonitor.stop()
+        appSwitchMonitor.stop()
         if AgentInterfaces.context === self {
             AgentInterfaces.context = nil
         }
