@@ -44,23 +44,43 @@ struct NotchMusicView: View {
         .onChange(of: trackKey) { _, _ in
             anchorWall = Date()
             anchorElapsed = controller.state.currentTime
-            let t = controller.state.title, a = controller.state.artist, al = controller.state.album
-            if !t.isEmpty, !a.isEmpty { lyrics.fetch(title: t, artist: a, album: al) }
-            else { lyrics.reset() }
+            refetchLyrics()
         }
         .onChange(of: controller.state.currentTime) { _, newVal in
             anchorWall = Date()
             anchorElapsed = newVal
         }
-        .onChange(of: controller.state.isPlaying) { _, _ in
+        .onChange(of: controller.state.isPlaying) { _, nowPlaying in
             anchorWall = Date()
             anchorElapsed = controller.state.currentTime
+            // Spotify only broadcasts on play/pause/track-change. When the user
+            // hits play after a long pause the cached currentTime may be stale,
+            // so kick a refresh to re-anchor against the real player position.
+            if nowPlaying { Task { await controller.refreshNow() } }
+        }
+        .onChange(of: controller.state.duration) { _, _ in
+            // Duration arrives after title/artist sometimes — once we have it,
+            // re-fetch with /api/get for an exact match.
+            if lyrics.lines.isEmpty { refetchLyrics() }
         }
         .onAppear {
             anchorWall = Date()
             anchorElapsed = controller.state.currentTime
-            let t = controller.state.title, a = controller.state.artist, al = controller.state.album
-            if !t.isEmpty, !a.isEmpty { lyrics.fetch(title: t, artist: a, album: al) }
+            refetchLyrics()
+        }
+    }
+
+    /// Kick off a lyrics fetch from current controller state. Idempotent —
+    /// LyricsStore short-circuits when the track key hasn't changed.
+    private func refetchLyrics() {
+        let t = controller.state.title
+        let a = controller.state.artist
+        let al = controller.state.album
+        let d = controller.state.duration
+        if !t.isEmpty, !a.isEmpty {
+            lyrics.fetch(title: t, artist: a, album: al, duration: d)
+        } else {
+            lyrics.reset()
         }
     }
 
@@ -160,11 +180,13 @@ struct NotchMusicView: View {
         }
     }
 
-    /// Live lyrics — only renders when we have any line or are loading.
+    /// Live lyrics — always renders when track loaded; LyricsView handles
+    /// loading / empty / no-match states internally so user sees the panel
+    /// even when LRClib returns no match.
     /// `TimelineView` re-runs every ~250ms to drive predicted elapsed.
     @ViewBuilder
     private var lyricsPanel: some View {
-        if lyrics.isLoading || !lyrics.lines.isEmpty || !lyrics.plain.isEmpty {
+        if controller.state.hasTrack {
             TimelineView(.animation(minimumInterval: 0.25, paused: !controller.state.isPlaying)) { _ in
                 LyricsView(
                     store: lyrics,

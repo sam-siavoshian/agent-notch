@@ -336,10 +336,13 @@ private struct GrantPermissionButton: View {
             object: nil,
             queue: .main
         ) { _ in
-            // 250ms delay — TCC daemon hasn't always settled by the moment
-            // we get focus back.
+            // Assume the user did what we sent them to do. We can't trust
+            // AXIsProcessTrusted() at this moment — it's cached per-process
+            // and stays `false` until a fresh exec, which is the entire
+            // reason we're asking them to relaunch. Show "Relaunch" on
+            // return; if they actually didn't grant, the second tap still
+            // does the right thing (restart → error reappears → loop).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                guard target.isNowGranted else { return }
                 withAnimation(.easeOut(duration: 0.18)) { armed = true }
             }
         }
@@ -356,9 +359,19 @@ private struct DraggableAgentIcon: View {
     var size: CGFloat = 26
     @State private var hover = false
 
+    private var iconImage: NSImage {
+        NSApp.applicationIconImage
+            ?? NSImage(named: NSImage.applicationIconName)
+            ?? NSImage()
+    }
+
     var body: some View {
-        AgentAppIconImage()
+        Image(nsImage: iconImage)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
             .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
             .shadow(color: .black.opacity(hover ? 0.35 : 0.20),
                     radius: hover ? 6 : 3, y: hover ? 3 : 1)
             .scaleEffect(hover ? 1.06 : 1.0)
@@ -370,20 +383,13 @@ private struct DraggableAgentIcon: View {
                 provider.suggestedName = Bundle.main.bundleURL.lastPathComponent
                 return provider
             } preview: {
-                AgentAppIconImage().frame(width: 80, height: 80)
+                Image(nsImage: iconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 80, height: 80)
             }
     }
-}
-
-private struct AgentAppIconImage: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSImageView {
-        let v = NSImageView()
-        v.image = NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName)
-        v.imageScaling = .scaleProportionallyUpOrDown
-        v.unregisterDraggedTypes()
-        return v
-    }
-    func updateNSView(_ nsView: NSImageView, context: Context) {}
 }
 
 /// Tiny ButtonStyle that exposes isPressed via a binding so the label can

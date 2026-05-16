@@ -18,43 +18,51 @@ struct LyricsView: View {
     private let visibleHalf = 2     // 2 above + active + 2 below = 5
 
     var body: some View {
-        Group {
-            if store.isLoading {
-                skeleton
-            } else if store.lines.isEmpty && store.plain.isEmpty {
-                if store.lastError != nil {
-                    emptyState
-                } else {
-                    Color.clear
-                }
-            } else if store.lines.isEmpty {
-                plainBlock
-            } else {
-                syncedScroller
-            }
-        }
-        .frame(height: lineHeight * CGFloat(visibleHalf * 2 + 1))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
+        ZStack {
+            // Panel chrome — NOT masked. Sits behind the scrolling text so the
+            // background doesn't fade out at the edges along with the lyrics.
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .fill(Color.white.opacity(0.04))
                 .overlay(
                     RoundedRectangle(cornerRadius: 11, style: .continuous)
                         .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
                 )
-        )
-        .mask(fadeMask)
+
+            Group {
+                if store.isLoading {
+                    skeleton
+                } else if store.lines.isEmpty && store.plain.isEmpty {
+                    if store.lastError != nil {
+                        emptyState
+                    } else {
+                        Color.clear
+                    }
+                } else if store.lines.isEmpty {
+                    plainBlock
+                } else {
+                    syncedScroller
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .mask(fadeMask)
+        }
+        .frame(height: lineHeight * CGFloat(visibleHalf * 2 + 1) + 16)
         .opacity(isPlaying ? 1.0 : 0.6)
         .animation(.easeOut(duration: 0.18), value: isPlaying)
     }
 
+    /// 250ms look-ahead — the active line lights up SLIGHTLY before it is sung.
+    /// Karaoke convention; without it the highlight feels late on long lines.
+    private static let lookAhead: Double = 0.25
+
     private var activeIndex: Int {
         guard !store.lines.isEmpty else { return 0 }
+        let target = elapsed + Self.lookAhead
         var lo = 0, hi = store.lines.count - 1, idx = 0
         while lo <= hi {
             let mid = (lo + hi) / 2
-            if store.lines[mid].time <= elapsed { idx = mid; lo = mid + 1 }
+            if store.lines[mid].time <= target { idx = mid; lo = mid + 1 }
             else { hi = mid - 1 }
         }
         return idx

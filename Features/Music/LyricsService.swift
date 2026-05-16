@@ -38,7 +38,10 @@ final class LyricsStore: ObservableObject {
 
     /// Fetch lyrics for the given track. No-op if the key matches the
     /// currently-loaded set. Cancels any in-flight fetch on key change.
-    func fetch(title: String, artist: String, album: String = "") {
+    /// Pass `duration` (seconds) when available so we can hit LRClib's exact
+    /// `/api/get` endpoint, which returns the right version on the first try
+    /// (`/api/search` returns fuzzy matches, often the wrong recording).
+    func fetch(title: String, artist: String, album: String = "", duration: Double = 0) {
         let key = normalize("\(title)|\(artist)")
         guard !title.isEmpty, !artist.isEmpty else {
             reset(); return
@@ -60,8 +63,9 @@ final class LyricsStore: ObservableObject {
         plain = ""
         lastError = nil
 
-        fetchTask = Task { [weak self, key, title, artist, album] in
-            let result = await LRClibClient.search(title: title, artist: artist, album: album)
+        fetchTask = Task { [weak self, key, title, artist, album, duration] in
+            let result = await LRClibClient.fetch(title: title, artist: artist,
+                                                  album: album, duration: duration)
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 guard self.loadedKey == key else { return }
@@ -115,14 +119,27 @@ enum LRClibClient {
         let trackName: String?
         let artistName: String?
         let albumName: String?
+        let duration: Double?
         let plainLyrics: String?
         let syncedLyrics: String?
     }
 
-    static func search(title: String, artist: String, album: String) async
+    /// Two-step lookup: try `/api/get` first (exact match by track + artist +
+    /// album + duration — returns the right recording). If that 404s, fall
+    /// back to `/api/search` and pick the hit whose duration is closest to ours
+    /// (the search endpoint can return covers, live versions, remixes).
+    static func fetch(title: String, artist: String, album: String, duration: Double) async
         -> Result<LyricsStore.ParsedLyrics, Error>
     {
-        var comps = URLComponents(string: "https://lrclib.net/api/search")!
+        if duration > 0, !album.isEmpty,
+           let hit = await getExact(title: title, artist: artist,
+                                    album: album, duration: duration) {
+            return .success(parsedFrom(hit))
+        }
+
+        guard var comps = URLComponents(string: "https://lrclib.net/api/search") else {
+            return .failure(LRCError.decode)
+        }
         comps.queryItems = [
             URLQueryItem(name: "track_name", value: title),
             URLQueryItem(name: "artist_name", value: artist),
@@ -132,41 +149,93 @@ enum LRClibClient {
         }
         guard let url = comps.url else { return .failure(LRCError.decode) }
 
-        var req = URLRequest(url: url, timeoutInterval: 6)
-        req.setValue("AgentNotch/0.1 (https://github.com/agentnotch)",
-                     forHTTPHeaderField: "User-Agent")
-
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-            guard (200..<300).contains(code) else { return .failure(LRCError.badStatus(code)) }
+            let data = try await get(url)
             let hits = try JSONDecoder().decode([Hit].self, from: data)
-            guard let hit = hits.first(where: {
+            let candidates = hits.filter {
                 ($0.syncedLyrics?.isEmpty == false) || ($0.plainLyrics?.isEmpty == false)
-            }) else {
-                return .failure(LRCError.noMatch)
             }
-            let parsed = LyricsStore.ParsedLyrics(
-                lines: parseLRC(hit.syncedLyrics ?? ""),
-                plain: hit.plainLyrics ?? ""
-            )
-            return .success(parsed)
+            guard !candidates.isEmpty else { return .failure(LRCError.noMatch) }
+
+            // Prefer the candidate whose duration is closest to ours; prefer
+            // those that actually have synced lyrics. Falls back to first hit.
+            let best = candidates.min { lhs, rhs in
+                let lScore = matchScore(hit: lhs, duration: duration)
+                let rScore = matchScore(hit: rhs, duration: duration)
+                return lScore < rScore
+            } ?? candidates[0]
+            return .success(parsedFrom(best))
         } catch {
             return .failure(error)
         }
     }
 
+    /// Lower score is better. Synced beats plain; tighter duration delta wins.
+    private static func matchScore(hit: Hit, duration: Double) -> Double {
+        let syncedBonus: Double = (hit.syncedLyrics?.isEmpty == false) ? 0 : 100
+        let hitDur = hit.duration ?? 0
+        let delta = duration > 0 && hitDur > 0 ? abs(hitDur - duration) : 50
+        return syncedBonus + delta
+    }
+
+    private static func getExact(title: String, artist: String,
+                                 album: String, duration: Double) async -> Hit? {
+        guard var comps = URLComponents(string: "https://lrclib.net/api/get") else { return nil }
+        comps.queryItems = [
+            URLQueryItem(name: "track_name", value: title),
+            URLQueryItem(name: "artist_name", value: artist),
+            URLQueryItem(name: "album_name", value: album),
+            URLQueryItem(name: "duration", value: String(Int(duration.rounded()))),
+        ]
+        guard let url = comps.url else { return nil }
+        guard let data = try? await get(url) else { return nil }
+        return try? JSONDecoder().decode(Hit.self, from: data)
+    }
+
+    private static func get(_ url: URL) async throws -> Data {
+        var req = URLRequest(url: url, timeoutInterval: 6)
+        req.setValue("AgentNotch/0.1 (https://github.com/agentnotch)",
+                     forHTTPHeaderField: "User-Agent")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else { throw LRCError.badStatus(code) }
+        return data
+    }
+
+    private static func parsedFrom(_ hit: Hit) -> LyricsStore.ParsedLyrics {
+        LyricsStore.ParsedLyrics(
+            lines: parseLRC(hit.syncedLyrics ?? ""),
+            plain: hit.plainLyrics ?? ""
+        )
+    }
+
     // MARK: - LRC parser
 
-    /// Parses `[mm:ss.xx]` or `[m:ss]` timestamped lines. Multi-tag lines like
-    /// `[00:12.30][00:45.10]text` produce one LyricLine per tag.
+    /// Parses `[mm:ss.xx]` or `[m:ss.xxx]` timestamped lines. Multi-tag lines
+    /// like `[00:12.30][00:45.10]text` produce one LyricLine per tag.
+    /// Honors `[offset:+/-N]` ms header (shifts all timestamps), strips BOM,
+    /// handles both LF and CRLF.
     static func parseLRC(_ raw: String) -> [LyricLine] {
         guard !raw.isEmpty else { return [] }
+        let cleaned = raw.hasPrefix("\u{FEFF}") ? String(raw.dropFirst()) : raw
+
+        // [offset:+250] or [offset:-100] — milliseconds, ADDED to every timestamp.
+        // Positive offset means lyrics arrive LATE so we shift forward.
+        var offsetSec: Double = 0
+        if let offRange = cleaned.range(of: #"\[offset:\s*([+-]?\d+)\]"#,
+                                        options: .regularExpression) {
+            let body = cleaned[offRange]
+            if let numRange = body.range(of: #"[+-]?\d+"#, options: .regularExpression),
+               let ms = Double(body[numRange]) {
+                offsetSec = ms / 1000.0
+            }
+        }
+
         let pattern = #"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
 
         var out: [LyricLine] = []
-        for rawLine in raw.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+        for rawLine in cleaned.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
             let line = String(rawLine)
             let ns = line as NSString
             let matches = regex.matches(in: line, range: NSRange(location: 0, length: ns.length))
@@ -183,10 +252,10 @@ enum LRClibClient {
                 }
                 let mins = Double(minS) ?? 0
                 let secs = Double(secS) ?? 0
-                let centis = Double(subS) ?? 0
+                let frac = Double(subS) ?? 0
                 let divisor: Double = subS.count >= 3 ? 1000 : 100
-                let t = mins * 60 + secs + centis / divisor
-                out.append(LyricLine(time: t, text: text))
+                let t = mins * 60 + secs + frac / divisor + offsetSec
+                out.append(LyricLine(time: max(0, t), text: text))
             }
         }
         return out.sorted { $0.time < $1.time }

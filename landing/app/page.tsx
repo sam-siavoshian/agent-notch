@@ -5,12 +5,12 @@ export default function Home() {
         <header className="chrome">
           <a className="pill logo" href="#">
             <span className="logo__mark">agent notch</span>
-            <span className="logo__sub">a macOS computer-use agent</span>
+            <span className="logo__sub">open source, for mac</span>
           </a>
           <nav className="pill nav">
             <a className="nav__link" href="#features">features</a>
             <a className="nav__link" href="#how">how it works</a>
-            <a className="nav__link" href="#stack">stack</a>
+            <a className="nav__link" href="#github">github</a>
             <a className="pill pill--dark nav__cta" href="#download">
               download
             </a>
@@ -18,7 +18,7 @@ export default function Home() {
           <div className="stat-wrap">
             <div className="pill pill--stat">
               <span className="dot" style={{ background: "#22c55e" }} />
-              <strong>live</strong> ships in your notch
+              <strong>shipped</strong> free and open source
             </div>
           </div>
         </header>
@@ -31,39 +31,24 @@ export default function Home() {
               in your notch.
             </h1>
             <p className="sub">
-              long-press the cursor. speak. it sees your screen, reads what
-              matters, and clicks for you. nothing leaves your mac you did not
-              put there.
+              hold the cursor. say what you want. it watches the screen and
+              does the rest. your hands stay free. your machine stays yours.
             </p>
             <div className="cta-row">
               <a className="pill pill--dark" href="#download">
                 download for mac
               </a>
               <a className="pill pill--soft" href="#how">
-                see how it works →
+                watch one run →
               </a>
             </div>
           </div>
 
           <div className="stage" aria-hidden="true">
-            <div className="float-chip pill float-chip--listen">
-              <span className="badge">↗</span>
-              listening
-            </div>
-            <div className="float-chip pill float-chip--ctx">
-              <span className="badge">i</span>
-              reading screen
-            </div>
-            <div className="float-chip pill float-chip--ok">
-              <span className="badge">✓</span>
-              clicked submit
-            </div>
-
             <div className="macbook">
               <div className="macbook__screen">
                 <div className="macbook__display">
                   <div className="desktop-bg" />
-                  <div className="desktop-grain" />
 
                   <div className="notch">
                     <div className="notch__wave">
@@ -72,17 +57,14 @@ export default function Home() {
                     <span className="notch__label">agent on</span>
                   </div>
 
-                  <div className="desktop-card desktop-card--a">
-                    <span className="badge">✓</span> calendar synced
+                  <div className="transcript">
+                    <div className="bubble bubble--user">
+                      open figma. share the doc with arshan.
+                    </div>
+                    <div className="bubble bubble--agent">
+                      opening figma. sharing with arshan@.
+                    </div>
                   </div>
-                  <div className="desktop-card desktop-card--b">
-                    <span className="badge">↗</span> draft sent
-                  </div>
-                  <div className="desktop-card desktop-card--c">
-                    <span className="badge">i</span> 3 tabs · figma · slack
-                  </div>
-
-                  <div className="companion" />
                 </div>
               </div>
               <div className="macbook__hinge" />
@@ -94,42 +76,40 @@ export default function Home() {
 
       <section className="section" id="features">
         <div className="section__inner">
-          <div className="section__eyebrow">// surface</div>
+          <div className="section__eyebrow">// the shape of it</div>
           <h2 className="section__title">
-            two surfaces.
+            not a chat window.
             <br />
-            one <em>quiet</em> agent.
+            a <em>quiet</em> agent.
           </h2>
           <p className="section__sub">
-            it is not a chat window. it is a body on your cursor and a mind in
-            your notch. talk to it like a person. correct it like a colleague.
+            no sidebar. no tab to switch to. a body on your cursor, a mind in
+            your notch.
           </p>
 
           <div className="feature-grid">
             <article className="feature">
               <div className="feature__icon feature__icon--warm">✦</div>
-              <h3>cursor companion</h3>
+              <h3>a body on your cursor</h3>
               <p>
-                a soft sprite follows your real cursor. long-press to speak.
-                release to dispatch. WhisperKit transcribes on-device, no audio
-                leaves the mac.
+                a soft sprite rides your real cursor. hold it down to speak.
+                let go to send. your voice never leaves the machine.
               </p>
             </article>
             <article className="feature">
               <div className="feature__icon feature__icon--blue">◐</div>
-              <h3>notch ui</h3>
+              <h3>a mind in your notch</h3>
               <p>
-                the agent lives in the MacBook notch. status, last transcript,
-                activity feed. tap to open. swipe to settings. cmd+d to toggle.
+                the agent lives in the notch. you see what it heard, what it
+                is doing, what it finished. always there. never in the way.
               </p>
             </article>
             <article className="feature">
               <div className="feature__icon feature__icon--green">◇</div>
-              <h3>computer use</h3>
+              <h3>real clicks, real keys</h3>
               <p>
-                Claude Sonnet drives CGEvent clicks, keystrokes, and scrolls.
-                screen context is summarized by an on-device OCR + Gemini
-                pipeline before each turn.
+                reads the screen first. picks the button. sends the keystroke.
+                the same moves you would have made at the trackpad.
               </p>
             </article>
           </div>
@@ -138,69 +118,47 @@ export default function Home() {
 
       <section className="section" id="how" style={{ paddingTop: 40 }}>
         <div className="section__inner">
-          <div className="section__eyebrow">// loop</div>
+          <div className="section__eyebrow">// one turn</div>
           <h2 className="section__title">
-            how one turn <em>actually</em> runs.
+            ask once. <em>watch</em> it land.
           </h2>
           <p className="section__sub">
-            four steps. measured in seconds. the same loop we debug in dev
-            tools.
+            four steps. about a second each.
           </p>
 
           <div className="steps">
             <div className="step">
-              <span className="step__num">01 · capture</span>
-              <h4>long-press the cursor</h4>
+              <span className="step__num">01 · hold</span>
+              <h4>press the cursor</h4>
               <p>
-                a long-press detector posts a notification. the mic opens.
-                voice recording starts. the sprite pulses.
+                hold the sprite. it pulses. the mic opens. nothing else on
+                screen changes.
               </p>
             </div>
             <div className="step">
-              <span className="step__num">02 · transcribe</span>
-              <h4>whisperkit on-device</h4>
+              <span className="step__num">02 · speak</span>
+              <h4>say the thing</h4>
               <p>
-                release ends the recording. WhisperKit transcribes locally.
-                .transcriptReady fires the agent session.
+                let go. your voice becomes text on the machine. nothing
+                uploaded.
               </p>
             </div>
             <div className="step">
-              <span className="step__num">03 · context</span>
-              <h4>screen + memory packet</h4>
+              <span className="step__num">03 · read</span>
+              <h4>the agent looks</h4>
               <p>
-                OCR over recent screenshots, Gemini summarizes each, the
-                rolling buffer becomes a compact prompt packet.
+                reads your last few screens. sees what you saw. knows where
+                the buttons are before it moves.
               </p>
             </div>
             <div className="step">
-              <span className="step__num">04 · act</span>
-              <h4>sonnet drives the mac</h4>
+              <span className="step__num">04 · move</span>
+              <h4>it actually clicks</h4>
               <p>
-                computer-use tool calls become CGEvents. clicks, keystrokes,
-                scrolls. the notch shows live status the whole turn.
+                real keystrokes, real clicks. the notch shows what it is
+                doing the whole way.
               </p>
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section" id="stack" style={{ paddingTop: 40 }}>
-        <div className="section__inner">
-          <div className="section__eyebrow">// under the hood</div>
-          <h2 className="section__title">stack you can read in an afternoon.</h2>
-          <p className="section__sub">
-            SwiftUI + AppKit. no electron, no web wrappers, no chromium. one
-            binary, one process, one notch.
-          </p>
-          <div className="stack-row">
-            <div className="stack-pill"><span>ui</span>SwiftUI · NSPanel</div>
-            <div className="stack-pill"><span>agent</span>claude-sonnet-4-6</div>
-            <div className="stack-pill"><span>voice</span>WhisperKit</div>
-            <div className="stack-pill"><span>vision</span>VisionKit OCR</div>
-            <div className="stack-pill"><span>context</span>Gemini 2.5</div>
-            <div className="stack-pill"><span>drive</span>CGEventTap</div>
-            <div className="stack-pill"><span>build</span>XcodeGen</div>
-            <div className="stack-pill"><span>min</span>macOS 14 · M-series</div>
           </div>
         </div>
       </section>
@@ -210,15 +168,14 @@ export default function Home() {
           stop typing. <em>start asking.</em>
         </h2>
         <p className="closing__sub">
-          one binary, your notch, your screen. accessibility, screen recording
-          and microphone, only what the agent actually needs.
+          free. open source. yours.
         </p>
         <div className="cta-row">
           <a className="pill pill--dark" href="#">
             download for mac
           </a>
-          <a className="pill pill--soft" href="#">
-            read the prd
+          <a className="pill pill--soft" href="#github">
+            star on github
           </a>
         </div>
       </section>
@@ -228,11 +185,10 @@ export default function Home() {
         <div className="footer__links">
           <a href="#features">features</a>
           <a href="#how">how it works</a>
-          <a href="#stack">stack</a>
-          <a href="#">github</a>
+          <a href="#github">github</a>
           <span className="footer__license">mit licensed</span>
         </div>
-        <span>built at tritonhacks 2026</span>
+        <span>open source. made with care.</span>
       </footer>
     </>
   );

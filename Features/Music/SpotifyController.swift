@@ -45,6 +45,7 @@ final class SpotifyController: ObservableObject {
     private let connectedKey = "spotify.connected"
     private var notificationTask: Task<Void, Never>?
     private var runningPollTask: Task<Void, Never>?
+    private var positionPollTask: Task<Void, Never>?
     private var artworkTask: Task<Void, Never>?
     private var lastArtworkURL: String?
     private let commandDelay: Duration = .milliseconds(40)
@@ -88,7 +89,27 @@ final class SpotifyController: ObservableObject {
                 await self?.refreshRunningStateAndMaybeFetch()
             }
         }
+        // Poll player position every 2s while playing. Spotify only broadcasts
+        // PlaybackStateChanged on play/pause/track-change — without this poll
+        // our cached currentTime drifts when the user seeks externally and the
+        // lyrics anchor goes stale. Cheap: one AppleScript call, ~5ms.
+        positionPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { continue }
+                if self.shouldPollPosition() { await self.refresh() }
+            }
+        }
         Task { await refresh() }
+    }
+
+    /// View can force a fresh AppleScript pull (used when user resumes play
+    /// after a long pause — the cached currentTime is stale until the next
+    /// notification fires, which may be never until the next track change).
+    func refreshNow() async { await refresh() }
+
+    private func shouldPollPosition() -> Bool {
+        isConnected && isRunning && state.isPlaying
     }
 
     /// User tapped Disconnect. Stops listening + clears state.
@@ -97,6 +118,7 @@ final class SpotifyController: ObservableObject {
         UserDefaults.standard.set(false, forKey: connectedKey)
         notificationTask?.cancel(); notificationTask = nil
         runningPollTask?.cancel(); runningPollTask = nil
+        positionPollTask?.cancel(); positionPollTask = nil
         artworkTask?.cancel(); artworkTask = nil
         state = SpotifyPlaybackState()
         lastArtworkURL = nil
