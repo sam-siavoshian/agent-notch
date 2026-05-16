@@ -36,6 +36,12 @@ public struct ContextPerformanceReporter {
             .appendingPathComponent("ContextGeminiCache", isDirectory: true)
     }
 
+    private var aiEventsURL: URL {
+        applicationSupportURL
+            .appendingPathComponent("ContextAI", isDirectory: true)
+            .appendingPathComponent("events.jsonl")
+    }
+
     public init(applicationSupportURL: URL = Self.defaultApplicationSupportURL()) {
         self.applicationSupportURL = applicationSupportURL
     }
@@ -53,6 +59,7 @@ public struct ContextPerformanceReporter {
     ) -> String {
         let memorySummaries = loadMemorySummaries()
         let observationSummaries = loadObservationSummaries(limit: recentObservationLimit)
+        let aiSummaries = loadAISummaries(limit: recentObservationLimit)
         let runSummaries = loadRunSummaries(limit: recentRunLimit)
 
         let totalSurfaces = memorySummaries.reduce(0) { $0 + $1.surfaceCount }
@@ -63,6 +70,12 @@ public struct ContextPerformanceReporter {
         let totalObservations = countJSONObjectRecords(at: observationsURL)
         let totalRuns = countJSONObjectRecords(at: agentMetricsURL)
         let totalGeminiCacheFiles = countJSONFiles(at: geminiCacheURL)
+        let totalAIEvents = countJSONObjectRecords(at: aiEventsURL)
+        let recentQueuedAI = aiSummaries.filter { $0.status == "queued" }.count
+        let recentLiveAI = aiSummaries.filter { $0.status == "completed" && $0.source == "gemini" }.count
+        let recentCachedAI = aiSummaries.filter { $0.status == "completed" && $0.source == "cache" }.count
+        let recentSkippedAI = aiSummaries.filter { $0.status == "skipped" }.count
+        let recentFailedAI = aiSummaries.filter { $0.status == "failed" }.count
         let latestOCRCount = observationSummaries.first?.ocrCount
         let latestOCRText = latestOCRCount.map(String.init) ?? "n/a"
 
@@ -73,6 +86,7 @@ public struct ContextPerformanceReporter {
             "- Artifact root: `\(applicationSupportURL.path)`",
             "- App memories: \(memorySummaries.count) apps, \(totalSurfaces) surfaces, \(totalTransitions) transitions, \(totalNegativeNotes) caution notes",
             "- Gemini memories: \(totalSemanticHighlights) semantic notes, \(totalControls) visible controls, \(totalGeminiCacheFiles) cached observations",
+            "- AI observation events: \(totalAIEvents) records; recent \(recentQueuedAI) queued, \(recentLiveAI) live, \(recentCachedAI) cached, \(recentSkippedAI) skipped, \(recentFailedAI) failed",
             "- Captures observed: \(totalObservations) observation records, latest OCR count: \(latestOCRText)",
             "- Agent runs: \(totalRuns) metric records",
             "",
@@ -95,6 +109,26 @@ public struct ContextPerformanceReporter {
             for observation in observationSummaries {
                 let window = observation.windowTitle.isEmpty ? "Untitled window" : observation.windowTitle
                 lines.append("- \(formatDate(observation.capturedAt)): \(observation.trigger) in \(observation.appName), \(window) | OCR \(observation.ocrCount) | \(observation.width)x\(observation.height)")
+            }
+        }
+
+        lines.append("")
+        lines.append("## Recent AI Observations")
+        if aiSummaries.isEmpty {
+            lines.append("- No AI observation events found in `\(aiEventsURL.path)`.")
+        } else {
+            for event in aiSummaries {
+                let latency = event.latencyMilliseconds.map { ", \($0)ms" } ?? ""
+                let source = event.source.map { ", \($0)" } ?? ""
+                let surface = event.surfaceLabel.map { ", surface: \($0)" } ?? ""
+                let window = event.windowTitle.isEmpty ? "Untitled window" : event.windowTitle
+                lines.append("- \(formatDate(event.happenedAt)): \(event.status) \(event.trigger) in \(event.appName), \(window)\(source)\(latency)\(surface)")
+                if !event.reason.isEmpty {
+                    lines.append("  Reason: \(event.reason)")
+                }
+                if !event.summary.isEmpty {
+                    lines.append("  Output: \(event.summary)")
+                }
             }
         }
 
@@ -192,6 +226,26 @@ public struct ContextPerformanceReporter {
                 )
             }
             .sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    private func loadAISummaries(limit: Int) -> [AISummary] {
+        recentJSONObjectStrings(at: aiEventsURL, limit: limit)
+            .compactMap { line in
+                guard let object = parseJSONObject(line) else { return nil }
+                return AISummary(
+                    happenedAt: object.dateValue("happenedAt") ?? .distantPast,
+                    status: object.stringValue("status", fallback: "unknown"),
+                    source: object.optionalStringValue("source"),
+                    trigger: object.stringValue("trigger", fallback: "unknown"),
+                    appName: object.stringValue("appName", fallback: "Unknown app"),
+                    windowTitle: object.stringValue("windowTitle", fallback: ""),
+                    reason: object.stringValue("reason", fallback: ""),
+                    latencyMilliseconds: object.optionalIntValue("latencyMilliseconds"),
+                    surfaceLabel: object.optionalStringValue("surfaceLabel"),
+                    summary: object.stringValue("summary", fallback: "")
+                )
+            }
+            .sorted { $0.happenedAt > $1.happenedAt }
     }
 
     private func loadRunSummaries(limit: Int) -> [RunSummary] {
@@ -355,6 +409,19 @@ private struct ObservationSummary {
     let height: Int
 }
 
+private struct AISummary {
+    let happenedAt: Date
+    let status: String
+    let source: String?
+    let trigger: String
+    let appName: String
+    let windowTitle: String
+    let reason: String
+    let latencyMilliseconds: Int?
+    let surfaceLabel: String?
+    let summary: String
+}
+
 private struct RunSummary {
     let startedAt: Date
     let durationMs: Int
@@ -370,6 +437,10 @@ private struct RunSummary {
 private extension Dictionary where Key == String, Value == Any {
     func stringValue(_ key: String, fallback: String) -> String {
         self[key] as? String ?? fallback
+    }
+
+    func optionalStringValue(_ key: String) -> String? {
+        self[key] as? String
     }
 
     func intValue(_ key: String) -> Int {

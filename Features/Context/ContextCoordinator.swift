@@ -17,6 +17,8 @@ public final class ContextCoordinator: RecentActivityContext {
     private let memoryStore: ContextMemoryStore
     private let ocrService: ContextOCRService
     private let geminiObservationService: ContextGeminiObservationService
+    private let aiObservationLog: ContextAIObservationLog
+    private let geminiGate: ContextGeminiObservationGate
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
 
@@ -26,12 +28,16 @@ public final class ContextCoordinator: RecentActivityContext {
         capture: ScreenCapture = .shared,
         memoryStore: ContextMemoryStore = .shared,
         ocrService: ContextOCRService = .shared,
-        geminiObservationService: ContextGeminiObservationService = .shared
+        geminiObservationService: ContextGeminiObservationService = .shared,
+        aiObservationLog: ContextAIObservationLog = .shared,
+        geminiGate: ContextGeminiObservationGate = ContextGeminiObservationGate()
     ) {
         self.capture = capture
         self.memoryStore = memoryStore
         self.ocrService = ocrService
         self.geminiObservationService = geminiObservationService
+        self.aiObservationLog = aiObservationLog
+        self.geminiGate = geminiGate
         self.clickMonitor = ContextClickMonitor { location in
             Task {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
@@ -102,6 +108,14 @@ public final class ContextCoordinator: RecentActivityContext {
             }
     }
 
+    public func aiObservationEvents(limit: Int = 20) async -> [ContextAIObservationEvent] {
+        await aiObservationLog.recentEvents(limit: limit)
+    }
+
+    public func aiObservationSummary() async -> ContextAIObservationSummary {
+        await aiObservationLog.summary()
+    }
+
     public func captureCurrentScreenForDebug() async {
         let cursorLocation = await MainActor.run {
             NSEvent.mouseLocation
@@ -162,13 +176,40 @@ public final class ContextCoordinator: RecentActivityContext {
     }
 
     private func scheduleGeminiObservation(for snapshot: ContextSnapshot) {
-        guard snapshot.trigger != .activation else { return }
-        guard ContextGeminiObservationService.isAPIKeyConfigured else { return }
-
         let geminiObservationService = geminiObservationService
         let memoryStore = memoryStore
+        let aiObservationLog = aiObservationLog
+        let geminiGate = geminiGate
+
         Task(priority: .utility) { [snapshot] in
+            let decision = await geminiGate.startDecision(
+                trigger: snapshot.trigger,
+                isAPIKeyConfigured: ContextGeminiObservationService.isAPIKeyConfigured
+            )
+
+            switch decision {
+            case .skip(let reason):
+                await aiObservationLog.record(ContextAIObservationEvent(
+                    status: .skipped,
+                    trigger: snapshot.trigger,
+                    appName: snapshot.appName,
+                    windowTitle: snapshot.windowTitle,
+                    reason: reason
+                ))
+                NSLog("[ContextCoordinator] Gemini skipped for \(snapshot.appName) / \(snapshot.windowTitle): \(reason)")
+                return
+            case .run:
+                break
+            }
+
             let startedAt = Date()
+            await aiObservationLog.record(ContextAIObservationEvent(
+                status: .queued,
+                trigger: snapshot.trigger,
+                appName: snapshot.appName,
+                windowTitle: snapshot.windowTitle,
+                reason: "queued for visual UI/UX observation"
+            ))
             NSLog("[ContextCoordinator] Gemini observation queued for \(snapshot.appName) / \(snapshot.windowTitle)")
             let observation = await geminiObservationService.observe(
                 jpegData: snapshot.jpegData,
@@ -181,8 +222,20 @@ public final class ContextCoordinator: RecentActivityContext {
                     "captureTrigger": snapshot.trigger.rawValue
                 ]
             )
+            let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
+            await geminiGate.finish()
 
-            guard let observation else { return }
+            guard let observation else {
+                await aiObservationLog.record(ContextAIObservationEvent(
+                    status: .failed,
+                    trigger: snapshot.trigger,
+                    appName: snapshot.appName,
+                    windowTitle: snapshot.windowTitle,
+                    reason: "Gemini returned no valid observation",
+                    latencyMilliseconds: elapsedMilliseconds
+                ))
+                return
+            }
 
             await memoryStore.record(
                 observation,
@@ -190,7 +243,21 @@ public final class ContextCoordinator: RecentActivityContext {
                 windowTitle: snapshot.windowTitle,
                 capturedAt: snapshot.capturedAt
             )
-            let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
+            await aiObservationLog.record(ContextAIObservationEvent(
+                status: .completed,
+                trigger: snapshot.trigger,
+                appName: snapshot.appName,
+                windowTitle: snapshot.windowTitle,
+                reason: "recorded \(observation.visibleControls.count) controls, \(observation.affordances.count) affordances, \(observation.entities.count) entities",
+                source: observation.source.rawValue,
+                latencyMilliseconds: elapsedMilliseconds,
+                confidence: observation.confidence,
+                surfaceLabel: observation.surfaceLabel,
+                summary: observation.summary,
+                controlsCount: observation.visibleControls.count,
+                affordancesCount: observation.affordances.count,
+                entitiesCount: observation.entities.count
+            ))
             NSLog("[ContextCoordinator] Gemini learned \(observation.appLabel) / \(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
         }
     }

@@ -11,8 +11,10 @@ import SwiftUI
 struct ContextDebugView: View {
     @State private var diagnosticsSummary = "Loading context..."
     @State private var snapshots: [ContextDebugSnapshot] = []
+    @State private var aiEvents: [ContextAIObservationEvent] = []
     @State private var activationPreview = ""
     @State private var performanceReport = ""
+    @State private var aiStatus = "No AI observations yet."
     @State private var status = ""
     @State private var mode: ContextDebugMode = .packet
 
@@ -82,6 +84,10 @@ struct ContextDebugView: View {
 
             iconButton("shippingbox", help: "Open Gemini observation cache") {
                 openDirectory(ContextGeminiObservationService.defaultCacheDirectoryURL)
+            }
+
+            iconButton("waveform.path.ecg", help: "Open AI observation log") {
+                openDirectory(ContextAIObservationLog.defaultDirectoryURL)
             }
         }
     }
@@ -171,16 +177,12 @@ struct ContextDebugView: View {
                 Spacer(minLength: 4)
 
                 iconButton("doc.on.doc", help: "Copy visible debug text") {
-                    copy(mode == .packet ? activationPreview : performanceReport, label: mode.copyLabel)
+                    copy(copyText, label: mode.copyLabel)
                 }
             }
 
             ScrollView(.vertical, showsIndicators: true) {
-                Text(mode == .packet ? activationPreview : performanceReport)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                inspectorContent
                     .padding(8)
             }
             .background(
@@ -188,6 +190,157 @@ struct ContextDebugView: View {
                     .fill(Color.white.opacity(0.04))
             )
         }
+    }
+
+    @ViewBuilder
+    private var inspectorContent: some View {
+        switch mode {
+        case .packet:
+            debugText(activationPreview)
+        case .report:
+            debugText(performanceReport)
+        case .ai:
+            aiInspector
+        }
+    }
+
+    private func debugText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10.5, design: .monospaced))
+            .foregroundStyle(.white.opacity(0.72))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var aiInspector: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(aiStatus)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.78))
+                .textSelection(.enabled)
+
+            if aiEvents.isEmpty {
+                Text("No Gemini events yet. Use the camera button or interact with the Mac after configuring GEMINI_API_KEY.")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.45))
+                    .textSelection(.enabled)
+            } else {
+                ForEach(aiEvents) { event in
+                    aiEventRow(event)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private var copyText: String {
+        switch mode {
+        case .packet:
+            return activationPreview
+        case .report:
+            return performanceReport
+        case .ai:
+            return aiLogText
+        }
+    }
+
+    private var aiLogText: String {
+        var lines = [
+            "AI observation status:",
+            aiStatus,
+            "",
+            "Recent AI events:"
+        ]
+
+        if aiEvents.isEmpty {
+            lines.append("- No Gemini events recorded.")
+        } else {
+            for event in aiEvents {
+                var line = "- \(event.happenedAt.formatted(date: .omitted, time: .standard)) [\(event.status.rawValue)] \(event.trigger.rawValue) \(event.appName)"
+                if !event.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    line += " / \(event.windowTitle)"
+                }
+                line += ": \(event.reason)"
+                if let latency = event.latencyMilliseconds {
+                    line += " (\(latency)ms)"
+                }
+                if let source = event.source {
+                    line += " source=\(source)"
+                }
+                if let confidence = event.confidence {
+                    line += " confidence=\(String(format: "%.2f", confidence))"
+                }
+                if let summary = event.summary {
+                    line += " summary=\"\(summary)\""
+                }
+                lines.append(line)
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func aiEventRow(_ event: ContextAIObservationEvent) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(event.status.rawValue.uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(statusColor(event.status))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(statusColor(event.status).opacity(0.12))
+                    )
+
+                Text(event.happenedAt.formatted(date: .omitted, time: .standard))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.42))
+
+                Spacer(minLength: 6)
+
+                if let latency = event.latencyMilliseconds {
+                    Text("\(latency)ms")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+
+                if let source = event.source {
+                    Text(source)
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.52))
+                }
+            }
+
+            Text("\(event.trigger.rawValue) - \(event.appName)\(event.windowTitle.isEmpty ? "" : " - \(event.windowTitle)")")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.68))
+                .lineLimit(1)
+
+            if let surface = event.surfaceLabel {
+                Text(surface)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.56))
+                    .lineLimit(1)
+            }
+
+            Text(event.summary ?? event.reason)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.48))
+                .lineLimit(3)
+                .textSelection(.enabled)
+
+            if event.status == .completed {
+                Text("\(event.controlsCount) controls - \(event.affordancesCount) affordances - \(event.entitiesCount) entities\(confidenceText(event.confidence))")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.38))
+            }
+        }
+        .padding(7)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
     }
 
     private func captureRow(_ snapshot: ContextDebugSnapshot) -> some View {
@@ -251,12 +404,16 @@ struct ContextDebugView: View {
     private func refresh() async {
         let diagnostics = await ContextCoordinator.shared.diagnostics()
         let recentSnapshots = await ContextCoordinator.shared.debugSnapshots(limit: 8)
+        let aiSummary = await ContextCoordinator.shared.aiObservationSummary()
+        let recentAIEvents = await ContextCoordinator.shared.aiObservationEvents(limit: 18)
         let packet = await ContextCoordinator.shared.currentActivationPreview()
         let report = ContextPerformanceReporter().markdownReport()
 
         await MainActor.run {
             diagnosticsSummary = diagnostics.summary
             snapshots = recentSnapshots
+            aiStatus = aiSummary.statusLine
+            aiEvents = recentAIEvents
             activationPreview = packet.isEmpty ? "No activation packet available yet." : packet
             performanceReport = report
         }
@@ -281,11 +438,30 @@ struct ContextDebugView: View {
         NSPasteboard.general.setString(text, forType: .string)
         status = "Copied \(label)."
     }
+
+    private func statusColor(_ eventStatus: ContextAIObservationEvent.Status) -> Color {
+        switch eventStatus {
+        case .queued:
+            return .blue.opacity(0.9)
+        case .skipped:
+            return .yellow.opacity(0.9)
+        case .completed:
+            return .green.opacity(0.9)
+        case .failed:
+            return .red.opacity(0.9)
+        }
+    }
+
+    private func confidenceText(_ confidence: Double?) -> String {
+        guard let confidence else { return "" }
+        return " - conf \(String(format: "%.2f", confidence))"
+    }
 }
 
 private enum ContextDebugMode: String, CaseIterable, Identifiable {
     case packet
     case report
+    case ai
 
     var id: String { rawValue }
 
@@ -293,6 +469,7 @@ private enum ContextDebugMode: String, CaseIterable, Identifiable {
         switch self {
         case .packet: return "Injected"
         case .report: return "Metrics"
+        case .ai: return "AI"
         }
     }
 
@@ -300,6 +477,7 @@ private enum ContextDebugMode: String, CaseIterable, Identifiable {
         switch self {
         case .packet: return "text.badge.checkmark"
         case .report: return "chart.xyaxis.line"
+        case .ai: return "brain.head.profile"
         }
     }
 
@@ -307,6 +485,7 @@ private enum ContextDebugMode: String, CaseIterable, Identifiable {
         switch self {
         case .packet: return "Show the context packet injected into the computer-use agent."
         case .report: return "Show local capture, memory, and run metrics."
+        case .ai: return "Show Gemini queue, skip, cache, live, latency, and output telemetry."
         }
     }
 
@@ -314,6 +493,7 @@ private enum ContextDebugMode: String, CaseIterable, Identifiable {
         switch self {
         case .packet: return "activation packet"
         case .report: return "performance report"
+        case .ai: return "AI call log"
         }
     }
 }
