@@ -204,7 +204,7 @@ public final class ContextCoordinator: RecentActivityContext {
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.35)
-            let recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
+            let recognizedText = await ocrService.recognizeText(in: snapshot.pngData)
             let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
                 trigger: trigger,
@@ -219,21 +219,33 @@ public final class ContextCoordinator: RecentActivityContext {
             await store.record(contextSnapshot)
             await memoryStore.record(contextSnapshot)
             let captureArtifact = await debugArtifactStore.recordCapture(contextSnapshot)
-            scheduleGeminiObservation(for: contextSnapshot, captureArtifact: captureArtifact)
+            scheduleGeminiObservation(
+                for: contextSnapshot,
+                imageData: snapshot.pngData,
+                mimeType: "image/png",
+                captureArtifact: captureArtifact
+            )
             NSLog("[ContextCoordinator] Captured \(trigger.rawValue) context for \(metadata.appName) with \(recognizedText.count) OCR text items")
         } catch {
             NSLog("[ContextCoordinator] Capture failed: \(error)")
         }
     }
 
-    private func scheduleGeminiObservation(for snapshot: ContextSnapshot, captureArtifact: ContextCaptureDebugArtifact?) {
+    private func scheduleGeminiObservation(
+        for snapshot: ContextSnapshot,
+        imageData: Data,
+        mimeType: String,
+        captureArtifact: ContextCaptureDebugArtifact?
+    ) {
         let geminiObservationService = geminiObservationService
         let memoryStore = memoryStore
         let aiObservationLog = aiObservationLog
         let geminiGate = geminiGate
-        let debugPaths = ContextGeminiObservationService.debugPaths(for: snapshot.jpegData)
+        let debugPaths = ContextGeminiObservationService.debugPaths(for: imageData, mimeType: mimeType)
+        let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
+        let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
 
-        Task(priority: .utility) { [snapshot] in
+        Task(priority: .utility) { [snapshot, imageData] in
             let decision = await geminiGate.startDecision(
                 trigger: snapshot.trigger,
                 isAPIKeyConfigured: ContextGeminiObservationService.isAPIKeyConfigured
@@ -247,9 +259,14 @@ public final class ContextCoordinator: RecentActivityContext {
                     appName: snapshot.appName,
                     windowTitle: snapshot.windowTitle,
                     reason: reason,
-                    imageBytes: snapshot.jpegData.count,
+                    imageBytes: imageData.count,
+                    requestMimeType: mimeType,
+                    requestMediaResolution: mediaResolution,
+                    requestThinkingLevel: thinkingLevel,
                     ocrCount: snapshot.recognizedText.count,
                     imageHash: debugPaths.imageHash,
+                    requestImagePath: debugPaths.requestImagePath,
+                    requestMetadataPath: debugPaths.requestMetadataPath,
                     captureImagePath: captureArtifact?.jpegPath,
                     captureJSONPath: captureArtifact?.jsonPath,
                     promptPath: debugPaths.promptPath,
@@ -269,9 +286,14 @@ public final class ContextCoordinator: RecentActivityContext {
                 appName: snapshot.appName,
                 windowTitle: snapshot.windowTitle,
                 reason: "queued for visual UI/UX observation",
-                imageBytes: snapshot.jpegData.count,
+                imageBytes: imageData.count,
+                requestMimeType: mimeType,
+                requestMediaResolution: mediaResolution,
+                requestThinkingLevel: thinkingLevel,
                 ocrCount: snapshot.recognizedText.count,
                 imageHash: debugPaths.imageHash,
+                requestImagePath: debugPaths.requestImagePath,
+                requestMetadataPath: debugPaths.requestMetadataPath,
                 captureImagePath: captureArtifact?.jpegPath,
                 captureJSONPath: captureArtifact?.jsonPath,
                 promptPath: debugPaths.promptPath,
@@ -280,7 +302,8 @@ public final class ContextCoordinator: RecentActivityContext {
             ))
             NSLog("[ContextCoordinator] Gemini observation queued for \(snapshot.appName) / \(snapshot.windowTitle)")
             let observation = await geminiObservationService.observe(
-                jpegData: snapshot.jpegData,
+                imageData: imageData,
+                mimeType: mimeType,
                 appName: snapshot.appName,
                 windowTitle: snapshot.windowTitle,
                 width: snapshot.width,
@@ -301,9 +324,14 @@ public final class ContextCoordinator: RecentActivityContext {
                     windowTitle: snapshot.windowTitle,
                     reason: "Gemini returned no valid observation",
                     latencyMilliseconds: elapsedMilliseconds,
-                    imageBytes: snapshot.jpegData.count,
+                    imageBytes: imageData.count,
+                    requestMimeType: mimeType,
+                    requestMediaResolution: mediaResolution,
+                    requestThinkingLevel: thinkingLevel,
                     ocrCount: snapshot.recognizedText.count,
                     imageHash: debugPaths.imageHash,
+                    requestImagePath: debugPaths.requestImagePath,
+                    requestMetadataPath: debugPaths.requestMetadataPath,
                     captureImagePath: captureArtifact?.jpegPath,
                     captureJSONPath: captureArtifact?.jsonPath,
                     promptPath: debugPaths.promptPath,
@@ -351,9 +379,14 @@ public final class ContextCoordinator: RecentActivityContext {
                 negativeCues: observation.negativeCues,
                 memoryCandidates: observation.memoryCandidates,
                 uncertainty: observation.uncertainty,
-                imageBytes: snapshot.jpegData.count,
+                imageBytes: imageData.count,
+                requestMimeType: mimeType,
+                requestMediaResolution: mediaResolution,
+                requestThinkingLevel: thinkingLevel,
                 ocrCount: snapshot.recognizedText.count,
                 imageHash: debugPaths.imageHash,
+                requestImagePath: debugPaths.requestImagePath,
+                requestMetadataPath: debugPaths.requestMetadataPath,
                 captureImagePath: captureArtifact?.jpegPath,
                 captureJSONPath: captureArtifact?.jsonPath,
                 promptPath: debugPaths.promptPath,

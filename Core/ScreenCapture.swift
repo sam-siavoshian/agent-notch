@@ -18,6 +18,7 @@ public actor ScreenCapture {
 
     public struct Snapshot: Sendable {
         public let jpegData: Data
+        public let pngData: Data
         public let width: Int
         public let height: Int
         public let scale: CGFloat
@@ -52,8 +53,12 @@ public actor ScreenCapture {
         guard let jpeg = jpegEncode(image, quality: quality) else {
             throw NSError(domain: "ScreenCapture", code: -2, userInfo: [NSLocalizedDescriptionKey: "JPEG encode failed"])
         }
+        guard let png = pngEncode(image) else {
+            throw NSError(domain: "ScreenCapture", code: -3, userInfo: [NSLocalizedDescriptionKey: "PNG encode failed"])
+        }
         return Snapshot(
             jpegData: jpeg,
+            pngData: png,
             width: image.width,
             height: image.height,
             scale: display.pointPixelScale(),
@@ -64,6 +69,11 @@ public actor ScreenCapture {
     private func jpegEncode(_ image: CGImage, quality: CGFloat) -> Data? {
         let rep = NSBitmapImageRep(cgImage: image)
         return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+    }
+
+    private func pngEncode(_ image: CGImage) -> Data? {
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .png, properties: [:])
     }
 }
 

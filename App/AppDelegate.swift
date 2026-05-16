@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Env.load()
         NotchWindowController.shared.install()
+        ContextDevToolsWindowController.shared.install()
+        ContextDevToolsWindowController.shared.present()
 
         OnboardingWindowController.shared.presentIfNeeded { [weak self] in
             self?.bootAgent()
@@ -27,7 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func bootAgent() {
         CursorCompanion.shared.start()
         ContextCoordinator.shared.start()
-        ContextDevToolsWindowController.shared.install()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
         // Spotify: user-opt-in. Resume the connection if they previously

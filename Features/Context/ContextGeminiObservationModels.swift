@@ -9,13 +9,36 @@
 import Foundation
 
 public struct ContextGeminiObservationInput: Sendable {
-    public let jpegData: Data
+    public let imageData: Data
+    public let mimeType: String
     public let appName: String?
     public let windowTitle: String?
     public let width: Int?
     public let height: Int?
     public let recognizedText: [ContextRecognizedText]
     public let metadata: [String: String]
+
+    public var jpegData: Data { imageData }
+
+    public init(
+        imageData: Data,
+        mimeType: String,
+        appName: String? = nil,
+        windowTitle: String? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
+        recognizedText: [ContextRecognizedText] = [],
+        metadata: [String: String] = [:]
+    ) {
+        self.imageData = imageData
+        self.mimeType = mimeType
+        self.appName = appName
+        self.windowTitle = windowTitle
+        self.width = width
+        self.height = height
+        self.recognizedText = recognizedText
+        self.metadata = metadata
+    }
 
     public init(
         jpegData: Data,
@@ -26,13 +49,16 @@ public struct ContextGeminiObservationInput: Sendable {
         recognizedText: [ContextRecognizedText] = [],
         metadata: [String: String] = [:]
     ) {
-        self.jpegData = jpegData
-        self.appName = appName
-        self.windowTitle = windowTitle
-        self.width = width
-        self.height = height
-        self.recognizedText = recognizedText
-        self.metadata = metadata
+        self.init(
+            imageData: jpegData,
+            mimeType: "image/jpeg",
+            appName: appName,
+            windowTitle: windowTitle,
+            width: width,
+            height: height,
+            recognizedText: recognizedText,
+            metadata: metadata
+        )
     }
 }
 

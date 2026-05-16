@@ -52,8 +52,13 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
     public let memoryCandidates: [String]?
     public let uncertainty: [String]?
     public let imageBytes: Int?
+    public let requestMimeType: String?
+    public let requestMediaResolution: String?
+    public let requestThinkingLevel: String?
     public let ocrCount: Int?
     public let imageHash: String?
+    public let requestImagePath: String?
+    public let requestMetadataPath: String?
     public let captureImagePath: String?
     public let captureJSONPath: String?
     public let promptPath: String?
@@ -95,8 +100,13 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         memoryCandidates: [String]? = nil,
         uncertainty: [String]? = nil,
         imageBytes: Int? = nil,
+        requestMimeType: String? = nil,
+        requestMediaResolution: String? = nil,
+        requestThinkingLevel: String? = nil,
         ocrCount: Int? = nil,
         imageHash: String? = nil,
+        requestImagePath: String? = nil,
+        requestMetadataPath: String? = nil,
         captureImagePath: String? = nil,
         captureJSONPath: String? = nil,
         promptPath: String? = nil,
@@ -137,8 +147,13 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         self.memoryCandidates = memoryCandidates
         self.uncertainty = uncertainty
         self.imageBytes = imageBytes
+        self.requestMimeType = requestMimeType
+        self.requestMediaResolution = requestMediaResolution
+        self.requestThinkingLevel = requestThinkingLevel
         self.ocrCount = ocrCount
         self.imageHash = imageHash
+        self.requestImagePath = requestImagePath
+        self.requestMetadataPath = requestMetadataPath
         self.captureImagePath = captureImagePath
         self.captureJSONPath = captureJSONPath
         self.promptPath = promptPath

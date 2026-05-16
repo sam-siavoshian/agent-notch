@@ -13,7 +13,10 @@ public actor ContextGeminiObservationService {
     public static let shared = ContextGeminiObservationService()
 
     public static let defaultModel = "gemini-3.1-flash-lite"
-    public static let promptVersion = "context-gemini-observation-v3"
+    public static let promptVersion = "context-gemini-observation-v4"
+    public static let defaultMediaResolution = "MEDIA_RESOLUTION_HIGH"
+    public static let defaultThinkingLevel = "minimal"
+    public static let defaultMaxOutputTokens = 2400
 
     public static var isAPIKeyConfigured: Bool {
         guard let apiKey = Env.value("GEMINI_API_KEY")?.trimmingCharacters(in: .whitespacesAndNewlines) else {
@@ -29,12 +32,29 @@ public actor ContextGeminiObservationService {
             .appendingPathComponent("ContextGeminiCache", isDirectory: true)
     }
 
-    public static func debugPaths(for jpegData: Data) -> ContextGeminiDebugPaths {
-        let imageHash = sha256Hex(jpegData)
+    public static var configuredMediaResolution: String {
+        normalizedMediaResolution(
+            Env.value("AGENTNOTCH_GEMINI_MEDIA_RESOLUTION")
+                ?? Env.value("GEMINI_MEDIA_RESOLUTION")
+        )
+    }
+
+    public static var configuredThinkingLevel: String {
+        normalizedThinkingLevel(
+            Env.value("AGENTNOTCH_GEMINI_THINKING_LEVEL")
+                ?? Env.value("GEMINI_THINKING_LEVEL")
+        )
+    }
+
+    public static func debugPaths(for imageData: Data, mimeType: String = "image/png") -> ContextGeminiDebugPaths {
+        let imageHash = sha256Hex(imageData)
         let shortHash = String(imageHash.prefix(16))
         let debugDirectoryURL = defaultCacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
+        let imageExtension = mimeType == "image/png" ? "png" : "jpg"
         return ContextGeminiDebugPaths(
             imageHash: imageHash,
+            requestImagePath: debugDirectoryURL.appendingPathComponent("\(shortHash)-request-image.\(imageExtension)").path,
+            requestMetadataPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-request.txt").path,
             promptPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-prompt.txt").path,
             rawResponsePath: debugDirectoryURL.appendingPathComponent("\(shortHash)-raw-response.json").path,
             errorPath: debugDirectoryURL.appendingPathComponent("\(shortHash)-error.txt").path
@@ -68,8 +88,9 @@ public actor ContextGeminiObservationService {
     }
 
     public func observe(_ input: ContextGeminiObservationInput) async -> ContextGeminiObservation? {
-        let imageHash = Self.sha256Hex(input.jpegData)
-        let cacheURL = cacheURL(imageHash: imageHash, input: input)
+        let config = Self.requestConfig()
+        let imageHash = Self.sha256Hex(input.imageData)
+        let cacheURL = cacheURL(imageHash: imageHash, input: input, config: config)
 
         if let cached = readCachedObservation(at: cacheURL) {
             var observation = cached
@@ -84,22 +105,25 @@ public actor ContextGeminiObservationService {
 
         do {
             let prompt = Self.prompt(for: input)
+            writeDebugData(input.imageData, imageHash: imageHash, mimeType: input.mimeType)
+            writeDebugText(requestMetadata(for: input, config: config), imageHash: imageHash, suffix: "request.txt")
             writeDebugText(prompt, imageHash: imageHash, suffix: "prompt.txt")
             let request = GeminiGenerateContentRequest(
                 contents: [
                     .init(parts: [
-                        .text(prompt),
-                        .inlineData(mimeType: "image/jpeg", data: input.jpegData.base64EncodedString())
+                        .inlineData(mimeType: input.mimeType, data: input.imageData.base64EncodedString()),
+                        .text(prompt)
                     ])
                 ],
                 generationConfig: .init(
-                    temperature: 0,
-                    maxOutputTokens: 3200,
-                    responseMimeType: "application/json"
+                    maxOutputTokens: config.maxOutputTokens,
+                    responseMimeType: "application/json",
+                    mediaResolution: config.mediaResolution,
+                    thinkingConfig: .init(thinkingLevel: config.thinkingLevel)
                 )
             )
 
-            let result = try await send(request, apiKey: apiKey)
+            let result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
             writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json")
             guard let text = result.response.firstText else {
                 NSLog("[ContextGeminiObservationService] Gemini response had no text candidate.")
@@ -124,6 +148,28 @@ public actor ContextGeminiObservationService {
     }
 
     public func observe(
+        imageData: Data,
+        mimeType: String,
+        appName: String? = nil,
+        windowTitle: String? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
+        recognizedText: [ContextRecognizedText] = [],
+        metadata: [String: String] = [:]
+    ) async -> ContextGeminiObservation? {
+        await observe(ContextGeminiObservationInput(
+            imageData: imageData,
+            mimeType: mimeType,
+            appName: appName,
+            windowTitle: windowTitle,
+            width: width,
+            height: height,
+            recognizedText: recognizedText,
+            metadata: metadata
+        ))
+    }
+
+    public func observe(
         jpegData: Data,
         appName: String? = nil,
         windowTitle: String? = nil,
@@ -143,7 +189,7 @@ public actor ContextGeminiObservationService {
         ))
     }
 
-    private func send(_ request: GeminiGenerateContentRequest, apiKey: String) async throws -> GeminiSendResult {
+    private func send(_ request: GeminiGenerateContentRequest, apiKey: String, timeoutSeconds: TimeInterval) async throws -> GeminiSendResult {
         let base = endpointBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(base)/\(model):generateContent") else {
             throw Error(status: nil, body: "Invalid Gemini endpoint URL.", underlying: nil)
@@ -153,7 +199,7 @@ public actor ContextGeminiObservationService {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        urlRequest.timeoutInterval = 30
+        urlRequest.timeoutInterval = timeoutSeconds
 
         do {
             urlRequest.httpBody = try Self.encoder.encode(request)
@@ -183,9 +229,9 @@ public actor ContextGeminiObservationService {
         }
     }
 
-    private func cacheURL(imageHash: String, input: ContextGeminiObservationInput) -> URL {
+    private func cacheURL(imageHash: String, input: ContextGeminiObservationInput, config: GeminiObservationRequestConfig) -> URL {
         let metadataHash = Self.sha256Hex(Self.cacheMetadataString(for: input).data(using: .utf8) ?? Data())
-        let key = Self.sha256Hex("\(imageHash)|\(metadataHash)|\(Self.promptVersion)|\(model)".data(using: .utf8) ?? Data())
+        let key = Self.sha256Hex("\(imageHash)|\(metadataHash)|\(Self.promptVersion)|\(model)|\(input.mimeType)|\(config.cacheKey)".data(using: .utf8) ?? Data())
         return cacheDirectoryURL.appendingPathComponent("\(key).json")
     }
 
@@ -218,6 +264,17 @@ public actor ContextGeminiObservationService {
         }
     }
 
+    private func writeDebugData(_ data: Data, imageHash: String, mimeType: String) {
+        let shortHash = String(imageHash.prefix(16))
+        let fileExtension = mimeType == "image/png" ? "png" : "jpg"
+        do {
+            try data.write(to: debugDirectoryURL.appendingPathComponent("\(shortHash)-request-image.\(fileExtension)"), options: .atomic)
+            try data.write(to: debugDirectoryURL.appendingPathComponent("latest-request-image.\(fileExtension)"), options: .atomic)
+        } catch {
+            NSLog("[ContextGeminiObservationService] Failed to write Gemini debug image: \(error)")
+        }
+    }
+
     private func writeDebugText(_ text: String, imageHash: String, suffix: String) {
         let shortHash = String(imageHash.prefix(16))
         let url = debugDirectoryURL.appendingPathComponent("\(shortHash)-\(suffix)")
@@ -227,6 +284,32 @@ public actor ContextGeminiObservationService {
         } catch {
             NSLog("[ContextGeminiObservationService] Failed to write Gemini debug text: \(error)")
         }
+    }
+
+    private static func requestConfig() -> GeminiObservationRequestConfig {
+        GeminiObservationRequestConfig(
+            mediaResolution: configuredMediaResolution,
+            thinkingLevel: configuredThinkingLevel,
+            maxOutputTokens: defaultMaxOutputTokens,
+            timeoutSeconds: 20
+        )
+    }
+
+    private func requestMetadata(for input: ContextGeminiObservationInput, config: GeminiObservationRequestConfig) -> String {
+        let imageKB = input.imageData.count / 1024
+        return """
+        Gemini observation request
+        model: \(model)
+        promptVersion: \(Self.promptVersion)
+        mimeType: \(input.mimeType)
+        imageBytes: \(input.imageData.count) (\(imageKB)KB)
+        mediaResolution: \(config.mediaResolution)
+        thinkingLevel: \(config.thinkingLevel)
+        maxOutputTokens: \(config.maxOutputTokens)
+        timeoutSeconds: \(Int(config.timeoutSeconds))
+        temperature: default
+        partOrder: image, prompt
+        """
     }
 
     private static func prompt(for input: ContextGeminiObservationInput) -> String {
@@ -419,6 +502,35 @@ public actor ContextGeminiObservationService {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    private static func normalizedMediaResolution(_ rawValue: String?) -> String {
+        let value = rawValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+            .replacingOccurrences(of: "MEDIA_RESOLUTION_", with: "")
+        switch value {
+        case "LOW":
+            return "MEDIA_RESOLUTION_LOW"
+        case "MEDIUM":
+            return "MEDIA_RESOLUTION_MEDIUM"
+        case "HIGH":
+            return "MEDIA_RESOLUTION_HIGH"
+        default:
+            return defaultMediaResolution
+        }
+    }
+
+    private static func normalizedThinkingLevel(_ rawValue: String?) -> String {
+        let value = rawValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch value {
+        case "minimal", "low", "medium", "high":
+            return value ?? defaultThinkingLevel
+        default:
+            return defaultThinkingLevel
+        }
+    }
+
     private static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -532,9 +644,22 @@ private struct ObservationPayload: Decodable {
 
 public struct ContextGeminiDebugPaths: Sendable {
     public let imageHash: String
+    public let requestImagePath: String
+    public let requestMetadataPath: String
     public let promptPath: String
     public let rawResponsePath: String
     public let errorPath: String
+}
+
+private struct GeminiObservationRequestConfig: Sendable {
+    let mediaResolution: String
+    let thinkingLevel: String
+    let maxOutputTokens: Int
+    let timeoutSeconds: TimeInterval
+
+    var cacheKey: String {
+        "\(mediaResolution)|\(thinkingLevel)|\(maxOutputTokens)|\(Int(timeoutSeconds))"
+    }
 }
 
 private struct ControlPayload: Decodable {
@@ -554,9 +679,14 @@ private struct GeminiGenerateContentRequest: Encodable {
     }
 
     struct GenerationConfig: Encodable {
-        var temperature: Double
         var maxOutputTokens: Int
         var responseMimeType: String
+        var mediaResolution: String
+        var thinkingConfig: ThinkingConfig
+    }
+
+    struct ThinkingConfig: Encodable {
+        var thinkingLevel: String
     }
 }
 
