@@ -11,4 +11,5 @@ import Foundation
 public extension Notification.Name {
     static let longPressBegan = Notification.Name("AgentNotch.longPressBegan")
     static let longPressEnded = Notification.Name("AgentNotch.longPressEnded")
+    static let transcriptReady = Notification.Name("AgentNotch.transcriptReady")
 }

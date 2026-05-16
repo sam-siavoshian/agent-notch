@@ -2,14 +2,10 @@
 //  AgentSession.swift
 //  Agent in the Notch
 //
-//  Glue between long-press events and the agent loop. Subscribes to
-//  .longPressEnded — that's the "user finished talking" signal. Pulls the
-//  most recent voice transcript (from AgentState, written by Ashan's whisper
-//  module) and the activity context, and fires one harness turn.
-//
-//  For demo dry-runs without Ashan's whisper online: ANTHROPIC_NOTCH_DEMO_PROMPT
-//  env var, if set, is used as the transcript so we can fire the agent
-//  without microphone input.
+//  Glue between voice transcription and the agent loop. Subscribes to
+//  .transcriptReady — posted by VoiceRecordingService after Whisper finishes.
+//  Reads the transcript from AgentState, pulls activity context, and fires
+//  one ComputerUseHarness turn.
 //
 
 import Foundation
@@ -18,14 +14,14 @@ import Foundation
 public final class AgentSession {
     public static let shared = AgentSession()
 
-    private var endedObserver: NSObjectProtocol?
+    private var readyObserver: NSObjectProtocol?
 
     private init() {}
 
     public func start() {
-        guard endedObserver == nil else { return }
-        endedObserver = NotificationCenter.default.addObserver(
-            forName: .longPressEnded,
+        guard readyObserver == nil else { return }
+        readyObserver = NotificationCenter.default.addObserver(
+            forName: .transcriptReady,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -36,19 +32,14 @@ public final class AgentSession {
     }
 
     public func stop() {
-        if let endedObserver { NotificationCenter.default.removeObserver(endedObserver) }
-        endedObserver = nil
+        if let readyObserver { NotificationCenter.default.removeObserver(readyObserver) }
+        readyObserver = nil
     }
 
     private func fireAgentTurn() async {
-        let demoTranscript = ProcessInfo.processInfo.environment["ANTHROPIC_NOTCH_DEMO_PROMPT"] ?? ""
-        let transcript: String
-        if !AgentState.shared.lastTranscript.isEmpty {
-            transcript = AgentState.shared.lastTranscript
-        } else if !demoTranscript.isEmpty {
-            transcript = demoTranscript
-        } else {
-            NSLog("[AgentSession] No transcript available. Set ANTHROPIC_NOTCH_DEMO_PROMPT for dry-run testing.")
+        let transcript = AgentState.shared.lastTranscript
+        guard !transcript.isEmpty else {
+            NSLog("[AgentSession] No transcript — agent not fired.")
             return
         }
 

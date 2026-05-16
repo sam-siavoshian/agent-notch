@@ -1,4 +1,10 @@
 name: AgentNotch
+
+packages:
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    from: 0.9.0
+
 options:
   bundleIdPrefix: com.agentnotch
   createIntermediateGroups: true
@@ -27,6 +33,8 @@ targets:
           - "AgentNotch.entitlements"
       - path: Core
       - path: Features
+    dependencies:
+      - package: WhisperKit
     info:
       path: App/Info.plist
       properties:
