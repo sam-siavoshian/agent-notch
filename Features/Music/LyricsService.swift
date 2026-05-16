@@ -211,6 +211,11 @@ enum LRClibClient {
 
     // MARK: - LRC parser
 
+    // swiftlint:disable:next force_try — hardcoded literal, never throws
+    static let lrcTagRegex = try! NSRegularExpression(
+        pattern: #"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]"#
+    )
+
     /// Parses `[mm:ss.xx]` or `[m:ss.xxx]` timestamped lines. Multi-tag lines
     /// like `[00:12.30][00:45.10]text` produce one LyricLine per tag.
     /// Honors `[offset:+/-N]` ms header (shifts all timestamps), strips BOM,
@@ -231,8 +236,7 @@ enum LRClibClient {
             }
         }
 
-        let pattern = #"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let regex = LRClibClient.lrcTagRegex
 
         var out: [LyricLine] = []
         for rawLine in cleaned.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {

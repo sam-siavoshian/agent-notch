@@ -16,6 +16,9 @@ import Foundation
 import CoreGraphics
 import AppKit
 import Carbon.HIToolbox
+import os.log
+
+private let log = Logger(subsystem: "com.agentnotch.app", category: "dispatcher")
 
 public struct DispatchedToolResult: Sendable {
     public let toolUseId: String
@@ -34,12 +37,15 @@ public actor ToolDispatcher {
 
     public func dispatch(toolUseId: String, name: String, input: JSON) async -> DispatchedToolResult {
         guard name == "computer" else {
+            log.error("dispatcher.unsupported_tool tool=\(name, privacy: .public)")
             return errorResult(toolUseId, "Unsupported tool: \(name)")
         }
         guard let action = input.objectValue?["action"]?.stringValue else {
+            log.error("dispatcher.missing_action input=\(String(describing: input), privacy: .public)")
             return errorResult(toolUseId, "Missing 'action' in tool input")
         }
 
+        log.error("dispatcher.action action=\(action, privacy: .public)")
         do {
             switch action {
             case "screenshot":
@@ -122,11 +128,14 @@ public actor ToolDispatcher {
                 return ok(toolUseId, "held \(combo) for \(dur)ms")
 
             default:
+                log.error("dispatcher.unsupported_action action=\(action, privacy: .public)")
                 return errorResult(toolUseId, "Unsupported action: \(action)")
             }
         } catch let e as DispatchError {
+            log.error("dispatcher.dispatch_error action=\(action, privacy: .public) message=\(e.message, privacy: .public)")
             return errorResult(toolUseId, e.message)
         } catch {
+            log.error("dispatcher.unexpected_error action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return errorResult(toolUseId, "Dispatch failed: \(error)")
         }
     }

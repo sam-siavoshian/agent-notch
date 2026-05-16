@@ -43,11 +43,13 @@ public final class AgentSession {
     private func fireAgentTurn() async {
         let transcript = AgentState.shared.lastTranscript
         guard !transcript.isEmpty else {
-            NSLog("[AgentSession] No transcript — agent not fired.")
+            log.warning("session.fire skipped — empty transcript")
             return
         }
+        log.error("session.fire transcript=\(transcript, privacy: .public)")
 
         let context = await AgentInterfaces.context?.getRecentActivityContext() ?? ""
+        log.error("session.context context_len=\(context.count) has_context=\(AgentInterfaces.context != nil)")
 
         let input = ComputerUseHarness.Input(transcript: transcript, contextSummary: context)
         await ComputerUseHarness.shared.run(input)
