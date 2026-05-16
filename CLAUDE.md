@@ -37,7 +37,7 @@ No keys are hardcoded. Resolution order: environment variable → nil.
 
 Set these in your Xcode scheme's environment or your shell before launching.
 
-**Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `AgentSession` will use it as the user's transcript when Whisper is not available.
+**Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `VoiceRecordingService` will use it as the transcript when the model is still initializing or no mic input was captured.
 
 ---
 
@@ -48,7 +48,7 @@ Set these in your Xcode scheme's environment or your shell before launching.
 - **Notch UI**: the agent's home, a fresh SwiftUI app. Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
-The agent (Claude Sonnet) receives: voice transcript (Whisper, P1 — not yet wired) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
+The agent (Claude Sonnet) receives: voice transcript (WhisperKit, on-device) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
 
 Full spec: `PRD.md`.
 
@@ -129,7 +129,8 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `AgentSession.swift` | Subscribes to `.longPressEnded`; fires one harness turn |
+| `VoiceRecordingService.swift` | Records mic on longPressBegan; runs WhisperKit on longPressEnded; posts `.transcriptReady` |
+| `AgentSession.swift` | Subscribes to `.transcriptReady`; fires one harness turn |
 | `ComputerUseHarness.swift` | Multi-turn Claude computer-use loop (model: `claude-sonnet-4-6`) |
 | `ComputerUseModels.swift` | Codable types for the Anthropic computer-use API |
 | `AnthropicClient.swift` | Raw API client (URLSession + async/await) |
@@ -159,12 +160,6 @@ Settings (reasoning effort, preferences text, system prompt, cursor color) are p
 
 ---
 
-## Known Gap
-
-**Voice transcription (Whisper) is not yet wired.** `AgentState.shared.lastTranscript` is read by the UI and by `AgentSession` but never written. Use `ANTHROPIC_NOTCH_DEMO_PROMPT` as a workaround to test the end-to-end loop without microphone input.
-
----
-
 ## Boot Sequence
 
 ```
@@ -172,7 +167,8 @@ AppDelegate.applicationDidFinishLaunching
   → NotchWindowController.shared.install()      // notch panel appears
   → OnboardingWindowController.presentIfNeeded  // first-launch permissions
       → bootAgent()
-          → CursorCompanion.shared.start()       // registers AgentInterfaces.cursor
-          → ContextCoordinator.shared.start()    // registers AgentInterfaces.context
-          → AgentSession.shared.start()          // subscribes to longPressEnded
+          → CursorCompanion.shared.start()          // registers AgentInterfaces.cursor
+          → ContextCoordinator.shared.start()       // registers AgentInterfaces.context
+          → VoiceRecordingService.shared.start()    // mic recording + WhisperKit init
+          → AgentSession.shared.start()             // subscribes to .transcriptReady
 ```
