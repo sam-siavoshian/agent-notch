@@ -28,7 +28,7 @@ Two surfaces:
 
 **The Cursor Companion.** A small PNG cursor that follows the user's real cursor around the screen. This is the agent's body. Long-press activates voice input. The cursor's color is user-selectable.
 
-The user long-presses to talk to the agent. Whisper transcribes. The agent receives: (a) the transcript, (b) a text summary of the past hour of activity, (c) user preferences and system prompt. Haiku then acts.
+The user long-presses to talk to the agent. Whisper transcribes. The agent receives: (a) the transcript, (b) a text summary of the past hour of activity, (c) user preferences and system prompt. Sonnet then acts.
 
 ## 4. The Context System (the hard part)
 
@@ -41,7 +41,7 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 1. **Cap:** Maintain a rolling buffer, max ~20 screenshots.
 1. **Summarization:** Batch the buffer (batches of ~10) into Gemini multimodal in parallel. Output: short text summaries per batch.
 1. **Merge:** Concatenate / synthesize the batch summaries into **max 2 paragraphs of plain text** describing what the user has been doing. ("User has been editing a spreadsheet in Excel, then switched to Chrome and opened three tabs about Italian rentals…")
-1. **Inject:** That text is passed as system context to Haiku alongside the live voice transcript.
+1. **Inject:** That text is passed as system context to Sonnet alongside the live voice transcript.
 
 **Why not embeddings:** ML self-embedding image → vectors → reconstruction is ugly. Won't ship in time. Text summary is good enough and inspectable.
 
@@ -56,23 +56,27 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 
 ## 6. Notch Contents
 
-### 6.1 Live agent state
+### 6.1 Live agent state ✅
 
 - What the agent is doing right now.
 - Which tool it's calling.
 - Progress / status.
 
-### 6.2 Settings (kept minimal)
+Implemented in `Features/Notch/AgentStateView.swift`. Reads from `AgentState.shared` — update that singleton to drive the UI.
+
+### 6.2 Settings (kept minimal) ✅
 
 - **Reasoning effort** — low / medium / high.
 - **Preferences** — free-form plain text the user writes. ("When I say 'open Twitter,' I mean x.com, not the support page." "I prefer dark mode tools.") Stored as JSON under the hood, but the user only sees a text box. **No JSON exposed to the user.**
 - **System prompt** — advanced override.
 - **Cursor color** — red, green, blue, yellow. Four PNG assets, one per color.
 
+Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/AgentSettingsStore.swift`.
+
 ### 6.3 Explicitly out of scope for v1
 
 - MCP (too much work, too risky for a hackathon).
-- Multi-model selection (Haiku only).
+- Multi-model selection (Sonnet only for now).
 - Any settings beyond the four above.
 
 ## 7. Architecture
@@ -120,11 +124,11 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 
 ## 9. Team & Responsibilities
 
-| Owner | Deliverable | Notes |
-|-------|-------------|-------|
-| **Wyatt** | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. | Exposes a settings API so Sam and Ashan can read user preferences and system prompt. |
-| **Sam** | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Computer use integration: Sonnet-driven OS actions (click, type, scroll). Click-hook OS plumbing. | Exposes `setCursorColor(color)` API consumed by Wyatt's settings panel. |
-| **Ashan** | Long-press detection → Whisper voice transcription. Context module: click-triggered screenshot capture (debounced 1s, rolling buffer of 20), Gemini multimodal batch summarizer, merge to ≤2 paragraphs. Core Sonnet agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` returning ≤2 paragraphs ready to inject into Sonnet's context. |
+| Owner | Status | Deliverable | Notes |
+|-------|--------|-------------|-------|
+| **Wyatt** | ✅ done | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. | Settings persisted at `~/Library/Application Support/AgentInTheNotch/agent_settings.json`. Read via `AgentSettingsStore.shared`. |
+| **Sam** | ❌ todo | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Computer use integration: Sonnet-driven OS actions (click, type, scroll). Click-hook OS plumbing. | Exposes `setCursorColor(color)` via `AgentInterfaces.cursor`. Set `AgentInterfaces.cursor = self` on init. |
+| **Ashan** | ❌ todo | Long-press detection → Whisper voice transcription. Context module: click-triggered screenshot capture (debounced 1s, rolling buffer of 20), Gemini multimodal batch summarizer, merge to ≤2 paragraphs. Core Sonnet agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
 
 **Interfaces are the contract.**
 - Wyatt's settings panel calls `setCursorColor(color)` on Sam's cursor module.
@@ -133,16 +137,16 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 
 ## 10. Milestones
 
-- **v0 (next 1–3 hours):** Notch shell up with four settings. Cursor PNG following real cursor in one color. Long-press records voice. Screenshot-on-click writes to disk.
-- **v1 (MVP):** Click-with-debounce capture → Gemini summary → text injected into Haiku → Haiku acts via computer use. End-to-end loop working.
+- **v0:** ✅ Notch shell up with four settings (persisted). ❌ Cursor PNG following real cursor. ❌ Long-press records voice. ❌ Screenshot-on-click writes to disk.
+- **v1 (MVP):** Click-with-debounce capture → Gemini summary → text injected into Sonnet → Sonnet acts via computer use. End-to-end loop working.
 - **v2 (stretch):** Richer capture hooks beyond clicks — foreground window change, tab change, app switch. Smarter cursor behavior (idle states, signaling).
 
 ## 11. Open Questions
 
 - What's the actual click-hook API on macOS, and does it require accessibility permissions? (Sam to confirm.)
 - Gemini batch latency at 10 images — does this stay under a few seconds? (Ashan to benchmark.)
-- Does the cursor PNG overlay need a transparent always-on-top window, and does that interfere with click capture? (Sam.)
-- Where do user preferences live on disk? Just a local JSON, no sync for v1.
+- Does the cursor PNG overlay need a transparent always-on-top window, and does that interfere with click capture? (Sam — see `App/NotchWindow.swift` for the transparent floating NSPanel pattern used by the notch.)
+- ~~Where do user preferences live on disk?~~ **Resolved:** `~/Library/Application Support/AgentInTheNotch/agent_settings.json` — see `Core/AgentSettingsStore.swift`.
 
 ## 12. Non-Goals
 
