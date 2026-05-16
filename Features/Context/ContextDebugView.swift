@@ -9,25 +9,25 @@ import AppKit
 import SwiftUI
 
 struct ContextDebugView: View {
-    @State private var diagnosticsSummary = "Loading context..."
-    @State private var diagnostics: ContextDiagnostics?
-    @State private var snapshots: [ContextDebugSnapshot] = []
-    @State private var aiSummary: ContextAIObservationSummary?
-    @State private var aiEvents: [ContextAIObservationEvent] = []
-    @State private var memories: [ContextAppMemory] = []
-    @State private var activationPreview = ""
-    @State private var performanceReport = ""
-    @State private var status = ""
-    @State private var mode: ContextDebugMode = .overview
-    @State private var isGatheringPaused = false
+    @State var diagnosticsSummary = "Loading context..."
+    @State var diagnostics: ContextDiagnostics?
+    @State var snapshots: [ContextDebugSnapshot] = []
+    @State var aiSummary: ContextAIObservationSummary?
+    @State var aiEvents: [ContextAIObservationEvent] = []
+    @State var memories: [ContextAppMemory] = []
+    @State var activationPreview = ""
+    @State var performanceReport = ""
+    @State var status = ""
+    @State var mode: ContextDebugMode = .overview
+    @State var isGatheringPaused = false
 
-    private var geminiStatus: String {
+    var geminiStatus: String {
         ContextGeminiObservationService.isAPIKeyConfigured
             ? "Gemini 3.1 Flash Lite: live"
             : "Gemini 3.1 Flash Lite: waiting for key"
     }
 
-    private var gatheringStatus: String {
+    var gatheringStatus: String {
         isGatheringPaused ? "Gathering paused" : "Gathering live"
     }
 
@@ -58,7 +58,7 @@ struct ContextDebugView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var header: some View {
+    var header: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Context Dev Tools", systemImage: "wrench.and.screwdriver")
@@ -113,7 +113,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private var statusStrip: some View {
+    var statusStrip: some View {
         HStack(spacing: 8) {
             metricCard(
                 title: "Captures",
@@ -149,7 +149,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private var sidebar: some View {
+    var sidebar: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(ContextDebugMode.allCases) { item in
@@ -208,7 +208,7 @@ struct ContextDebugView: View {
         .background(panelBackground)
     }
 
-    private var contentPanel: some View {
+    var contentPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Label(mode.label, systemImage: mode.icon)
@@ -236,7 +236,7 @@ struct ContextDebugView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    var content: some View {
         switch mode {
         case .overview:
             overviewDashboard
@@ -253,616 +253,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private var overviewDashboard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            section("Pipeline") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 8)], spacing: 8) {
-                    pipelineCard("1. Capture", "\(snapshots.count) recent", "Screenshots stored with trigger, app, window, cursor, and OCR.", "camera.viewfinder", .cyan)
-                    pipelineCard("2. OCR", "\(diagnostics?.latestRecognizedTextCount ?? 0) latest", "Vision text recognition produces the local text layer before AI.", "text.viewfinder", .mint)
-                    pipelineCard("3. Gemini", aiSummary?.latestStatusLine ?? "No AI observation yet", "Runs parallel Activity, UI Map, Entity, and Interaction lanes; each lane logs its own prompt, image, and raw output.", "brain.head.profile", .purple)
-                    pipelineCard("4. Memory", "\(memories.count) apps", "Lane outputs reduce into structured current-work, UI operation, entity, workflow, and caution memory.", "rectangle.stack.badge.person.crop", .orange)
-                    pipelineCard("5. Injection", "\(activationPreview.count) chars", "This is the packet the computer-use agent sees at activation.", "text.badge.checkmark", .green)
-                }
-            }
-
-            HStack(alignment: .top, spacing: 12) {
-                section("Latest Screen") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        latestScreenshotPreview
-                        if let latest = snapshots.first {
-                            captureMetadata(latest)
-                            Text(latest.textPreview.isEmpty ? "No useful OCR preview." : latest.textPreview)
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.48))
-                                .lineLimit(4)
-                                .textSelection(.enabled)
-                        } else {
-                            mutedText("No screenshot captured yet.")
-                        }
-                    }
-                }
-
-                section("Latest Gemini Output") {
-                    if let event = aiEvents.first(where: { $0.status == .completed }) {
-                        aiEventSummary(event)
-                    } else {
-                        mutedText("No completed Gemini observation yet.")
-                    }
-                }
-            }
-
-            section("Injected Context Preview") {
-                debugText(firstLines(activationPreview, maxLines: 18))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var capturesInspector: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if snapshots.isEmpty {
-                mutedText("No captures yet. Use the camera button or interact with the Mac while gathering is live.")
-            } else {
-                ForEach(snapshots) { snapshot in
-                    captureCard(snapshot)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var aiInspector: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(aiSummary?.statusLine ?? "No AI observations yet.")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.78))
-                .textSelection(.enabled)
-
-            if aiEvents.isEmpty {
-                mutedText("No Gemini events yet. Use the camera button or interact with the Mac after configuring GEMINI_API_KEY.")
-            } else {
-                ForEach(aiEvents) { event in
-                    aiEventRow(event)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private var memoryInspector: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if memories.isEmpty {
-                mutedText("No app memory yet. Capture screens with OCR/Gemini enabled and this pane will show learned surfaces, controls, transitions, and negative memory.")
-            } else {
-                ForEach(memories, id: \.appName) { memory in
-                    memoryCard(memory)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private var latestScreenshotPreview: some View {
-        if let data = snapshots.first?.jpegData, let image = NSImage(data: data) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity)
-                .frame(height: 115)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(alignment: .bottomLeading) {
-                    Text("Latest screenshot")
-                        .font(.system(size: 9, weight: .semibold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.black.opacity(0.58))
-                        .foregroundStyle(.white.opacity(0.84))
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .padding(6)
-                }
-        } else {
-            mutedText("No screenshot preview yet.")
-                .frame(maxWidth: .infinity, minHeight: 78)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(0.035))
-                )
-        }
-    }
-
-    private func metricCard(title: String, value: String, detail: String, icon: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(color.opacity(0.9))
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.58))
-                Spacer(minLength: 2)
-            }
-
-            Text(value)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
-
-            Text(detail)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.white.opacity(0.38))
-                .lineLimit(2)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.045))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(color.opacity(0.18), lineWidth: 1)
-                )
-        )
-    }
-
-    private func pipelineCard(_ title: String, _ value: String, _ detail: String, _ icon: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .foregroundStyle(color.opacity(0.86))
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.76))
-                Spacer(minLength: 2)
-            }
-
-            Text(value)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
-                .lineLimit(2)
-
-            Text(detail)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.42))
-                .lineLimit(4)
-        }
-        .padding(10)
-        .frame(minHeight: 116, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
-    }
-
-    private func captureCard(_ snapshot: ContextDebugSnapshot) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            if let image = NSImage(data: snapshot.jpegData) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 150, height: 86)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                captureMetadata(snapshot)
-                Text(snapshot.textPreview.isEmpty ? "No useful OCR text captured." : snapshot.textPreview)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.48))
-                    .lineLimit(5)
-                    .textSelection(.enabled)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .padding(9)
-        .background(rowBackground)
-    }
-
-    private func captureMetadata(_ snapshot: ContextDebugSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                statusPill(snapshot.trigger.rawValue, color: .cyan)
-                Text(snapshot.capturedAt.formatted(date: .omitted, time: .standard))
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.42))
-                Text("\(snapshot.recognizedTextCount) OCR")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.42))
-            }
-
-            Text(snapshot.appName)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.74))
-                .lineLimit(1)
-
-            Text(snapshot.windowTitle.isEmpty ? "Untitled window" : snapshot.windowTitle)
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.52))
-                .lineLimit(1)
-        }
-    }
-
-    private func compactCaptureRow(_ snapshot: ContextDebugSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 5) {
-                statusPill(snapshot.trigger.rawValue, color: .cyan)
-                Text(relativeTime(snapshot.capturedAt))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.white.opacity(0.38))
-            }
-
-            Text(snapshot.appName)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.7))
-                .lineLimit(1)
-
-            Text(snapshot.textPreview.isEmpty ? "No useful OCR preview." : snapshot.textPreview)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.white.opacity(0.36))
-                .lineLimit(2)
-        }
-        .padding(7)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.035))
-        )
-    }
-
-    private func aiEventSummary(_ event: ContextAIObservationEvent) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                statusPill(event.status.rawValue, color: statusColor(event.status))
-                if let laneName = event.laneName {
-                    statusPill(laneName, color: .purple)
-                }
-                if let latency = event.latencyMilliseconds {
-                    statusPill("\(latency)ms", color: .blue)
-                }
-                if let confidence = event.confidence {
-                    statusPill("conf \(String(format: "%.2f", confidence))", color: .green)
-                }
-            }
-
-            detailLine("Surface", event.surfaceLabel)
-            detailLine("Task", event.primaryTask)
-            detailLine("Summary", event.summary)
-            detailList("Controls", event.controls)
-            detailList("Affordances", event.affordances)
-            detailList("Memory candidates", event.memoryCandidates)
-        }
-    }
-
-    private func aiEventRow(_ event: ContextAIObservationEvent) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                statusPill(event.status.rawValue.uppercased(), color: statusColor(event.status))
-                if let laneName = event.laneName {
-                    statusPill(laneName, color: .purple)
-                }
-                Text(event.happenedAt.formatted(date: .omitted, time: .standard))
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.42))
-
-                Spacer(minLength: 6)
-
-                if let latency = event.latencyMilliseconds {
-                    statusPill("\(latency)ms", color: .blue)
-                }
-
-                if let source = event.source {
-                    statusPill(source, color: source == ContextGeminiObservation.Source.cache.rawValue ? .orange : .green)
-                }
-            }
-
-            Text("\(event.trigger.rawValue) - \(event.appName)\(event.windowTitle.isEmpty ? "" : " - \(event.windowTitle)")")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.68))
-                .lineLimit(1)
-
-            Text(primaryEventText(event))
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.5))
-                .lineLimit(4)
-                .textSelection(.enabled)
-
-            if event.status == .completed {
-                Text("\(event.controlsCount) controls - \(event.affordancesCount) affordances - \(event.entitiesCount) entities\(confidenceText(event.confidence))\(imageText(event))")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.38))
-            }
-
-            aiArtifactInspector(event)
-
-            VStack(alignment: .leading, spacing: 4) {
-                detailLine("Model", event.model)
-                detailLine("Attempt", event.attemptID?.uuidString)
-                detailLine("Lane", event.laneName)
-                detailLine("Prompt version", event.promptVersion)
-                detailLine("MIME", event.requestMimeType)
-                detailLine("Media resolution", event.requestMediaResolution)
-                detailLine("Thinking level", event.requestThinkingLevel)
-                detailLine("Surface", event.surfaceLabel)
-                detailLine("Screen type", event.screenType)
-                detailLine("Task", event.primaryTask)
-                detailLine("Layout", event.layoutSummary)
-                detailLine("Content", event.contentSummary)
-                detailList("Controls", event.controls)
-                detailList("Landmarks", event.landmarks)
-                detailList("State", event.stateIndicators)
-                detailList("Navigation", event.navigationPaths)
-                detailList("Data", event.dataRegions)
-                detailList("Workflow", event.workflowHints)
-                detailList("Memory", event.memoryCandidates)
-                detailList("Entities", event.entities)
-                detailList("Affordances", event.affordances)
-                detailList("Negative", event.negativeCues)
-                detailList("Uncertain", event.uncertainty)
-                detailLine("Image hash", event.imageHash)
-                detailLine("Request image", event.requestImagePath)
-                detailLine("Request metadata", event.requestMetadataPath)
-                detailLine("Capture image", event.captureImagePath)
-                detailLine("Capture JSON", event.captureJSONPath)
-                detailLine("Prompt", event.promptPath)
-                detailLine("Raw response", event.rawResponsePath)
-                detailLine("Error", event.errorPath)
-            }
-        }
-        .padding(9)
-        .background(rowBackground)
-    }
-
-    @ViewBuilder
-    private func aiArtifactInspector(_ event: ContextAIObservationEvent) -> some View {
-        if hasInlineArtifacts(event) {
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 8) {
-                    requestImagePreview(event.requestImagePath)
-                    artifactTextBlock("Request metadata + transformations", event.requestMetadataPath, maxCharacters: 4_000)
-                    artifactTextBlock("Prompt sent to Gemini", event.promptPath, maxCharacters: 8_000)
-                    artifactTextBlock("Raw Gemini response", event.rawResponsePath, maxCharacters: 8_000)
-                    artifactTextBlock("Gemini error", event.errorPath, maxCharacters: 4_000)
-                }
-                .padding(.top, 4)
-            } label: {
-                Label("Inline request/response artifacts", systemImage: "tray.full")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.58))
-            }
-            .tint(.white.opacity(0.58))
-        }
-    }
-
-    private func hasInlineArtifacts(_ event: ContextAIObservationEvent) -> Bool {
-        [
-            event.requestImagePath,
-            event.requestMetadataPath,
-            event.promptPath,
-            event.rawResponsePath,
-            event.errorPath
-        ].contains { path in
-            guard let path else { return false }
-            return FileManager.default.fileExists(atPath: path)
-        }
-    }
-
-    @ViewBuilder
-    private func requestImagePreview(_ path: String?) -> some View {
-        if let path, let image = NSImage(contentsOfFile: path) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Screenshot sent to Gemini")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.58))
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity)
-                    .frame(maxHeight: 260)
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func artifactTextBlock(_ title: String, _ path: String?, maxCharacters: Int) -> some View {
-        if let path, let text = fileText(path, maxCharacters: maxCharacters), !text.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.58))
-                Text(text)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.62))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                    .padding(7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.black.opacity(0.18))
-                    )
-            }
-        }
-    }
-
-    private func memoryCard(_ memory: ContextAppMemory) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                Image(systemName: "app.connected.to.app.below.fill")
-                    .foregroundStyle(.orange.opacity(0.86))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(memory.appName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                    Text("First seen \(relativeTime(memory.firstSeen)) - last seen \(relativeTime(memory.lastSeen))")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.42))
-                }
-                Spacer(minLength: 6)
-                statusPill("\(memory.surfaces.count) surfaces", color: .orange)
-                statusPill("\(memory.transitions.count) transitions", color: .cyan)
-                statusPill("\(memory.negativeNotes.count) negative", color: .yellow)
-            }
-
-            if memory.surfaces.isEmpty {
-                mutedText("No surfaces learned yet.")
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(memory.surfaces.sorted { $0.lastSeen > $1.lastSeen }.prefix(4)) { surface in
-                        surfaceMemoryRow(surface)
-                    }
-                }
-            }
-
-            if !memory.transitions.isEmpty {
-                detailList(
-                    "Transitions",
-                    memory.transitions
-                        .sorted { $0.lastSeen > $1.lastSeen }
-                        .prefix(6)
-                        .map { "\($0.fromTitle) -> \($0.toTitle) via \($0.trigger.rawValue) (\($0.evidenceCount)x)" }
-                )
-            }
-
-            if !memory.negativeNotes.isEmpty {
-                detailList(
-                    "Negative memory",
-                    memory.negativeNotes
-                        .sorted { $0.lastSeen > $1.lastSeen }
-                        .prefix(6)
-                        .map { "\($0.surfaceTitle): \($0.note) (\($0.evidenceCount)x)" }
-                )
-            }
-        }
-        .padding(10)
-        .background(rowBackground)
-    }
-
-    private func surfaceMemoryRow(_ surface: ContextSurfaceMemory) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Text(surface.title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if !surface.facts.isEmpty {
-                    statusPill("\(surface.facts.count) facts", color: .orange)
-                }
-                if !surface.controls.isEmpty {
-                    statusPill("\(surface.controls.count) controls", color: .cyan)
-                }
-                if !surface.entities.isEmpty {
-                    statusPill("\(surface.entities.count) entities", color: .green)
-                }
-            }
-
-            detailList(
-                "Structured facts",
-                surface.facts
-                    .sorted { $0.lastSeen > $1.lastSeen }
-                    .prefix(10)
-                    .map { "[\($0.category)/\($0.durability)] \($0.text)" }
-            )
-            detailList(
-                "Structured controls",
-                surface.controls
-                    .sorted { $0.lastSeen > $1.lastSeen }
-                    .prefix(10)
-                    .map { control in
-                        let hint = control.actionHint.isEmpty ? "" : ": \(control.actionHint)"
-                        return "\(control.label) (\(control.role), \(control.region))\(hint)"
-                    }
-            )
-            detailList("Structured entities", surface.entities.sorted { $0.lastSeen > $1.lastSeen }.prefix(12).map(\.text))
-            detailList("UI facts", surface.semanticHighlights)
-            detailList("Controls", surface.controlHighlights)
-            detailList("Affordances", surface.affordanceHighlights)
-            detailList("Text", surface.textHighlights)
-            detailList("Uncertain", surface.uncertaintyHighlights)
-        }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.032))
-        )
-    }
-
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.68))
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private func debugText(_ text: String) -> some View {
-        Text(text.isEmpty ? "Nothing to show yet." : text)
-            .font(.system(size: 10.5, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.72))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    private func mutedText(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.42))
-            .textSelection(.enabled)
-    }
-
-    private func statusPill(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(color.opacity(0.92))
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.12))
-            )
-    }
-
-    private func iconButton(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 25, height: 25)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.74))
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-        .help(help)
-    }
-
-    private var panelBackground: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(Color.white.opacity(0.045))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.white.opacity(0.055), lineWidth: 1)
-            )
-    }
-
-    private var rowBackground: some View {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
-            .fill(Color.white.opacity(0.04))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.white.opacity(0.045), lineWidth: 1)
-            )
-    }
-
-    private var copyText: String {
+    var copyText: String {
         switch mode {
         case .overview:
             return overviewText
@@ -879,7 +270,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private var overviewText: String {
+    var overviewText: String {
         [
             "Context Dev Tools overview",
             diagnosticsSummary,
@@ -890,7 +281,7 @@ struct ContextDebugView: View {
         ].joined(separator: "\n")
     }
 
-    private var captureLogText: String {
+    var captureLogText: String {
         if snapshots.isEmpty {
             return "No captures recorded."
         }
@@ -903,7 +294,7 @@ struct ContextDebugView: View {
         }.joined(separator: "\n\n")
     }
 
-    private var memoryLogText: String {
+    var memoryLogText: String {
         if memories.isEmpty {
             return "No learned UI memory yet."
         }
@@ -913,7 +304,7 @@ struct ContextDebugView: View {
         }.joined(separator: "\n\n---\n\n")
     }
 
-    private var aiLogText: String {
+    var aiLogText: String {
         var lines = [
             "AI observation status:",
             aiSummary?.statusLine ?? "No AI observations yet.",
@@ -956,7 +347,7 @@ struct ContextDebugView: View {
         return lines.joined(separator: "\n")
     }
 
-    private func refreshLoop() async {
+    func refreshLoop() async {
         await refresh()
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(2))
@@ -964,7 +355,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private func refresh() async {
+    func refresh() async {
         let diagnostics = await ContextCoordinator.shared.diagnostics()
         let recentSnapshots = await ContextCoordinator.shared.debugSnapshots(limit: 12)
         let aiSummary = await ContextCoordinator.shared.aiObservationSummary()
@@ -986,7 +377,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private func toggleGatheringPause() async {
+    func toggleGatheringPause() async {
         let paused = ContextCoordinator.shared.toggleGatheringPaused()
         await MainActor.run {
             isGatheringPaused = paused
@@ -997,7 +388,7 @@ struct ContextDebugView: View {
         await refresh()
     }
 
-    private func captureNow() async {
+    func captureNow() async {
         await ContextCoordinator.shared.captureCurrentScreenForDebug()
         await refresh()
         await MainActor.run {
@@ -1005,7 +396,7 @@ struct ContextDebugView: View {
         }
     }
 
-    private func compareLatestScreenshot() async {
+    func compareLatestScreenshot() async {
         await ContextCoordinator.shared.compareLatestScreenshotForDebug()
         await refresh()
         await MainActor.run {
@@ -1013,150 +404,20 @@ struct ContextDebugView: View {
         }
     }
 
-    private func openDirectory(_ url: URL) {
+    func openDirectory(_ url: URL) {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         NSWorkspace.shared.open(url)
         status = "Opened \(url.lastPathComponent)."
     }
 
-    private func copy(_ text: String, label: String) {
+    func copy(_ text: String, label: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         status = "Copied \(label)."
     }
-
-    private func primaryEventText(_ event: ContextAIObservationEvent) -> String {
-        if let summary = event.summary, !summary.isEmpty {
-            return summary
-        }
-        return event.reason
-    }
-
-    private func statusColor(_ eventStatus: ContextAIObservationEvent.Status) -> Color {
-        switch eventStatus {
-        case .queued:
-            return .blue
-        case .skipped:
-            return .yellow
-        case .completed:
-            return .green
-        case .failed:
-            return .red
-        }
-    }
-
-    private func confidenceText(_ confidence: Double?) -> String {
-        guard let confidence else { return "" }
-        return " - conf \(String(format: "%.2f", confidence))"
-    }
-
-    private func imageText(_ event: ContextAIObservationEvent) -> String {
-        var parts: [String] = []
-        if let imageBytes = event.imageBytes {
-            parts.append("\(imageBytes / 1024)KB img")
-        }
-        if let ocrCount = event.ocrCount {
-            parts.append("\(ocrCount) OCR")
-        }
-        return parts.isEmpty ? "" : " - \(parts.joined(separator: ", "))"
-    }
-
-    private func relativeTime(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-
-    private func firstLines(_ text: String, maxLines: Int) -> String {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count > maxLines else { return text }
-        return lines.prefix(maxLines).joined(separator: "\n") + "\n..."
-    }
-
-    private func fileText(_ path: String, maxCharacters: Int) -> String? {
-        guard FileManager.default.fileExists(atPath: path) else { return nil }
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-        if text.count <= maxCharacters {
-            return text
-        }
-        let prefix = String(text.prefix(maxCharacters))
-        return "\(prefix)\n\n... truncated in Dev Tools preview ..."
-    }
-
-    @ViewBuilder
-    private func detailLine(_ label: String, _ value: String?) -> some View {
-        if let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Text("\(label): \(value)")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.48))
-                .lineLimit(4)
-                .textSelection(.enabled)
-        }
-    }
-
-    @ViewBuilder
-    private func detailList(_ label: String, _ values: [String]?) -> some View {
-        let cleanValues = (values ?? [])
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanValues.isEmpty {
-            Text("\(label): \(cleanValues.prefix(10).joined(separator: " | "))")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.44))
-                .lineLimit(5)
-                .textSelection(.enabled)
-        }
-    }
-
-    private func appendDetails(for event: ContextAIObservationEvent, to lines: inout [String]) {
-        append("screenType", event.screenType, to: &lines)
-        append("primaryTask", event.primaryTask, to: &lines)
-        append("layoutSummary", event.layoutSummary, to: &lines)
-        append("contentSummary", event.contentSummary, to: &lines)
-        append("controls", event.controls, to: &lines)
-        append("landmarks", event.landmarks, to: &lines)
-        append("stateIndicators", event.stateIndicators, to: &lines)
-        append("navigationPaths", event.navigationPaths, to: &lines)
-        append("dataRegions", event.dataRegions, to: &lines)
-        append("workflowHints", event.workflowHints, to: &lines)
-        append("memoryCandidates", event.memoryCandidates, to: &lines)
-        append("entities", event.entities, to: &lines)
-        append("affordances", event.affordances, to: &lines)
-        append("negativeCues", event.negativeCues, to: &lines)
-        append("uncertainty", event.uncertainty, to: &lines)
-        append("requestMimeType", event.requestMimeType, to: &lines)
-        append("requestMediaResolution", event.requestMediaResolution, to: &lines)
-        append("requestThinkingLevel", event.requestThinkingLevel, to: &lines)
-        append("laneName", event.laneName, to: &lines)
-        append("attemptID", event.attemptID?.uuidString, to: &lines)
-        append("imageHash", event.imageHash, to: &lines)
-        append("requestImagePath", event.requestImagePath, to: &lines)
-        append("requestMetadataPath", event.requestMetadataPath, to: &lines)
-        append("captureImagePath", event.captureImagePath, to: &lines)
-        append("captureJSONPath", event.captureJSONPath, to: &lines)
-        append("promptPath", event.promptPath, to: &lines)
-        append("rawResponsePath", event.rawResponsePath, to: &lines)
-        append("errorPath", event.errorPath, to: &lines)
-    }
-
-    private func append(_ label: String, _ value: String?, to lines: inout [String]) {
-        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        lines.append("  \(label): \(value)")
-    }
-
-    private func append(_ label: String, _ values: [String]?, to lines: inout [String]) {
-        let cleanValues = (values ?? [])
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !cleanValues.isEmpty else { return }
-        lines.append("  \(label):")
-        for value in cleanValues.prefix(16) {
-            lines.append("    - \(value)")
-        }
-    }
 }
 
-private enum ContextDebugMode: String, CaseIterable, Identifiable {
+enum ContextDebugMode: String, CaseIterable, Identifiable {
     case overview
     case packet
     case captures
