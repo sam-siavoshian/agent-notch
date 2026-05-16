@@ -12,6 +12,11 @@ import SwiftUI
 struct NotchShape: Shape {
     var bottomCornerRadius: CGFloat = 18
 
+    var animatableData: CGFloat {
+        get { bottomCornerRadius }
+        set { bottomCornerRadius = newValue }
+    }
+
     func path(in rect: CGRect) -> Path {
         var p = Path()
         let r = min(bottomCornerRadius, rect.width / 2, rect.height)

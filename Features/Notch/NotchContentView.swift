@@ -33,6 +33,7 @@ struct NotchContentView: View {
     @State private var selected: NotchTab = .agent
     @State private var isOpen = false
     @State private var closeTask: Task<Void, Never>?
+    @State private var hoverTask: Task<Void, Never>?
 
     // Closed state hugs the physical notch.
     private let closedWidth: CGFloat = 220
@@ -65,14 +66,26 @@ struct NotchContentView: View {
                                 removal: .opacity
                             )
                         )
+                } else {
+                    ClosedNotchView()
+                        .frame(width: closedWidth, height: closedHeight)
+                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
                 }
             }
             .frame(width: width, height: height)
             .contentShape(NotchShape(bottomCornerRadius: cornerRadius))
             .onHover { hovering in
                 if hovering {
-                    open()
+                    hoverTask?.cancel()
+                    closeTask?.cancel()
+                    hoverTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(160))
+                        guard !Task.isCancelled else { return }
+                        open()
+                    }
                 } else {
+                    hoverTask?.cancel()
+                    hoverTask = nil
                     scheduleClose()
                 }
             }
