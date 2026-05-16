@@ -14,6 +14,8 @@ After the agent observes a dashboard once, learned UI memory should reduce explo
 
 The first demo is a synthetic deployment dashboard. The first run explores the UI. The second run uses learned app memory to find the failed deployment with fewer actions and screenshots.
 
+For the larger system direction, see `SYSTEM_BLUEPRINT.md`. It lays out the path from screenshot ingestion to transition learning, activation bundles, and computer-use performance benchmarks.
+
 ## Setup
 
 ```bash
