@@ -87,10 +87,24 @@ fi
 # Without a stable Apple Development cert, every build is signed ad-hoc and
 # TCC drops Accessibility / Screen Recording / Mic grants on each rebuild.
 # scripts/setup-signing.sh writes a populated Local.xcconfig and re-runs
-# xcodegen. We only invoke it when Local.xcconfig has no DEVELOPMENT_TEAM.
+# xcodegen. We invoke it when Local.xcconfig is missing or still has the
+# template placeholder. If this machine has no Apple Development cert, fall
+# back to local ad-hoc signing so the build still runs.
+SIGNING_ARGS=()
+NEEDS_SIGNING_SETUP=0
 if ! grep -qE '^DEVELOPMENT_TEAM = [A-Z0-9]+' "${REPO_ROOT}/Local.xcconfig" 2>/dev/null; then
-  echo "→ Local.xcconfig missing DEVELOPMENT_TEAM; running scripts/setup-signing.sh"
-  "${REPO_ROOT}/scripts/setup-signing.sh"
+  NEEDS_SIGNING_SETUP=1
+elif grep -qE '^DEVELOPMENT_TEAM = TEAMID12$' "${REPO_ROOT}/Local.xcconfig" 2>/dev/null; then
+  NEEDS_SIGNING_SETUP=1
+fi
+
+if [[ $NEEDS_SIGNING_SETUP -eq 1 ]]; then
+  echo "→ Local.xcconfig missing a real DEVELOPMENT_TEAM; running scripts/setup-signing.sh"
+  if ! "${REPO_ROOT}/scripts/setup-signing.sh"; then
+    echo "→ No stable Apple Development signing available; falling back to local ad-hoc signing"
+    echo "  Note: TCC permissions may need to be re-granted after rebuilds."
+    SIGNING_ARGS=(CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual)
+  fi
 fi
 
 # ---------- tcc reset (opt-in) ----------
@@ -117,19 +131,43 @@ fi
 echo "→ xcodebuild ($SCHEME)"
 mkdir -p "$DERIVED"
 set +e
-xcodebuild build \
-  -project "$PROJECT" \
-  -scheme "$SCHEME" \
-  -destination "platform=macOS" \
-  -derivedDataPath "$DERIVED" \
-  | xcbeautify 2>/dev/null \
-  || xcodebuild build \
+if [[ ${#SIGNING_ARGS[@]} -gt 0 ]]; then
+  xcodebuild build \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -destination "platform=macOS" \
     -derivedDataPath "$DERIVED" \
-    2>&1 | tail -40
-BUILD_RC=${PIPESTATUS[0]}
+    "${SIGNING_ARGS[@]}" \
+    | xcbeautify 2>/dev/null
+  BUILD_RC=${PIPESTATUS[0]}
+  if [[ $BUILD_RC -ne 0 ]]; then
+    xcodebuild build \
+      -project "$PROJECT" \
+      -scheme "$SCHEME" \
+      -destination "platform=macOS" \
+      -derivedDataPath "$DERIVED" \
+      "${SIGNING_ARGS[@]}" \
+      2>&1 | tail -40
+    BUILD_RC=${PIPESTATUS[0]}
+  fi
+else
+  xcodebuild build \
+    -project "$PROJECT" \
+    -scheme "$SCHEME" \
+    -destination "platform=macOS" \
+    -derivedDataPath "$DERIVED" \
+    | xcbeautify 2>/dev/null
+  BUILD_RC=${PIPESTATUS[0]}
+  if [[ $BUILD_RC -ne 0 ]]; then
+    xcodebuild build \
+      -project "$PROJECT" \
+      -scheme "$SCHEME" \
+      -destination "platform=macOS" \
+      -derivedDataPath "$DERIVED" \
+      2>&1 | tail -40
+    BUILD_RC=${PIPESTATUS[0]}
+  fi
+fi
 set -e
 if [[ $BUILD_RC -ne 0 ]]; then
   echo "ERROR: build failed (rc=$BUILD_RC)"
