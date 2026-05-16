@@ -37,3 +37,9 @@ ArshanTesting/fixtures/private/
 ArshanTesting/memory/private/
 ArshanTesting/memory/cache/*.json
 ArshanTesting/memory/preprocessed/
+.gstack/
+
+landing/node_modules/
+landing/.next/
+landing/out/
+landing/.vercel/

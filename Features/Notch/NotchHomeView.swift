@@ -2,9 +2,14 @@
 //  NotchHomeView.swift
 //  Agent in the Notch
 //
-//  Home tab in compact soft-pill form.
+//  Home tab in compact soft-pill form. Surfaces an inline Grant button
+//  when the agent reports a missing TCC permission, with a built-in
+//  "open Settings → return → relaunch" flow so the user never has to
+//  restart the app manually.
 //
 
+import AppKit
+import ApplicationServices
 import SwiftUI
 
 struct NotchHomeView: View {
@@ -94,6 +99,9 @@ struct NotchHomeView: View {
                 .truncationMode(.tail)
             }
             Spacer(minLength: 0)
+            if let fix = missingPermission {
+                GrantPermissionButton(target: fix)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -104,6 +112,22 @@ struct NotchHomeView: View {
                 cornerRadius: 11
             )
         )
+    }
+
+    /// Returns the permission pane to open when the status text reports a
+    /// missing TCC grant. Detected from `state.activity == .error(...)` +
+    /// keyword match on the message. Returns nil for unrelated errors.
+    private var missingPermission: PermissionTarget? {
+        guard case .error = state.activity else { return nil }
+        let combined = (state.activity.label + " " + state.detail).lowercased()
+        if combined.contains("accessibility") { return .accessibility }
+        if combined.contains("screen recording") || combined.contains("screen capture") {
+            return .screenRecording
+        }
+        if combined.contains("microphone") || combined.contains("mic ") {
+            return .microphone
+        }
+        return nil
     }
 
     private var lastRequestCard: some View {
@@ -167,7 +191,34 @@ struct NotchHomeView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
     }
+
+    // MARK: - Permission target (nested so it's namespaced to home)
+
+    fileprivate enum PermissionTarget {
+        case accessibility, screenRecording, microphone
+
+        var settingsURL: URL {
+            let base = "x-apple.systempreferences:com.apple.preference.security?Privacy_"
+            switch self {
+            case .accessibility:   return URL(string: base + "Accessibility")!
+            case .screenRecording: return URL(string: base + "ScreenCapture")!
+            case .microphone:      return URL(string: base + "Microphone")!
+            }
+        }
+
+        /// Live trust check. Only `.accessibility` has a synchronous,
+        /// no-prompt API; for the others we assume granted once the user
+        /// returns from Settings.
+        var isNowGranted: Bool {
+            switch self {
+            case .accessibility: return AXIsProcessTrusted()
+            case .screenRecording, .microphone: return true
+            }
+        }
+    }
 }
+
+// MARK: - Activity feed row
 
 private struct ActivityLogRow: View {
     let entry: AgentLogEntry
@@ -202,5 +253,109 @@ private struct ActivityLogRow: View {
 
     private var rowLabel: String {
         entry.detail.isEmpty ? entry.activity.label : entry.detail
+    }
+}
+
+// MARK: - Inline Grant button
+//
+// First tap: opens System Settings → Privacy & Security at the right pane
+// + arms a one-shot observer. When the user returns to AgentNotch and the
+// grant has actually flipped, label morphs into "Relaunch". Second tap
+// execs a fresh process (required — macOS caches the TCC trust answer per
+// process, so an in-place reload won't pick up the change).
+
+private struct GrantPermissionButton: View {
+    let target: NotchHomeView.PermissionTarget
+    @State private var hover = false
+    @State private var pressed = false
+    @State private var armed = false
+    @State private var activateObserver: NSObjectProtocol?
+
+    var body: some View {
+        Button {
+            if armed {
+                AppRelaunch.relaunch()
+            } else {
+                NSWorkspace.shared.open(target.settingsURL)
+                armRelaunchOnReturn()
+            }
+        } label: {
+            Text(armed ? "Relaunch" : "Grant")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.953, green: 0.478, blue: 0.478),
+                                Color(red: 1.0,   green: 0.62,  blue: 0.42)
+                            ],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        LinearGradient(
+                            colors: pressed
+                                ? [Color.black.opacity(0.30), .clear, Color.white.opacity(0.30)]
+                                : [Color.white.opacity(hover ? 0.50 : 0.35),
+                                   .clear,
+                                   Color.black.opacity(0.18)],
+                            startPoint: .top, endPoint: .bottom
+                        ),
+                        lineWidth: 0.8
+                    )
+                )
+                .shadow(
+                    color: pressed ? .clear : Color(red: 1.0, green: 0.55, blue: 0.50).opacity(hover ? 0.55 : 0.35),
+                    radius: hover ? 12 : 6, y: hover ? 4 : 2
+                )
+                .scaleEffect(pressed ? 0.95 : (hover ? 1.04 : 1.0))
+                .brightness(pressed ? -0.05 : (hover ? 0.05 : 0))
+        }
+        .buttonStyle(PressTrackingStyle(pressed: $pressed))
+        .onHover { h in withAnimation(.easeOut(duration: 0.16)) { hover = h } }
+        .help(armed
+              ? "Permission granted — relaunch to take effect"
+              : "Open System Settings → Privacy & Security")
+        .onDisappear {
+            if let activateObserver { NotificationCenter.default.removeObserver(activateObserver) }
+        }
+    }
+
+    private func armRelaunchOnReturn() {
+        guard activateObserver == nil else { return }
+        activateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            // 250ms delay — TCC daemon hasn't always settled by the moment
+            // we get focus back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                guard target.isNowGranted else { return }
+                withAnimation(.easeOut(duration: 0.18)) { armed = true }
+            }
+        }
+    }
+}
+
+/// Tiny ButtonStyle that exposes isPressed via a binding so the label can
+/// reflect press state in its own visual chrome (instead of fighting the
+/// default ButtonStyle scaling).
+private struct PressTrackingStyle: ButtonStyle {
+    @Binding var pressed: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .onChange(of: configuration.isPressed) { _, new in
+                withAnimation(new
+                    ? .easeOut(duration: 0.08)
+                    : .spring(response: 0.25, dampingFraction: 0.7)) {
+                    pressed = new
+                }
+            }
     }
 }

@@ -273,7 +273,7 @@ private struct SpotifyTabButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                SpotifyTabMark(size: 11)
+                SpotifyMark(size: 11)
                 Text("Spotify")
                     .font(.system(size: 10, weight: .semibold))
             }
@@ -293,34 +293,3 @@ private struct SpotifyTabButton: View {
     }
 }
 
-/// Mini Spotify glyph (green circle + 3 white arcs). Local copy so the
-/// tab bar doesn't depend on NotchMusicView.
-private struct SpotifyTabMark: View {
-    var size: CGFloat = 11
-    private let green = Color(red: 0.114, green: 0.725, blue: 0.329)
-    var body: some View {
-        ZStack {
-            Circle().fill(green)
-            GeometryReader { geo in
-                let w = geo.size.width
-                let lw = w * 0.13
-                arc(in: geo, yOffset: -0.18, radius: 0.34, lineWidth: lw)
-                arc(in: geo, yOffset: -0.04, radius: 0.27, lineWidth: lw * 0.85)
-                arc(in: geo, yOffset:  0.08, radius: 0.20, lineWidth: lw * 0.72)
-            }
-            .padding(size * 0.12)
-        }
-        .frame(width: size, height: size)
-    }
-    private func arc(in geo: GeometryProxy, yOffset: CGFloat,
-                     radius: CGFloat, lineWidth: CGFloat) -> some View {
-        let w = geo.size.width, h = geo.size.height
-        return Path { p in
-            let c = CGPoint(x: w / 2, y: h / 2 + yOffset * h)
-            p.addArc(center: c, radius: w * radius,
-                     startAngle: .degrees(200), endAngle: .degrees(-20),
-                     clockwise: false)
-        }
-        .stroke(Color.white, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-    }
-}
