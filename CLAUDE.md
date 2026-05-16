@@ -8,24 +8,18 @@ See `AGENTS.md` for Swift coding conventions, architecture rules, and AI agent g
 
 ## Build & Run
 
-The Xcode project lives in the vendored fork:
+This is a fresh macOS SwiftUI app at the repo root. The `.xcodeproj` needs to be scaffolded in Xcode (File → New → Project → macOS → App) — the source files in `App/`, `Core/`, `Features/` are ready to drop in. Once the project exists:
+
+- Open `<repo>.xcodeproj` in Xcode and hit Run.
+- Requires macOS with a notch (M-series MacBook) and Accessibility permissions for cursor overlay and click hooks.
+
+The app **is not** a fork of boring.notch. We may clone boring.notch into `vendored/boring.notch/` locally as a read-only reference for how they implement the notch window, animations, etc. — but `vendored/` is gitignored and we do not modify it.
+
+To grab the reference clone:
 
 ```bash
-# Resolve SPM dependencies
-cd vendored/boring.notch
-xcodebuild -resolvePackageDependencies -project boringNotch.xcodeproj
-
-# Build (no signing required)
-xcodebuild build \
-  -project boringNotch.xcodeproj \
-  -scheme boringNotch \
-  -destination "platform=macOS" \
-  CODE_SIGN_IDENTITY="" \
-  CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGNING_ALLOWED=NO
+git clone https://github.com/TheBoredTeam/boring.notch.git vendored/boring.notch
 ```
-
-To run the app, open `vendored/boring.notch/boringNotch.xcodeproj` in Xcode and hit Run. The app requires macOS with a notch (M-series MacBook) and Accessibility permissions for cursor overlay and click hooks.
 
 ---
 
@@ -33,7 +27,7 @@ To run the app, open `vendored/boring.notch/boringNotch.xcodeproj` in Xcode and 
 
 **Agent in the Notch** — a macOS computer-use agent with two surfaces:
 
-- **Notch UI**: the agent's home, forked from [boring.notch](vendored/boring.notch). Shows live agent state and settings.
+- **Notch UI**: the agent's home, a fresh SwiftUI app (inspired by, but not forked from, boring.notch). Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
 The agent (Claude Haiku) receives: voice transcript (Whisper) + a ≤2-paragraph text summary of recent screen activity (Gemini multimodal pipeline) + user preferences. It then drives computer-use actions.
@@ -54,7 +48,7 @@ Features/Agent/       — Haiku agent wiring, assembles inputs, fires model (Ash
 Core/                 — shared types, settings store
 ```
 
-The vendored `boring.notch` source (`vendored/boring.notch/boringNotch/`) is the base for `Features/Notch/`. Key files there: `BoringViewModel.swift` (main state), `BoringViewCoordinator.swift` (window/notch lifecycle), `ContentView.swift` (root SwiftUI view).
+If `vendored/boring.notch/` is cloned locally for reference (gitignored), useful files to read: `boringNotch/BoringViewModel.swift` (main state), `boringNotch/BoringViewCoordinator.swift` (window/notch lifecycle), `boringNotch/ContentView.swift` (root SwiftUI view), `boringNotch/components/Notch/BoringNotchWindow.swift` (window plumbing).
 
 ---
 

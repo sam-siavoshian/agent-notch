@@ -1,1 +1,23 @@
 NOTES.md
+
+# Local reference clones — keep boring.notch out of git.
+# Clone it manually for reference:
+#   git clone https://github.com/TheBoredTeam/boring.notch.git vendored/boring.notch
+vendored/
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Package.resolved
+
+# macOS
+.DS_Store
