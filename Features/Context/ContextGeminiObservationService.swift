@@ -350,7 +350,7 @@ public actor ContextGeminiObservationService {
         urlRequest.timeoutInterval = timeoutSeconds
 
         do {
-            urlRequest.httpBody = try Self.encoder.encode(request)
+            urlRequest.httpBody = try Self.requestEncoder.encode(request)
         } catch {
             throw Error(status: nil, body: nil, underlying: error)
         }
@@ -953,7 +953,7 @@ public actor ContextGeminiObservationService {
     }
 
     private static func sha256Hex(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: data).lazy.map { String(format: "%02x", $0) }.joined()
     }
 
     private static func debugArtifactPrefix(imageHash: String, laneName: String?) -> String {
@@ -1070,18 +1070,27 @@ public actor ContextGeminiObservationService {
         return String(format: "$%.4f", value)
     }
 
-    private static var encoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }
+    // Reused across all encode/decode calls — JSONEncoder/Decoder are not Sendable but all
+    // accesses happen through actor-serialized methods or static funcs called from them.
+    nonisolated(unsafe) private static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return e
+    }()
 
-    private static var decoder: JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
+    nonisolated(unsafe) private static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
+    // Compact encoder for outgoing API requests — no pretty-printing overhead.
+    nonisolated(unsafe) private static let requestEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
 }
 
 extension ContextGeminiObservationService {

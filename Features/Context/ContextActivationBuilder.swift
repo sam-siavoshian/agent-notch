@@ -63,9 +63,9 @@ enum ContextActivationBuilder {
 
         var notes: [String] = []
         var sameSurfaceClickSeen = false
-        for pair in snapshots.adjacentPairs() {
-            let before = pair.0
-            let after = pair.1
+        for i in snapshots.indices.dropFirst() {
+            let before = snapshots[i - 1]
+            let after = snapshots[i]
             guard after.trigger == .click || after.trigger == .activation else { continue }
 
             if before.appName != after.appName {
@@ -82,7 +82,7 @@ enum ContextActivationBuilder {
             compactNotes.append("- Recent clicks stayed on the current app/window, so they likely selected, edited, opened inline controls, or changed state without navigation.")
         }
 
-        return Array(compactNotes)
+        return compactNotes
     }
 
     private static func guidance(from snapshots: [ContextSnapshot]) -> [String] {
@@ -115,9 +115,3 @@ enum ContextActivationBuilder {
     }
 }
 
-private extension Array {
-    func adjacentPairs() -> [(Element, Element)] {
-        guard count >= 2 else { return [] }
-        return zip(dropLast(), dropFirst()).map { ($0, $1) }
-    }
-}

@@ -36,6 +36,13 @@ public final class VoiceRecordingService {
 
     public func start() {
         Task { await initWhisper() }
+        Task.detached {
+            let tmp = FileManager.default.temporaryDirectory
+            guard let files = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) else { return }
+            for name in files where name.hasPrefix("agentnotch_voice_") {
+                try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+            }
+        }
 
         beganObserver = NotificationCenter.default.addObserver(
             forName: .longPressBegan,

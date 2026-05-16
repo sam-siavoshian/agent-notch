@@ -20,7 +20,7 @@ public actor ContextSnapshotStore {
     public func record(_ snapshot: ContextSnapshot) {
         snapshots.append(snapshot)
         if snapshots.count > maxSnapshots {
-            snapshots.removeFirst(snapshots.count - maxSnapshots)
+            snapshots.removeFirst()
         }
     }
 
