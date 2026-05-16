@@ -16,6 +16,9 @@
 
 import AVFoundation
 import WhisperKit
+import os.log
+
+private let log = Logger(subsystem: "com.agentnotch.app", category: "voice")
 
 @MainActor
 public final class VoiceRecordingService {
@@ -49,6 +52,9 @@ public final class VoiceRecordingService {
         ) { [weak self] _ in
             Task { @MainActor in await self?.stopAndTranscribe() }
         }
+
+        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        log.info("voice.ready mic_authorized=\(micStatus == .authorized, privacy: .public) whisper_loading=true")
     }
 
     public func stop() {
@@ -68,8 +74,10 @@ public final class VoiceRecordingService {
         do {
             whisper = try await WhisperKit(model: "openai/whisper-tiny")
             NSLog("[VoiceRecordingService] WhisperKit ready (whisper-tiny)")
+            log.info("voice.whisper_ready model=whisper-tiny")
         } catch {
             NSLog("[VoiceRecordingService] WhisperKit init failed: \(error)")
+            log.error("voice.whisper_failed error=\(String(describing: error), privacy: .public)")
         }
     }
 

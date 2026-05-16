@@ -50,7 +50,7 @@ public enum Tool: Codable, Sendable {
         var c = encoder.container(keyedBy: Keys.self)
         switch self {
         case .computer(let w, let h, let n):
-            try c.encode("computer_20250124", forKey: .type)
+            try c.encode("computer_20251124", forKey: .type)
             try c.encode("computer", forKey: .name)
             try c.encode(w, forKey: .displayWidth)
             try c.encode(h, forKey: .displayHeight)
@@ -62,7 +62,7 @@ public enum Tool: Codable, Sendable {
         let c = try decoder.container(keyedBy: Keys.self)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
-        case "computer_20250124":
+        case "computer_20251124", "computer_20250124":
             let w = try c.decode(Int.self, forKey: .displayWidth)
             let h = try c.decode(Int.self, forKey: .displayHeight)
             let n = try? c.decode(Int.self, forKey: .displayNumber)

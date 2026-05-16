@@ -5,6 +5,7 @@
 #   ./dev.sh "open calculator and type 2+2"    # build + run with demo prompt
 #   ./dev.sh --clean                           # nuke DerivedData, then build + run
 #   ./dev.sh --build-only                      # build, don't launch
+#   ./dev.sh --reset-tcc                       # tccutil reset com.agentnotch.app, then build + run
 #   ./dev.sh --rotate-key sk-ant-...           # update keychain entry, then build + run
 #   ./dev.sh --rotate-gemini-key AIza...       # update optional Gemini key, then build + run
 #
@@ -25,12 +26,14 @@ DERIVED="${REPO_ROOT}/.build/DerivedData"
 # ---------- args ----------
 CLEAN=0
 BUILD_ONLY=0
+RESET_TCC=0
 DEMO_PROMPT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
+    --reset-tcc) RESET_TCC=1; shift ;;
     --rotate-key)
       shift
       if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-key needs the key as next arg"; exit 1; fi
@@ -54,7 +57,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,12p' "$0"; exit 0 ;;
+      sed -n '2,13p' "$0"; exit 0 ;;
     *)
       if [[ -z "$DEMO_PROMPT" ]]; then DEMO_PROMPT="$1"; shift
       else echo "ERROR: unexpected arg '$1'"; exit 1
@@ -80,6 +83,22 @@ else
   echo "→ Gemini key not configured; context observation will run OCR-only"
 fi
 
+# ---------- signing guard ----------
+# Without a stable Apple Development cert, every build is signed ad-hoc and
+# TCC drops Accessibility / Screen Recording / Mic grants on each rebuild.
+# scripts/setup-signing.sh writes a populated Local.xcconfig and re-runs
+# xcodegen. We only invoke it when Local.xcconfig has no DEVELOPMENT_TEAM.
+if ! grep -qE '^DEVELOPMENT_TEAM = [A-Z0-9]+' "${REPO_ROOT}/Local.xcconfig" 2>/dev/null; then
+  echo "→ Local.xcconfig missing DEVELOPMENT_TEAM; running scripts/setup-signing.sh"
+  "${REPO_ROOT}/scripts/setup-signing.sh"
+fi
+
+# ---------- tcc reset (opt-in) ----------
+if [[ $RESET_TCC -eq 1 ]]; then
+  echo "→ tccutil reset All com.agentnotch.app"
+  tccutil reset All com.agentnotch.app 2>/dev/null || true
+fi
+
 # ---------- xcodegen ----------
 if ! command -v xcodegen >/dev/null 2>&1; then
   echo "ERROR: xcodegen not found. Install with 'brew install xcodegen'."
@@ -103,18 +122,12 @@ xcodebuild build \
   -scheme "$SCHEME" \
   -destination "platform=macOS" \
   -derivedDataPath "$DERIVED" \
-  CODE_SIGN_IDENTITY="-" \
-  CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGNING_ALLOWED=NO \
   | xcbeautify 2>/dev/null \
   || xcodebuild build \
     -project "$PROJECT" \
     -scheme "$SCHEME" \
     -destination "platform=macOS" \
     -derivedDataPath "$DERIVED" \
-    CODE_SIGN_IDENTITY="-" \
-    CODE_SIGNING_REQUIRED=NO \
-    CODE_SIGNING_ALLOWED=NO \
     2>&1 | tail -40
 BUILD_RC=${PIPESTATUS[0]}
 set -e

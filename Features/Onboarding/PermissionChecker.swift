@@ -15,9 +15,19 @@ import ApplicationServices
 
 @MainActor
 public final class PermissionChecker: ObservableObject {
+    public static let shared = PermissionChecker()
+
     public enum PermissionID: String, CaseIterable, Identifiable, Sendable {
         case accessibility, screenRecording, microphone
         public var id: String { rawValue }
+
+        public var label: String {
+            switch self {
+            case .accessibility:    return "Accessibility"
+            case .screenRecording:  return "Screen Recording"
+            case .microphone:       return "Microphone"
+            }
+        }
     }
 
     public enum Status: String, Sendable {
@@ -34,6 +44,12 @@ public final class PermissionChecker: ObservableObject {
 
     public var allGranted: Bool {
         statuses.values.allSatisfy { $0 == .granted }
+    }
+
+    /// IDs that are not currently granted, in stable display order
+    /// (accessibility → screen recording → microphone).
+    public var missing: [PermissionID] {
+        PermissionID.allCases.filter { statuses[$0] != .granted }
     }
 
     private var timer: Timer?

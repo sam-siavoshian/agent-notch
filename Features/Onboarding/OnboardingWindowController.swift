@@ -15,7 +15,7 @@ public final class OnboardingWindowController {
     public static let shared = OnboardingWindowController()
 
     private var window: NSWindow?
-    private let checker = PermissionChecker()
+    private let checker = PermissionChecker.shared
     private var windowDelegate: CloseDelegate?
 
     private init() {}

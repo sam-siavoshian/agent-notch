@@ -10,6 +10,7 @@ import SwiftUI
 struct NotchHomeView: View {
     @ObservedObject private var state = AgentState.shared
     @ObservedObject private var store = AgentSettingsStore.shared
+    @ObservedObject private var permissions = PermissionChecker.shared
 
     private var isActive: Bool {
         switch state.activity {
@@ -20,6 +21,9 @@ struct NotchHomeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if !permissions.missing.isEmpty {
+                permissionBanner
+            }
             statusHero
             if !state.lastTranscript.isEmpty {
                 lastRequestCard
@@ -30,6 +34,39 @@ struct NotchHomeView: View {
                 emptyState
             }
         }
+    }
+
+    private var permissionBanner: some View {
+        let missing = permissions.missing
+        let primary = missing.first
+        return Button {
+            if let primary { permissions.openSettings(for: primary) }
+        } label: {
+            HStack(spacing: 6) {
+                StatusBadge(color: SoftPill.Status.amber, symbol: "exclamationmark.triangle.fill", size: 14)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(missing.count == 1
+                         ? "\(primary?.label ?? "Permission") not granted"
+                         : "\(missing.count) permissions missing")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(SoftPill.Status.amber)
+                    Text("Tap to open System Settings")
+                        .font(.system(size: 9))
+                        .foregroundStyle(SoftPill.Text.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                PillBackground(
+                    fill: AnyShapeStyle(SoftPill.Surface.inset),
+                    glow: SoftPill.Status.amber,
+                    cornerRadius: 10
+                )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var statusHero: some View {

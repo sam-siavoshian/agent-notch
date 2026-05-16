@@ -9,6 +9,9 @@
 //
 
 import Foundation
+import os.log
+
+private let log = Logger(subsystem: "com.agentnotch.app", category: "session")
 
 @MainActor
 public final class AgentSession {
@@ -29,6 +32,7 @@ public final class AgentSession {
                 await self?.fireAgentTurn()
             }
         }
+        log.info("session.ready")
     }
 
     public func stop() {

@@ -27,7 +27,7 @@ public struct AnthropicClient: Sendable {
         apiKey: String,
         session: URLSession = .shared,
         endpoint: URL = URL(string: "https://api.anthropic.com/v1/messages")!,
-        betaHeaders: [String] = ["computer-use-2025-01-24"]
+        betaHeaders: [String] = ["computer-use-2025-11-24"]
     ) {
         self.apiKey = apiKey
         self.session = session

@@ -17,6 +17,9 @@ import ApplicationServices
 import Foundation
 import CoreGraphics
 import os.lock
+import os.log
+
+private let log = Logger(subsystem: "com.agentnotch.app", category: "longpress")
 
 final class LongPressDetector {
     private enum State {
@@ -65,6 +68,7 @@ final class LongPressDetector {
             userInfo: opaqueSelf
         ) else {
             NSLog("[LongPressDetector] Failed to create event tap. Accessibility permission probably not granted.")
+            log.error("longpress.ready ax_trusted=\(trusted, privacy: .public) tap_installed=false reason=tap_create_failed")
             return
         }
 
@@ -75,6 +79,7 @@ final class LongPressDetector {
         self.eventTap = tap
         self.runLoopSource = source
         NSLog("[LongPressDetector] event tap installed (threshold=\(threshold)s)")
+        log.info("longpress.ready ax_trusted=\(trusted, privacy: .public) tap_installed=true threshold_s=\(self.threshold, privacy: .public)")
     }
 
     func stop() {
