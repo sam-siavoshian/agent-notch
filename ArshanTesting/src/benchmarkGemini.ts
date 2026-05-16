@@ -83,7 +83,6 @@ async function main(): Promise<void> {
         try {
           const observation = await observeScreenshotWithGemini(screenshotPath, {
             rootDir,
-            stateHint: state,
             live: true,
             useCache: false,
             model,

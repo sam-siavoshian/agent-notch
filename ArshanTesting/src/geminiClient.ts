@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { imageRequestFromEnv, prepareGeminiImage, type ImageRequestConfig } from "./imagePreprocess";
-import { buildObservationPrompt, fixtureObservationForState, Observation, ObservationJsonSchema, parseObservationJson } from "./observationPrompt";
+import { buildObservationPrompt, fixtureObservationForState, Observation, ObservationJsonSchema, ObservationSchema, parseObservationJson } from "./observationPrompt";
 import { projectRoot, stateForScreenshot } from "./syntheticScreens";
 
 export interface GeminiObservationOptions {
@@ -91,11 +91,11 @@ export async function observeScreenshotWithGemini(
 async function readCached(cachePath: string, screenshotPath: string): Promise<Observation | undefined> {
   try {
     const raw = await readFile(cachePath, "utf8");
-    return {
+    return ObservationSchema.parse({
       ...JSON.parse(raw),
       source: "cache",
       screenshotPath
-    } as Observation;
+    });
   } catch {
     return undefined;
   }

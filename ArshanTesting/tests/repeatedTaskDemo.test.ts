@@ -7,6 +7,8 @@ describe("repeated task demo", () => {
 
     expect(result.firstRun.metrics.actions_per_task).toBeGreaterThan(result.secondRun.metrics.actions_per_task);
     expect(result.firstRun.metrics.exploratory_actions_per_task).toBeGreaterThan(result.secondRun.metrics.exploratory_actions_per_task);
+    expect(result.firstRun.metrics.memory_hit_rate).toBe(0);
+    expect(result.secondRun.metrics.exploratory_actions_per_task).toBe(0);
     expect(result.secondRun.metrics.memory_hit_rate).toBe(1);
     expect(result.secondRun.metrics.memory_helped_rate).toBe(1);
     expect(result.secondRun.metrics.memory_misled_rate).toBe(0);

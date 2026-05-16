@@ -3,28 +3,28 @@
   "profile": "Acme Deploy is a synthetic SaaS deployment dashboard used to test UI/UX learning.",
   "surfaces": [
     {
-      "text": "Dashboard overview: Overview surface with deployment health cards, activity feed, and left navigation.",
+      "text": "[overview] Dashboard overview: Overview surface with deployment health cards, activity feed, and left navigation.",
       "confidence": "high",
       "evidenceIds": [
         "fixture-overview"
       ]
     },
     {
-      "text": "Deployments table: Deployments table with environment, status, commit, age, and filters.",
+      "text": "[deployments] Deployments table: Deployments table with environment, status, commit, age, and filters.",
       "confidence": "high",
       "evidenceIds": [
         "fixture-deployments"
       ]
     },
     {
-      "text": "Deployments filters open: Filter popover is open with status options including Failed.",
+      "text": "[filters-open] Deployments filters open: Filter popover is open with status options including Failed.",
       "confidence": "high",
       "evidenceIds": [
         "fixture-filters-open"
       ]
     },
     {
-      "text": "Failed deployment detail: Failed deployment detail panel showing production API deployment failure and logs.",
+      "text": "[failed-detail] Failed deployment detail: Failed deployment detail panel showing production API deployment failure and logs.",
       "confidence": "high",
       "evidenceIds": [
         "fixture-failed-detail"

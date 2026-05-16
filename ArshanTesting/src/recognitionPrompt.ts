@@ -1,4 +1,4 @@
-import { AppMemory, MemoryFact } from "./memoryStore";
+import { AppMemory, canonicalSurfaceKey, MemoryFact } from "./memoryStore";
 import { Observation } from "./observationPrompt";
 
 export interface RecognitionResult {
@@ -34,6 +34,7 @@ export function buildRecognitionPrompt(input: {
 }
 
 export function recognizeState(observation: Observation, memory: AppMemory | undefined, userGoal: string): RecognitionResult {
+  const surfaceKey = canonicalSurfaceKey(observation);
   if (!memory) {
     return {
       app: observation.app,
@@ -43,14 +44,14 @@ export function recognizeState(observation: Observation, memory: AppMemory | und
       memoryHelped: false,
       layoutDriftDetected: false,
       retrievedFacts: [],
-      recommendedFirstAction: exploratoryAction(observation),
+      recommendedFirstAction: exploratoryAction(surfaceKey),
       uncertainty: ["No app memory exists yet."]
     };
   }
 
-  const matchingSurface = bestSurfaceFact(observation, memory.surfaces);
+  const matchingSurface = bestSurfaceFact(observation, memory.surfaces, surfaceKey);
   const layoutDriftDetected = observation.surfaceId.includes("layout-drift") ||
-    (hasFact(memory.landmarks, "left navigation") && observation.landmarks.includes("top navigation"));
+    (hasFact(memory.landmarks, "left navigation") && mentionsAny(observation.landmarks.join(" "), ["top navigation", "top-nav", "top tabs"]));
   const relevantAffordances = memory.affordances
     .filter((fact) => mentionsAny(fact.text, ["Deployments", "Status filter", "Failed"]))
     .slice(0, 5);
@@ -64,7 +65,7 @@ export function recognizeState(observation: Observation, memory: AppMemory | und
   ].filter(Boolean) as string[];
 
   const confidence = layoutDriftDetected ? "medium" : matchingSurface ? "high" : "low";
-  const canUseRecipe = Boolean(taskRecipe && relevantAffordances.length > 0);
+  const canUseRecipe = Boolean((taskRecipe || matchingSurface) && relevantAffordances.length > 0);
 
   return {
     app: observation.app,
@@ -74,31 +75,32 @@ export function recognizeState(observation: Observation, memory: AppMemory | und
     memoryHelped: canUseRecipe,
     layoutDriftDetected,
     retrievedFacts,
-    recommendedFirstAction: chooseMemoryAction(observation, userGoal, layoutDriftDetected),
+    recommendedFirstAction: chooseMemoryAction(surfaceKey, userGoal, layoutDriftDetected),
     uncertainty: layoutDriftDetected
       ? ["Known app memory partially matches, but navigation landmarks moved."]
       : observation.uncertainty
   };
 }
 
-function bestSurfaceFact(observation: Observation, facts: MemoryFact[]): MemoryFact | undefined {
+function bestSurfaceFact(observation: Observation, facts: MemoryFact[], surfaceKey: string): MemoryFact | undefined {
   const label = observation.surfaceLabel.toLowerCase();
-  return facts.find((fact) => fact.text.toLowerCase().includes(label.split(" ")[0])) ??
+  return facts.find((fact) => fact.text.startsWith(`[${surfaceKey}]`)) ??
+    facts.find((fact) => fact.text.toLowerCase().includes(label.split(" ")[0])) ??
     facts.find((fact) => mentionsAny(fact.text, observation.landmarks));
 }
 
-function chooseMemoryAction(observation: Observation, userGoal: string, layoutDriftDetected: boolean): string {
+function chooseMemoryAction(surfaceKey: string, userGoal: string, layoutDriftDetected: boolean): string {
   const wantsFailedDeployment = userGoal.toLowerCase().includes("failed deployment");
-  if (!wantsFailedDeployment) return exploratoryAction(observation);
-  if (observation.surfaceId === "overview" && !layoutDriftDetected) return "click Deployments in the left navigation";
-  if (observation.surfaceId === "layout-drift-overview") return "click Deployments in the top navigation";
-  if (observation.surfaceId === "deployments") return "click Status filter";
-  if (observation.surfaceId === "filters-open") return "select Failed status";
+  if (!wantsFailedDeployment) return exploratoryAction(surfaceKey);
+  if (surfaceKey === "overview" && !layoutDriftDetected) return "click Deployments in the left navigation";
+  if (surfaceKey === "overview" && layoutDriftDetected) return "click Deployments in the top navigation";
+  if (surfaceKey === "deployments") return "click Status filter";
+  if (surfaceKey === "filters-open") return "select Failed status";
   return "inspect failed deployment detail";
 }
 
-function exploratoryAction(observation: Observation): string {
-  if (observation.surfaceId === "overview") return "inspect visible navigation, then choose Deployments";
+function exploratoryAction(surfaceKey: string): string {
+  if (surfaceKey === "overview") return "inspect visible navigation, then choose Deployments";
   return "inspect visible controls and choose the most relevant next action";
 }
 

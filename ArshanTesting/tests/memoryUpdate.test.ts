@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateMemoryFromObservations, renderAppMemoryMarkdown } from "../src/memoryStore";
+import { canonicalSurfaceKey, updateMemoryFromObservations, renderAppMemoryMarkdown } from "../src/memoryStore";
 import { fixtureObservationForState } from "../src/observationPrompt";
 
 describe("memory update", () => {
@@ -23,5 +23,31 @@ describe("memory update", () => {
     expect(memory.negativeMemory[0]?.text).toContain("Blank center");
     expect(markdown).toContain("Find failed deployment");
     expect(markdown).not.toContain("one-off");
+  });
+
+  it("normalizes unstable model surface IDs before learning transitions", () => {
+    const overview = {
+      ...fixtureObservationForState("overview"),
+      surfaceId: "main-dashboard",
+      surfaceLabel: "Deployment overview"
+    };
+    const deployments = {
+      ...fixtureObservationForState("deployments"),
+      surfaceId: "deployments_dashboard",
+      surfaceLabel: "Acme Deploy Deployments Dashboard"
+    };
+    const memory = updateMemoryFromObservations([overview, deployments], [
+      { from: "overview", action: "click Deployments in the left navigation", to: "deployments", success: true, note: "Opens deployments table." }
+    ]);
+
+    expect(canonicalSurfaceKey(overview)).toBe("overview");
+    expect(canonicalSurfaceKey(deployments)).toBe("deployments");
+    expect(memory.surfaces.map((surface) => surface.text)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("[overview]"),
+        expect.stringContaining("[deployments]")
+      ])
+    );
+    expect(memory.transitions[0]?.evidenceIds).toEqual(expect.arrayContaining([overview.id, deployments.id]));
   });
 });

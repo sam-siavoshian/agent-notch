@@ -30,6 +30,7 @@ export type Region = z.infer<typeof RegionSchema>;
 
 export const ObservationJsonSchema = {
   type: "object",
+  additionalProperties: false,
   properties: {
     app: { type: "string" },
     windowTitle: { type: "string" },
@@ -46,7 +47,8 @@ export const ObservationJsonSchema = {
           region: { type: "string" },
           confidence: { type: "number" }
         },
-        required: ["label", "role", "region", "confidence"]
+        required: ["label", "role", "region", "confidence"],
+        additionalProperties: false
       }
     },
     visibleEntities: { type: "array", items: { type: "string" } },

@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { observeScreenshotWithGemini } from "./geminiClient";
 import { calculateRunMetrics, ActionResult, RunMetrics } from "./metrics";
-import { MemoryStore, updateMemoryFromObservations, AppMemory } from "./memoryStore";
+import { MemoryStore, updateMemoryFromObservations, AppMemory, canonicalSurfaceKey } from "./memoryStore";
 import { Observation } from "./observationPrompt";
 import { recognizeState, RecognitionResult } from "./recognitionPrompt";
 import { generateSyntheticScreens, projectRoot, screenshotPathForState, syntheticStates, SyntheticStateId } from "./syntheticScreens";
@@ -63,9 +63,7 @@ export async function runRepeatedTaskDemo(options: {
 
   const learnedMemory = updateMemoryFromObservations(firstRun.observations, firstRunActions);
   if (options.writeMemory ?? true) {
-    for (const observation of firstRun.observations) {
-      await store.appendObservation(observation);
-    }
+    await store.writeObservations(firstRun.observations);
     await store.writeAppMemory(learnedMemory);
   }
 
@@ -101,7 +99,6 @@ async function runScenario(input: {
     const screenshotPath = screenshotPathForState(input.rootDir, state);
     return observeScreenshotWithGemini(screenshotPath, {
       rootDir: input.rootDir,
-      stateHint: state,
       live: input.liveGemini,
       useCache: input.useCache
     });
@@ -111,14 +108,24 @@ async function runScenario(input: {
     recognizeState(observation, input.memory, TASK)
   );
 
-  const actionResults: ActionResult[] = input.actions.map((action) => ({
-    action: action.action,
-    exploratory: input.label === "first-run" && (!action.success || action.action.includes("blank")),
-    success: action.success,
-    usedMemory: input.label === "second-run",
-    memoryHelped: input.label === "second-run" && action.success,
-    memoryMisled: false
-  }));
+  const recognitionBySurface = new Map(
+    observations.map((observation, index) => [canonicalSurfaceKey(observation), recognitions[index]])
+  );
+  const actionResults: ActionResult[] = input.actions.map((action) => {
+    const recognition = recognitionBySurface.get(action.from);
+    const recommended = recognition?.recommendedFirstAction;
+    const usedMemory = Boolean(recognition?.memoryHit);
+    const followedRecommendation = Boolean(recommended && sameAction(recommended, action.action));
+
+    return {
+      action: action.action,
+      exploratory: !usedMemory || !followedRecommendation || !action.success,
+      success: action.success,
+      usedMemory,
+      memoryHelped: usedMemory && followedRecommendation && action.success,
+      memoryMisled: usedMemory && followedRecommendation && !action.success
+    };
+  });
 
   return {
     label: input.label,
@@ -138,6 +145,14 @@ async function runScenario(input: {
 
 function uniqueStates(states: SyntheticStateId[]): SyntheticStateId[] {
   return Array.from(new Set(states));
+}
+
+function sameAction(a: string, b: string): boolean {
+  return normalizeAction(a) === normalizeAction(b);
+}
+
+function normalizeAction(action: string): string {
+  return action.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 export async function runDemoInTemp(): Promise<ReplayDemoResult> {

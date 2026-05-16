@@ -41,6 +41,7 @@ GEMINI_JPEG_QUALITY=70
 
 ```bash
 npm run generate
+npm run assess:memory
 npm run bench:gemini
 npm test
 npm run demo
@@ -59,8 +60,15 @@ ARSHAN_LIVE_GEMINI=1 ARSHAN_BYPASS_CACHE=1 npm run demo
 - `memory/observations.jsonl` stores raw screen observations.
 - `memory/apps/*.md` stores inspectable per-app UI memory.
 - `memory/cache/` stores Gemini responses by screenshot hash.
+- `npm run assess:memory` checks whether the stored app memory has the required surfaces, affordances, transitions, negative memory, uncertainty, and portable evidence.
 
 Commit synthetic fixtures and stable test artifacts. Do not commit real private screenshots or secrets.
+
+## Assessment
+
+See `ASSESSMENT.md` for the current honest read.
+
+Short version: this is now a stronger controlled harness, but the actual product-level learning problem is not solved yet. The next important layer is visual transition inference from before/after screenshots and click positions, so the system learns how the UI works without relying on scripted action labels.
 
 ## Performance Notes
 

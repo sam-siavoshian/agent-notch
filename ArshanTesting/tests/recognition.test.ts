@@ -42,4 +42,26 @@ describe("state recognition", () => {
     expect(recognition.confidence).toBe("medium");
     expect(recognition.recommendedFirstAction).toBe("click Deployments in the top navigation");
   });
+
+  it("recognizes a known surface even when the model emits a generic surface id", () => {
+    const memory = updateMemoryFromObservations(
+      [fixtureObservationForState("overview"), fixtureObservationForState("deployments")],
+      [{ from: "overview", action: "click Deployments in the left navigation", to: "deployments", success: true, note: "Opens deployments table." }]
+    );
+    const observation = {
+      ...fixtureObservationForState("deployments"),
+      surfaceId: "main-window",
+      surfaceLabel: "Deployments dashboard"
+    };
+
+    const recognition = recognizeState(
+      observation,
+      memory,
+      "Find the failed deployment in the deployment dashboard."
+    );
+
+    expect(recognition.memoryHit).toBe(true);
+    expect(recognition.matchedSurface).toContain("[deployments]");
+    expect(recognition.recommendedFirstAction).toBe("click Status filter");
+  });
 });

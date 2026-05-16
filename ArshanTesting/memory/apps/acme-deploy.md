@@ -4,10 +4,10 @@
 Acme Deploy is a synthetic SaaS deployment dashboard used to test UI/UX learning.
 
 ## Surfaces Seen
-- [high] Dashboard overview: Overview surface with deployment health cards, activity feed, and left navigation. (evidence: fixture-overview)
-- [high] Deployments table: Deployments table with environment, status, commit, age, and filters. (evidence: fixture-deployments)
-- [high] Deployments filters open: Filter popover is open with status options including Failed. (evidence: fixture-filters-open)
-- [high] Failed deployment detail: Failed deployment detail panel showing production API deployment failure and logs. (evidence: fixture-failed-detail)
+- [high] [overview] Dashboard overview: Overview surface with deployment health cards, activity feed, and left navigation. (evidence: fixture-overview)
+- [high] [deployments] Deployments table: Deployments table with environment, status, commit, age, and filters. (evidence: fixture-deployments)
+- [high] [filters-open] Deployments filters open: Filter popover is open with status options including Failed. (evidence: fixture-filters-open)
+- [high] [failed-detail] Failed deployment detail: Failed deployment detail panel showing production API deployment failure and logs. (evidence: fixture-failed-detail)
 
 ## Landmarks
 - [high] left navigation (evidence: fixture-overview)

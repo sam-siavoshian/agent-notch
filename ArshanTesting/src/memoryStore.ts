@@ -46,7 +46,14 @@ export class MemoryStore {
   async appendObservation(observation: Observation): Promise<void> {
     await this.ensure();
     const filePath = path.join(this.rootDir, "memory", "observations.jsonl");
-    await appendFile(filePath, `${JSON.stringify(observation)}\n`, "utf8");
+    await appendFile(filePath, `${JSON.stringify(this.portableObservation(observation))}\n`, "utf8");
+  }
+
+  async writeObservations(observations: Observation[]): Promise<void> {
+    await this.ensure();
+    const filePath = path.join(this.rootDir, "memory", "observations.jsonl");
+    const lines = observations.map((observation) => JSON.stringify(this.portableObservation(observation)));
+    await writeFile(filePath, `${lines.join("\n")}\n`, "utf8");
   }
 
   async readObservations(): Promise<Observation[]> {
@@ -81,6 +88,18 @@ export class MemoryStore {
   markdownPath(app: string): string {
     return path.join(this.rootDir, "memory", "apps", `${slug(app)}.md`);
   }
+
+  private portableObservation(observation: Observation): Observation {
+    if (!observation.screenshotPath || !path.isAbsolute(observation.screenshotPath)) {
+      return observation;
+    }
+
+    const relativePath = path.relative(this.rootDir, observation.screenshotPath);
+    if (relativePath.startsWith("..")) {
+      return { ...observation, screenshotPath: path.basename(observation.screenshotPath) };
+    }
+    return { ...observation, screenshotPath: relativePath };
+  }
 }
 
 export function emptyAppMemory(app: string): AppMemory {
@@ -106,14 +125,21 @@ export function updateMemoryFromObservations(
   const memory = cloneMemory(existing ?? emptyAppMemory(app));
 
   for (const observation of observations) {
-    addFact(memory.surfaces, `${observation.surfaceLabel}: ${observation.summary}`, "high", [observation.id]);
+    const surfaceKey = canonicalSurfaceKey(observation);
+    addSurfaceFact(
+      memory.surfaces,
+      surfaceKey,
+      `[${surfaceKey}] ${observation.surfaceLabel}: ${observation.summary}`,
+      confidenceFromScore(observation.confidence),
+      [observation.id]
+    );
 
     for (const landmark of observation.landmarks) {
-      addFact(memory.landmarks, landmark, observation.confidence > 0.9 ? "high" : "medium", [observation.id]);
+      addFact(memory.landmarks, landmark, confidenceFromScore(observation.confidence), [observation.id]);
     }
 
     for (const affordance of observation.likelyAffordances) {
-      addFact(memory.affordances, affordance, observation.confidence > 0.9 ? "high" : "medium", [observation.id]);
+      addFact(memory.affordances, affordance, confidenceFromScore(observation.confidence), [observation.id]);
     }
 
     for (const uncertainty of observation.uncertainty) {
@@ -122,8 +148,8 @@ export function updateMemoryFromObservations(
   }
 
   for (const action of actions) {
-    const before = observations.find((observation) => observation.surfaceId === action.from);
-    const after = observations.find((observation) => observation.surfaceId === action.to);
+    const before = findObservationForSurface(observations, action.from);
+    const after = findObservationForSurface(observations, action.to);
     const evidenceIds = [before?.id, after?.id].filter(Boolean) as string[];
 
     if (action.success) {
@@ -139,12 +165,15 @@ export function updateMemoryFromObservations(
     }
   }
 
-  addFact(
-    memory.taskRecipes,
-    "Find failed deployment: open Deployments, use Status filter, select Failed, then inspect the failed deployment detail.",
-    "high",
-    observations.map((observation) => observation.id)
-  );
+  const actionText = actions.map((action) => action.action).join(" ").toLowerCase();
+  if (actionText.includes("deployments") && actionText.includes("status") && actionText.includes("failed")) {
+    addFact(
+      memory.taskRecipes,
+      "Find failed deployment: open Deployments, use Status filter, select Failed, then inspect the failed deployment detail.",
+      "high",
+      observations.map((observation) => observation.id)
+    );
+  }
 
   return memory;
 }
@@ -203,6 +232,23 @@ function addFact(facts: MemoryFact[], text: string, confidence: MemoryFact["conf
   facts.push({ text, confidence, evidenceIds: Array.from(new Set(evidenceIds)) });
 }
 
+function addSurfaceFact(
+  facts: MemoryFact[],
+  surfaceKey: string,
+  text: string,
+  confidence: MemoryFact["confidence"],
+  evidenceIds: string[]
+): void {
+  const prefix = `[${surfaceKey}]`;
+  const existing = facts.find((fact) => fact.text.startsWith(prefix));
+  if (existing) {
+    existing.evidenceIds = Array.from(new Set([...existing.evidenceIds, ...evidenceIds]));
+    existing.confidence = stronger(existing.confidence, confidence);
+    return;
+  }
+  addFact(facts, text, confidence, evidenceIds);
+}
+
 function addTransition(transitions: MemoryTransition[], transition: MemoryTransition): void {
   const existing = transitions.find((candidate) =>
     candidate.fromSurface === transition.fromSurface &&
@@ -224,6 +270,62 @@ function stronger(a: MemoryFact["confidence"], b: MemoryFact["confidence"]): Mem
 
 function normalize(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function confidenceFromScore(score: number): MemoryFact["confidence"] {
+  if (score >= 0.9) return "high";
+  if (score >= 0.7) return "medium";
+  return "low";
+}
+
+function findObservationForSurface(observations: Observation[], surface: string): Observation | undefined {
+  const target = normalizeSurfaceToken(surface);
+  return observations.find((observation) => normalizeSurfaceToken(observation.surfaceId) === target) ??
+    observations.find((observation) => canonicalSurfaceKey(observation) === target) ??
+    observations.find((observation) => surfaceText(observation).includes(target));
+}
+
+export function canonicalSurfaceKey(observation: Pick<Observation, "surfaceId" | "surfaceLabel" | "summary" | "landmarks" | "visibleControls" | "visibleEntities">): string {
+  const text = surfaceText(observation);
+
+  if (mentions(text, ["filter popover", "filters open", "status options", "apply filters"]) ||
+    (mentions(text, ["failed"]) && mentions(text, ["ready"]) && mentions(text, ["building"]) && mentions(text, ["canceled"]))) {
+    return "filters-open";
+  }
+
+  if (mentions(text, ["failed detail", "detail panel", "right panel", "view logs", "redeploy", "missing database"])) {
+    return "failed-detail";
+  }
+
+  if (mentions(text, ["deployment table", "deployments table", "deployments dashboard", "filter bar", "date range"]) ||
+    (mentions(text, ["api-8f31"]) && mentions(text, ["status"]))) {
+    return "deployments";
+  }
+
+  if (mentions(text, ["overview", "health cards", "metrics cards", "recent activity", "failed deployments"])) {
+    return "overview";
+  }
+
+  return normalizeSurfaceToken(observation.surfaceId || observation.surfaceLabel || "unknown");
+}
+
+function surfaceText(observation: Pick<Observation, "surfaceId" | "surfaceLabel" | "summary" | "landmarks" | "visibleControls" | "visibleEntities">): string {
+  return normalize([
+    observation.surfaceId,
+    observation.surfaceLabel,
+    observation.summary,
+    ...observation.landmarks,
+    ...observation.visibleControls.map((control) => `${control.label} ${control.role} ${control.region}`),
+    ...observation.visibleEntities
+  ].join(" "));
+}
+
+function normalizeSurfaceToken(value: string): string {
+  return normalize(value).replace(/[_\s]+/g, "-").replace(/[^a-z0-9-]+/g, "");
+}
+
+function mentions(text: string, needles: string[]): boolean {
+  return needles.some((needle) => text.includes(normalize(needle)));
 }
 
 function slug(value: string): string {
