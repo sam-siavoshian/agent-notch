@@ -26,6 +26,7 @@ public struct ContextSnapshot: Identifiable, Sendable {
     public let jpegData: Data
     public let width: Int
     public let height: Int
+    public let recognizedText: [ContextRecognizedText]
 
     public init(
         id: UUID = UUID(),
@@ -36,7 +37,8 @@ public struct ContextSnapshot: Identifiable, Sendable {
         cursorLocation: CGPoint?,
         jpegData: Data,
         width: Int,
-        height: Int
+        height: Int,
+        recognizedText: [ContextRecognizedText] = []
     ) {
         self.id = id
         self.capturedAt = capturedAt
@@ -47,12 +49,22 @@ public struct ContextSnapshot: Identifiable, Sendable {
         self.jpegData = jpegData
         self.width = width
         self.height = height
+        self.recognizedText = recognizedText
     }
 }
 
 public struct ContextWindowMetadata: Sendable {
     public let appName: String
     public let windowTitle: String
+}
+
+public struct ContextRecognizedText: Codable, Sendable {
+    public let text: String
+    public let confidence: Float
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
 }
 
 public struct ContextActivationPacket: Sendable {
@@ -119,6 +131,50 @@ public struct ContextSurfaceMemory: Codable, Identifiable, Sendable {
     public var observationCount: Int
     public var clickCount: Int
     public var activationCount: Int
+    public var textHighlights: [String]
+
+    public init(
+        id: String,
+        title: String,
+        firstSeen: Date,
+        lastSeen: Date,
+        observationCount: Int,
+        clickCount: Int,
+        activationCount: Int,
+        textHighlights: [String] = []
+    ) {
+        self.id = id
+        self.title = title
+        self.firstSeen = firstSeen
+        self.lastSeen = lastSeen
+        self.observationCount = observationCount
+        self.clickCount = clickCount
+        self.activationCount = activationCount
+        self.textHighlights = textHighlights
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case firstSeen
+        case lastSeen
+        case observationCount
+        case clickCount
+        case activationCount
+        case textHighlights
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.firstSeen = try container.decode(Date.self, forKey: .firstSeen)
+        self.lastSeen = try container.decode(Date.self, forKey: .lastSeen)
+        self.observationCount = try container.decode(Int.self, forKey: .observationCount)
+        self.clickCount = try container.decode(Int.self, forKey: .clickCount)
+        self.activationCount = try container.decode(Int.self, forKey: .activationCount)
+        self.textHighlights = try container.decodeIfPresent([String].self, forKey: .textHighlights) ?? []
+    }
 }
 
 public struct ContextTransitionMemory: Codable, Identifiable, Sendable {
@@ -150,6 +206,7 @@ public struct ContextMemoryObservationRecord: Codable, Sendable {
     public let appName: String
     public let windowTitle: String
     public let surfaceID: String
+    public let recognizedText: [String]
     public let cursorX: Int?
     public let cursorY: Int?
     public let width: Int

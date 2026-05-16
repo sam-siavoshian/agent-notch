@@ -47,7 +47,8 @@ enum ContextActivationBuilder {
         snapshots.suffix(8).map { snapshot in
             let age = max(0, Int(now.timeIntervalSince(snapshot.capturedAt)))
             let cursor = snapshot.cursorLocation.map { " cursor=(\(Int($0.x)),\(Int($0.y)))" } ?? ""
-            return "- \(age)s ago: \(snapshot.trigger.rawValue) capture in \(snapshot.appName), \(displayTitle(snapshot.windowTitle)).\(cursor)"
+            let text = textPreview(from: snapshot)
+            return "- \(age)s ago: \(snapshot.trigger.rawValue) capture in \(snapshot.appName), \(displayTitle(snapshot.windowTitle)).\(cursor)\(text)"
         }
     }
 
@@ -99,6 +100,16 @@ enum ContextActivationBuilder {
 
     private static func normalizedTitle(_ title: String) -> String {
         title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func textPreview(from snapshot: ContextSnapshot) -> String {
+        let highlights = snapshot.recognizedText
+            .map(\.text)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .prefix(5)
+
+        guard !highlights.isEmpty else { return "" }
+        return " Visible text: \(highlights.joined(separator: " | "))"
     }
 }
 

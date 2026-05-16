@@ -42,6 +42,7 @@ public actor ContextMemoryStore {
             surfaceID: surfaceID,
             title: surfaceTitle,
             trigger: snapshot.trigger,
+            textHighlights: textHighlights(from: snapshot),
             capturedAt: snapshot.capturedAt,
             memory: &memory
         )
@@ -95,6 +96,7 @@ public actor ContextMemoryStore {
         surfaceID: String,
         title: String,
         trigger: ContextCaptureTrigger,
+        textHighlights: [String],
         capturedAt: Date,
         memory: inout ContextAppMemory
     ) {
@@ -108,6 +110,10 @@ public actor ContextMemoryStore {
             if trigger == .activation {
                 memory.surfaces[index].activationCount += 1
             }
+            memory.surfaces[index].textHighlights = mergedHighlights(
+                existing: memory.surfaces[index].textHighlights,
+                new: textHighlights
+            )
         } else {
             memory.surfaces.append(ContextSurfaceMemory(
                 id: surfaceID,
@@ -116,7 +122,8 @@ public actor ContextMemoryStore {
                 lastSeen: capturedAt,
                 observationCount: 1,
                 clickCount: trigger == .click ? 1 : 0,
-                activationCount: trigger == .activation ? 1 : 0
+                activationCount: trigger == .activation ? 1 : 0,
+                textHighlights: textHighlights
             ))
         }
     }
@@ -212,6 +219,7 @@ public actor ContextMemoryStore {
             appName: snapshot.appName,
             windowTitle: snapshot.windowTitle,
             surfaceID: surfaceID,
+            recognizedText: textHighlights(from: snapshot, maxCount: 20),
             cursorX: snapshot.cursorLocation.map { Int($0.x) },
             cursorY: snapshot.cursorLocation.map { Int($0.y) },
             width: snapshot.width,
@@ -239,6 +247,42 @@ public actor ContextMemoryStore {
 
     private func markdownURL(for appKey: String) -> URL {
         appDirectoryURL.appendingPathComponent("\(appKey).md")
+    }
+
+    private func textHighlights(from snapshot: ContextSnapshot, maxCount: Int = 12) -> [String] {
+        var seen = Set<String>()
+        var highlights: [String] = []
+
+        for item in snapshot.recognizedText {
+            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.count >= 2 else { continue }
+            let key = text.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            highlights.append(text)
+            if highlights.count >= maxCount {
+                break
+            }
+        }
+
+        return highlights
+    }
+
+    private func mergedHighlights(existing: [String], new: [String], maxCount: Int = 24) -> [String] {
+        var seen = Set<String>()
+        var merged: [String] = []
+
+        for text in new + existing {
+            let key = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            merged.append(text)
+            if merged.count >= maxCount {
+                break
+            }
+        }
+
+        return merged
     }
 
     private func storageKey(for appName: String) -> String {

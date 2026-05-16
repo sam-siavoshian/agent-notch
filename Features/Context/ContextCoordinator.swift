@@ -15,14 +15,20 @@ public final class ContextCoordinator: RecentActivityContext {
 
     private let store = ContextSnapshotStore(maxSnapshots: 20)
     private let memoryStore: ContextMemoryStore
+    private let ocrService: ContextOCRService
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
 
     private var isStarted = false
 
-    private init(capture: ScreenCapture = .shared, memoryStore: ContextMemoryStore = .shared) {
+    private init(
+        capture: ScreenCapture = .shared,
+        memoryStore: ContextMemoryStore = .shared,
+        ocrService: ContextOCRService = .shared
+    ) {
         self.capture = capture
         self.memoryStore = memoryStore
+        self.ocrService = ocrService
         self.clickMonitor = ContextClickMonitor { location in
             Task {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
@@ -74,6 +80,7 @@ public final class ContextCoordinator: RecentActivityContext {
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.55)
+            let recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
             let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
                 trigger: trigger,
@@ -82,11 +89,12 @@ public final class ContextCoordinator: RecentActivityContext {
                 cursorLocation: cursorLocation,
                 jpegData: snapshot.jpegData,
                 width: snapshot.width,
-                height: snapshot.height
+                height: snapshot.height,
+                recognizedText: recognizedText
             )
             await store.record(contextSnapshot)
             await memoryStore.record(contextSnapshot)
-            NSLog("[ContextCoordinator] Captured \(trigger.rawValue) context for \(metadata.appName)")
+            NSLog("[ContextCoordinator] Captured \(trigger.rawValue) context for \(metadata.appName) with \(recognizedText.count) OCR text items")
         } catch {
             NSLog("[ContextCoordinator] Capture failed: \(error)")
         }

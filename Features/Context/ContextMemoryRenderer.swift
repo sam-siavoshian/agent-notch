@@ -19,7 +19,9 @@ enum ContextMemoryRenderer {
             }
             .prefix(5)
             .map { surface in
-                "- \(surface.title): seen \(surface.observationCount)x, last seen \(relativeAge(surface.lastSeen))."
+                let text = surface.textHighlights.prefix(6).joined(separator: " | ")
+                let suffix = text.isEmpty ? "" : " Visible text: \(text)."
+                return "- \(surface.title): seen \(surface.observationCount)x, last seen \(relativeAge(surface.lastSeen)).\(suffix)"
             }
 
         let transitions = memory.transitions
@@ -61,7 +63,8 @@ enum ContextMemoryRenderer {
         let surfaces = memory.surfaces
             .sorted { $0.lastSeen > $1.lastSeen }
             .map { surface in
-                "- **\(surface.title)**: seen \(surface.observationCount)x, clicks \(surface.clickCount)x, activations \(surface.activationCount)x, last seen \(iso(surface.lastSeen))."
+                let text = surface.textHighlights.isEmpty ? "" : "\n  - Text highlights: \(surface.textHighlights.prefix(12).joined(separator: " | "))"
+                return "- **\(surface.title)**: seen \(surface.observationCount)x, clicks \(surface.clickCount)x, activations \(surface.activationCount)x, last seen \(iso(surface.lastSeen)).\(text)"
             }
             .joined(separator: "\n")
 
