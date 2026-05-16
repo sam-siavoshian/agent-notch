@@ -10,7 +10,11 @@
 import Foundation
 
 enum ContextActivationBuilder {
-    static func build(from snapshots: [ContextSnapshot], now: Date = Date()) -> ContextActivationPacket {
+    static func build(
+        from snapshots: [ContextSnapshot],
+        learnedUIMemory: String = "",
+        now: Date = Date()
+    ) -> ContextActivationPacket {
         guard let latest = snapshots.last else {
             return ContextActivationPacket(
                 generatedAt: now,
@@ -20,6 +24,7 @@ enum ContextActivationBuilder {
                 currentWindow: "Unknown window",
                 recentTimeline: [],
                 observedTransitions: [],
+                learnedUIMemory: learnedUIMemory,
                 firstActionGuidance: ["- No screen context has been captured yet. Take a screenshot before acting."]
             )
         }
@@ -33,6 +38,7 @@ enum ContextActivationBuilder {
             currentWindow: displayTitle(latest.windowTitle),
             recentTimeline: timeline(from: snapshots, now: now),
             observedTransitions: transitions(from: snapshots),
+            learnedUIMemory: learnedUIMemory,
             firstActionGuidance: guidance(from: snapshots)
         )
     }

@@ -28,7 +28,11 @@ public actor ContextSnapshotStore {
         snapshots
     }
 
-    public func recentActivityContext(now: Date = Date()) -> String {
-        ContextActivationBuilder.build(from: snapshots, now: now).promptText
+    public func recentActivityContext(now: Date = Date(), learnedUIMemory: String = "") -> String {
+        ContextActivationBuilder.build(
+            from: snapshots,
+            learnedUIMemory: learnedUIMemory,
+            now: now
+        ).promptText
     }
 }

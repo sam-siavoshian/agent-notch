@@ -14,13 +14,15 @@ public final class ContextCoordinator: RecentActivityContext {
     public static let shared = ContextCoordinator()
 
     private let store = ContextSnapshotStore(maxSnapshots: 20)
+    private let memoryStore: ContextMemoryStore
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
 
     private var isStarted = false
 
-    private init(capture: ScreenCapture = .shared) {
+    private init(capture: ScreenCapture = .shared, memoryStore: ContextMemoryStore = .shared) {
         self.capture = capture
+        self.memoryStore = memoryStore
         self.clickMonitor = ContextClickMonitor { location in
             Task {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
@@ -55,7 +57,10 @@ public final class ContextCoordinator: RecentActivityContext {
             NSEvent.mouseLocation
         }
         await capture(trigger: .activation, cursorLocation: cursorLocation)
-        return await store.recentActivityContext()
+        let snapshots = await store.recentSnapshots()
+        let appName = snapshots.last?.appName ?? ""
+        let learnedMemory = await memoryStore.activationMemory(appName: appName)
+        return await store.recentActivityContext(learnedUIMemory: learnedMemory)
     }
 
     public func recentSnapshots() async -> [ContextSnapshot] {
@@ -69,7 +74,7 @@ public final class ContextCoordinator: RecentActivityContext {
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.55)
-            await store.record(ContextSnapshot(
+            let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
                 trigger: trigger,
                 appName: metadata.appName,
@@ -78,7 +83,9 @@ public final class ContextCoordinator: RecentActivityContext {
                 jpegData: snapshot.jpegData,
                 width: snapshot.width,
                 height: snapshot.height
-            ))
+            )
+            await store.record(contextSnapshot)
+            await memoryStore.record(contextSnapshot)
             NSLog("[ContextCoordinator] Captured \(trigger.rawValue) context for \(metadata.appName)")
         } catch {
             NSLog("[ContextCoordinator] Capture failed: \(error)")
