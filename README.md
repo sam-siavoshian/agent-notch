@@ -9,6 +9,7 @@ A macOS computer-use agent that lives in the notch. Voice-activated (long-press 
 - macOS 14+ on an M-series MacBook (physical notch required)
 - Xcode 15+
 - [xcodegen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- Apple ID added to Xcode → Settings → Accounts (free Personal Team works) with an Apple Development cert in the login keychain
 - An Anthropic API key
 
 ---
@@ -16,23 +17,31 @@ A macOS computer-use agent that lives in the notch. Voice-activated (long-press 
 ## First-time setup
 
 ```bash
-git clone <this repo>
-cd tritonhacks2026
+brew install xcodegen
+bash scripts/setup-signing.sh   # detects your Apple Dev cert, writes Local.xcconfig
 xcodegen generate
 open AgentNotch.xcodeproj
 ```
 
-Re-run `xcodegen generate` any time `Project.yml` or the source layout changes.
+`setup-signing.sh` is idempotent. Re-run if you switch Apple ID. Re-run `xcodegen generate` any time `Project.yml` or the source layout changes.
+
+### Why the signing script?
+
+Ad-hoc signing (`CODE_SIGN_IDENTITY = "-"`) regenerates the binary's cdhash on every build. macOS TCC keys permission grants (Accessibility, Screen Recording) by cdhash + cert chain. Ad-hoc rebuild → TCC sees a "different app" → grant invalidated → onboarding red Xs forever.
+
+Signing with your Apple Development cert keeps the Designated Requirement stable across rebuilds, so once you grant a permission, it sticks. Hardened runtime is also off for local dev so declared entitlements survive at runtime without a provisioning profile — otherwise stripped entitlements destabilize the effective signature each launch.
+
+If `scripts/setup-signing.sh` complains it cannot find a cert: open Xcode → Settings → Accounts → Manage Certificates → + → Apple Development, then re-run.
 
 ---
 
-## Setting your API key
+## Setting your API keys
 
-The app reads `ANTHROPIC_API_KEY` from the Xcode scheme environment at launch.
+**Anthropic** key reads from `ANTHROPIC_API_KEY` in the Xcode scheme environment at launch.
 
-1. In Xcode, go to **Product → Scheme → Edit Scheme…** (or `⌘<`)
-2. Select **Run** in the left sidebar → **Arguments** tab
-3. Under **Environment Variables**, click **+** and add:
+1. In Xcode, **Product → Scheme → Edit Scheme…** (or `⌘<`)
+2. Select **Run** → **Arguments** tab
+3. Under **Environment Variables**, add:
 
 | Name | Value |
 |------|-------|
@@ -40,11 +49,25 @@ The app reads `ANTHROPIC_API_KEY` from the Xcode scheme environment at launch.
 
 The key is never written to disk — it lives only in the local scheme, which is gitignored.
 
+**OpenAI** (Whisper) key is stored in the macOS Keychain under service `com.agentnotch.app`. `AppDelegate.seedSecrets()` bootstraps a default on first launch; rotate via `Secrets.setOpenAIAPIKey(_:)`.
+
+---
+
+## Permissions
+
+On first launch the onboarding window asks for three TCC grants:
+
+- **Accessibility** — read long-press gesture, drive clicks/keystrokes
+- **Screen Recording** — capture activity for context
+- **Microphone** — long-press to talk
+
+Click Grant on each. The window auto-relaunches after you return from Settings so the in-process TCC cache flushes.
+
 ---
 
 ## Demo without a microphone
 
-If Whisper isn't wired up yet, set a fallback prompt in the same scheme env:
+If you want to fire the agent without Whisper:
 
 | Name | Value |
 |------|-------|
@@ -66,4 +89,5 @@ Any long-press on the cursor companion will fire the agent using that string as 
 
 ## Architecture
 
-See `CLAUDE.md` for the full architecture guide and `NOTES.md` for current build status and known gaps.
+See `AGENTS.md` and `CLAUDE.md` for module layout and conventions.
+See `PRD.md` for the product spec and `NOTES.md` for current build status.

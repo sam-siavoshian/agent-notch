@@ -13,12 +13,13 @@ import SwiftUI
 final class CursorCompanionWindow {
     /// Panel is bigger than the sprite so the listening halo + thinking ring
     /// don't clip. Must match the outer frame of CursorCompanionView.
-    private let panelSize: CGFloat = 40
+    private let panelSize: CGFloat = 50
 
     /// Where the sprite center sits relative to the user's real cursor tip
-    /// (screen coords, AppKit: +x right, +y up). Tuned so the companion sits
-    /// just to the right and slightly below the cursor, like a buddy.
-    private let spriteOffsetFromCursor = CGPoint(x: 14, y: -8)
+    /// (screen coords, AppKit: +x right, +y up). Offset clears the real
+    /// macOS cursor's ~18pt-wide × 24pt-tall arrow body so the companion
+    /// never sits visually behind the user's pointer.
+    private let spriteOffsetFromCursor = CGPoint(x: 28, y: -16)
 
     private let panel: NSPanel
     private let hostingView: NSHostingView<CursorCompanionView>

@@ -17,9 +17,16 @@ settings:
     SWIFT_VERSION: "5.10"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
-    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Manual
+    OTHER_CODE_SIGN_FLAGS: "--timestamp=none"
+    # Hardened runtime OFF for local dev: without it macOS keeps our declared
+    # entitlements intact at runtime, so TCC grants bind to a stable effective
+    # signature across rebuilds. Turn back on only when shipping notarized.
+    ENABLE_HARDENED_RUNTIME: NO
+
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
 
 targets:
   AgentNotch:
@@ -52,7 +59,10 @@ targets:
         com.apple.security.app-sandbox: false
         com.apple.security.device.audio-input: true
         com.apple.security.network.client: true
-        com.apple.security.automation.apple-events: true
+        # apple-events removed: CGEvent path drives clicks/keys directly.
+        # Restricted entitlement would need a provisioning profile to actually
+        # apply at runtime; without one it gets stripped, which destabilizes
+        # the effective signature TCC keys grants against.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.agentnotch.app

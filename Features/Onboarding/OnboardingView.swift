@@ -43,31 +43,102 @@ private enum Pill {
 
 // MARK: - Shared modifiers / styles
 
+/// White-pill background. Three states with distinct visual language:
+/// - rest: inset highlight (top) + inset floor (bottom), 2-layer outer shadow
+/// - hover: ADD ring, ADD tinted glow, scale up, brighten — light leaks in
+/// - pressed: FLIP insets (dark top, bright bottom rim), kill glow + ambient,
+///            scale DOWN. Reads as a real button punched into the canvas.
 private struct SoftPillBg: ViewModifier {
     var fill: Color = Pill.surface
     var radius: CGFloat = 999
-    var elevated: Bool = false
+    var hovered: Bool = false
+    var pressed: Bool = false
+    var glow: Color = Color(red: 1.0, green: 0.71, blue: 0.55)
+    var glowIntensity: Double = 0.35
+
     func body(content: Content) -> some View {
-        content
-            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(fill))
-            .shadow(color: Pill.shadowContact, radius: 1, x: 0, y: 1)
-            .shadow(color: elevated ? Pill.shadowHover : Pill.shadowAmbient,
-                    radius: elevated ? 18 : 12,
-                    x: 0, y: elevated ? 12 : 8)
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        return content
+            .background(shape.fill(fill))
+            // Inset edges only when pressed. REST/HOVER: no border ring.
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.18),
+                            .clear,
+                            Color.white.opacity(0.55)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 1.5
+                )
+                .opacity(pressed ? 1 : 0)
+            )
+            // Outer shadows. Hover lifts via deeper ambient + tinted glow.
+            .shadow(color: pressed ? Color.black.opacity(0.10) : Pill.shadowContact,
+                    radius: 1, x: 0, y: 1)
+            .shadow(color: pressed
+                        ? .clear
+                        : (hovered ? Pill.shadowHover : Pill.shadowAmbient),
+                    radius: hovered ? 22 : 12,
+                    x: 0, y: hovered ? 14 : 8)
+            .shadow(color: glow.opacity((hovered && !pressed) ? glowIntensity : 0),
+                    radius: 26, x: 0, y: 0)
+            .scaleEffect(pressed ? 0.97 : (hovered ? 1.025 : 1.0))
+            .brightness(pressed ? -0.04 : (hovered ? 0.03 : 0))
+            .saturation(pressed ? 0.98 : (hovered ? 1.04 : 1.0))
+            .animation(pressed
+                        ? .easeOut(duration: 0.08)
+                        : .timingCurve(0.2, 0.7, 0.2, 1, duration: 0.18),
+                       value: pressed)
+            .animation(.timingCurve(0.2, 0.7, 0.2, 1, duration: 0.18), value: hovered)
     }
 }
 
 private extension View {
-    func softPill(fill: Color = Pill.surface, radius: CGFloat = 999, elevated: Bool = false) -> some View {
-        modifier(SoftPillBg(fill: fill, radius: radius, elevated: elevated))
+    func softPill(fill: Color = Pill.surface,
+                  radius: CGFloat = 999,
+                  hovered: Bool = false,
+                  pressed: Bool = false,
+                  glow: Color = Color(red: 1.0, green: 0.71, blue: 0.55),
+                  glowIntensity: Double = 0.35) -> some View {
+        modifier(SoftPillBg(fill: fill, radius: radius,
+                            hovered: hovered, pressed: pressed,
+                            glow: glow, glowIntensity: glowIntensity))
     }
 }
 
+/// Real-button press: scales DOWN below rest, brightens DOWN, fast ease-out.
+/// Inset/shadow inversion lives in SoftPillBg — this style is for buttons
+/// whose label is the whole tap target (no backing pill on its own).
 private struct PressSpringStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-            .animation(.spring(response: 0.25, dampingFraction: 0.65), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .brightness(configuration.isPressed ? -0.04 : 0)
+            .animation(configuration.isPressed
+                        ? .easeOut(duration: 0.08)
+                        : .spring(response: 0.28, dampingFraction: 0.7),
+                       value: configuration.isPressed)
+    }
+}
+
+/// Button style that wraps its label in a SoftPillBg and pipes press state
+/// straight into it — so the inset flips, glow dies, and scale drops in one
+/// place. Pass `hovered` from the caller's @State.
+private struct SoftPillButtonStyle: ButtonStyle {
+    var hovered: Bool = false
+    var fill: Color = Pill.surface
+    var radius: CGFloat = 999
+    var glow: Color = Color(red: 1.0, green: 0.71, blue: 0.55)
+    var glowIntensity: Double = 0.35
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .softPill(fill: fill, radius: radius,
+                      hovered: hovered, pressed: configuration.isPressed,
+                      glow: glow, glowIntensity: glowIntensity)
     }
 }
 
@@ -78,6 +149,8 @@ struct OnboardingView: View {
     let onContinue: () -> Void
 
     @State private var pulseScale: CGFloat = 1.0
+    @State private var pendingRelaunch = false
+    @State private var activateObserver: NSObjectProtocol?
 
     private var allGranted: Bool { checker.allGranted }
     private var grantedCount: Int {
@@ -106,8 +179,31 @@ struct OnboardingView: View {
         .onAppear {
             checker.startPolling()
             pulseScale = 2.4
+            // When user comes back from Settings after granting AX/SR, the
+            // in-process TCC cache is stale. Auto-relaunch to flush it.
+            activateObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                guard pendingRelaunch else { return }
+                let stillDenied =
+                    checker.statuses[.accessibility] != .granted ||
+                    checker.statuses[.screenRecording] != .granted
+                if stillDenied {
+                    pendingRelaunch = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        relaunch()
+                    }
+                } else {
+                    pendingRelaunch = false
+                }
+            }
         }
-        .onDisappear { checker.stopPolling() }
+        .onDisappear {
+            checker.stopPolling()
+            if let activateObserver { NotificationCenter.default.removeObserver(activateObserver) }
+        }
     }
 
     // MARK: Header
@@ -154,29 +250,31 @@ struct OnboardingView: View {
     private var permissionRows: some View {
         VStack(spacing: 12) {
             PermPill(
-                icon: "hand.tap.fill",
+                icon: .accessibility,
                 title: "Accessibility",
                 blurb: "Read long-press, click and type on your behalf.",
                 status: checker.statuses[.accessibility] ?? .unknown,
                 onGrant: {
                     checker.requestAccessibility()
                     checker.openSettings(for: .accessibility)
+                    pendingRelaunch = true
                 },
                 onSettings: { checker.openSettings(for: .accessibility) }
             )
             PermPill(
-                icon: "rectangle.on.rectangle",
+                icon: .monitor,
                 title: "Screen Recording",
                 blurb: "See recent screen activity for context. Needs a relaunch after grant.",
                 status: checker.statuses[.screenRecording] ?? .unknown,
                 onGrant: {
                     checker.requestScreenRecording()
                     checker.openSettings(for: .screenRecording)
+                    pendingRelaunch = true
                 },
                 onSettings: { checker.openSettings(for: .screenRecording) }
             )
             PermPill(
-                icon: "mic.fill",
+                icon: .mic,
                 title: "Microphone",
                 blurb: "Hold the cursor to talk, release to send.",
                 status: checker.statuses[.microphone] ?? .unknown,
@@ -219,7 +317,7 @@ struct OnboardingView: View {
                 .help("Skip setup — you can grant later from settings")
         }
         if needsRelaunch {
-            ghostPill(label: "Relaunch", icon: "arrow.clockwise", dashed: false, action: relaunch)
+            ghostPill(label: "Relaunch", icon: .rotateCW, dashed: false, action: relaunch)
                 .help("Restart so new grants take effect")
         }
     }
@@ -253,12 +351,11 @@ struct OnboardingView: View {
         .softPill()
     }
 
-    private func ghostPill(label: String, icon: String? = nil, dashed: Bool, action: @escaping () -> Void) -> some View {
+    private func ghostPill(label: String, icon: LucideName? = nil, dashed: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 7) {
                 if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 11, weight: .semibold))
+                    LucideIcon(name: icon, size: 13, lineWidth: 2, animate: false)
                 }
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
@@ -319,31 +416,16 @@ private struct ContinueCTA: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 12, weight: .bold))
-                    .symbolEffect(.variableColor.iterative.reversing,
-                                  options: .repeating)
+                LucideIcon(name: .sparkles, size: 14, lineWidth: 2, animate: true)
+                    .foregroundStyle(.white)
                 Text(allGranted ? "Continue" : "Continue anyway")
                     .font(.system(size: 14, weight: .semibold))
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 18)
             .padding(.vertical, 11)
-            .background(
-                LinearGradient(
-                    colors: [Pill.ctaFrom, Pill.ctaTo],
-                    startPoint: hover ? .topTrailing : .topLeading,
-                    endPoint: hover ? .bottomLeading : .bottomTrailing
-                )
-            )
-            .clipShape(Capsule())
-            .shadow(color: Pill.ctaShadow1, radius: 2, x: 0, y: 1)
-            .shadow(color: Pill.ctaShadow2,
-                    radius: hover ? 22 : 16,
-                    x: 0, y: hover ? 12 : 9)
-            .scaleEffect(hover ? 1.03 : 1.0)
         }
-        .buttonStyle(PressSpringStyle())
+        .buttonStyle(CTAStyle(hover: hover))
         .keyboardShortcut(.defaultAction)
         .onHover { h in
             withAnimation(.easeInOut(duration: 0.25)) { hover = h }
@@ -352,10 +434,61 @@ private struct ContinueCTA: View {
     }
 }
 
+/// Continue CTA visual. Three states:
+/// - rest: pink→orange gradient, glassy top inset, warm bottom inset, soft bloom
+/// - hover: brightness up, gradient flips diagonal, bloom 2x, white halo ring
+/// - pressed: scale 0.97, FLIP insets (dark warm top, white bottom rim),
+///            kill bloom + ambient — looks pressed into the canvas
+private struct CTAStyle: ButtonStyle {
+    let hover: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = configuration.isPressed
+        return configuration.label
+            .background(
+                LinearGradient(
+                    colors: [Pill.ctaFrom, Pill.ctaTo],
+                    startPoint: hover ? .topTrailing : .topLeading,
+                    endPoint: hover ? .bottomLeading : .bottomTrailing
+                )
+            )
+            // Inset edge: only when pressed (warm top + bright bottom rim).
+            .overlay(
+                Capsule().strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.55, green: 0.16, blue: 0.31).opacity(0.40),
+                            .clear,
+                            .white.opacity(0.30)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 1.5
+                )
+                .opacity(pressed ? 1 : 0)
+            )
+            .clipShape(Capsule())
+            // Contact shadow always; ambient + bloom only when not pressed.
+            .shadow(color: Pill.ctaShadow1, radius: 2, x: 0, y: 1)
+            .shadow(color: pressed ? .clear : Pill.ctaShadow2,
+                    radius: hover ? 36 : 20,
+                    x: 0, y: hover ? 14 : 9)
+            .shadow(color: pressed ? .clear : Pill.ctaFrom.opacity(hover ? 0.55 : 0.30),
+                    radius: hover ? 40 : 18, x: 0, y: 0)
+            .scaleEffect(pressed ? 0.97 : (hover ? 1.03 : 1.0))
+            .brightness(pressed ? -0.06 : (hover ? 0.06 : 0))
+            .saturation(pressed ? 0.95 : (hover ? 1.08 : 1.0))
+            .animation(pressed
+                        ? .easeOut(duration: 0.08)
+                        : .timingCurve(0.2, 0.7, 0.2, 1, duration: 0.18),
+                       value: pressed)
+    }
+}
+
 // MARK: - Permission pill row
 
 private struct PermPill: View {
-    let icon: String
+    let icon: LucideName
     let title: String
     let blurb: String
     let status: PermissionChecker.Status
@@ -371,8 +504,7 @@ private struct PermPill: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
+                    LucideIcon(name: icon, size: 14, lineWidth: 2, animate: hover)
                         .foregroundStyle(Pill.muted)
                     Text(title)
                         .font(.system(size: 14, weight: .semibold))
@@ -391,19 +523,24 @@ private struct PermPill: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .softPill(radius: 22, elevated: hover)
-        .scaleEffect(hover ? 1.005 : 1.0)
+        .softPill(radius: 22, hovered: hover, glow: glowColor, glowIntensity: 0.45)
         .animation(.easeInOut(duration: 0.2), value: status)
-        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: hover)
         .onHover { h in hover = h }
+    }
+
+    private var glowColor: Color {
+        switch status {
+        case .granted: Pill.green
+        case .denied:  Pill.red
+        case .unknown: Pill.amber
+        }
     }
 
     @ViewBuilder
     private var actionArea: some View {
         if status == .granted {
-            HStack(spacing: 5) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+            HStack(spacing: 6) {
+                LucideIcon(name: .check, size: 12, lineWidth: 2.5, trigger: status)
                 Text("Granted")
                     .font(.system(size: 12, weight: .semibold))
             }
@@ -413,26 +550,34 @@ private struct PermPill: View {
             .background(Capsule().fill(Pill.green.opacity(0.14)))
             .transition(.scale.combined(with: .opacity))
         } else {
-            Button(action: onGrant) {
-                Text("Grant")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Pill.text)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(Pill.hoverFill))
-            }
-            .buttonStyle(PressSpringStyle())
+            GrantButton(action: onGrant)
         }
 
-        Button(action: onSettings) {
-            Image(systemName: "gearshape")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Pill.muted)
-                .frame(width: 32, height: 32)
-                .background(Circle().fill(Pill.hoverFill))
+        SettingsCogButton(action: onSettings)
+            .help("Open in System Settings")
+    }
+}
+
+// MARK: - Grant button (own hover so it pops independently of the row)
+
+private struct GrantButton: View {
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            Text("Grant")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Pill.text)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
         }
-        .buttonStyle(PressSpringStyle())
-        .help("Open in System Settings")
+        .buttonStyle(SoftPillButtonStyle(
+            hovered: hover,
+            fill: Pill.hoverFill,
+            glow: Pill.ctaFrom,
+            glowIntensity: 0.18
+        ))
+        .onHover { h in hover = h }
     }
 }
 
@@ -444,14 +589,12 @@ private struct StatusBadge: View {
     var body: some View {
         ZStack {
             Circle().fill(fill)
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .bold))
+            LucideIcon(name: lucideName,
+                       size: 14,
+                       lineWidth: 2.4,
+                       animate: status == .unknown,
+                       trigger: status)
                 .foregroundStyle(.white)
-                .contentTransition(.symbolEffect(.replace.downUp))
-                .symbolEffect(.bounce, value: status == .granted)
-                .symbolEffect(.pulse,
-                              options: .repeating,
-                              isActive: status == .unknown)
         }
     }
 
@@ -463,12 +606,34 @@ private struct StatusBadge: View {
         }
     }
 
-    private var symbol: String {
+    private var lucideName: LucideName {
         switch status {
-        case .granted: "checkmark"
-        case .denied:  "xmark"
-        case .unknown: "info"
+        case .granted: .check
+        case .denied:  .xmark
+        case .unknown: .info
         }
+    }
+}
+
+// MARK: - Settings cog button (own hover state so the cog spins on hover)
+
+private struct SettingsCogButton: View {
+    let action: () -> Void
+    @State private var hover = false
+    var body: some View {
+        Button(action: action) {
+            LucideIcon(name: .settings, size: 16, lineWidth: 2, animate: hover)
+                .foregroundStyle(Pill.muted)
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(SoftPillButtonStyle(
+            hovered: hover,
+            fill: Pill.hoverFill,
+            radius: 16,
+            glow: Pill.gray,
+            glowIntensity: 0.20
+        ))
+        .onHover { h in hover = h }
     }
 }
 

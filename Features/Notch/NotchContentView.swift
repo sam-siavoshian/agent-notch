@@ -65,15 +65,28 @@ struct NotchContentView: View {
             // One compositing group below shape + shadow so the shadow
             // rasterizes against the shape once per frame, not separately.
             NotchShape(bottomCornerRadius: cornerRadius)
-                .fill(Color.black)
-                .shadow(color: .black.opacity(isOpen ? 0.40 : 0), radius: 12, y: 5)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.black,
+                            isOpen ? SoftPill.Canvas.base : Color.black
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    NotchShape(bottomCornerRadius: cornerRadius)
+                        .stroke(Color.white.opacity(isOpen ? 0.06 : 0), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(isOpen ? 0.50 : 0), radius: 16, y: 6)
                 .compositingGroup()
 
             if isOpen {
                 openContent
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 14)
-                    .padding(.top, NotchSizing.notchHeight(for: NSScreen.main))
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                    .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 2)
                     .frame(width: openWidth, height: openHeight, alignment: .top)
                     // Insertion: opacity + tiny scale from the notch edge.
                     // Removal: pure opacity (fastest possible exit).
@@ -198,35 +211,18 @@ struct NotchContentView: View {
 
 private struct NotchTabBar: View {
     @Binding var selected: NotchTab
-    @Namespace private var animation
 
     var body: some View {
-        HStack(spacing: 0) {
+        PillToolbar {
             ForEach(NotchTab.allCases) { tab in
-                Button {
+                ToolbarIconButton(
+                    systemImage: tab.icon,
+                    label: tab.label,
+                    isActive: selected == tab
+                ) {
                     withAnimation(.easeOut(duration: 0.14)) { selected = tab }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(tab.label)
-                            .font(.system(size: 11, weight: .semibold))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .foregroundStyle(selected == tab ? .white : .white.opacity(0.45))
-                    .contentShape(Capsule())
-                    .background {
-                        if selected == tab {
-                            Capsule()
-                                .fill(Color.white.opacity(0.12))
-                                .matchedGeometryEffect(id: "tab-bg", in: animation)
-                        }
-                    }
                 }
-                .buttonStyle(.plain)
             }
         }
-        .clipShape(Capsule())
     }
 }

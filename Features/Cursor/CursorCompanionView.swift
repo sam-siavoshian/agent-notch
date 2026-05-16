@@ -14,10 +14,17 @@ struct CursorCompanionView: View {
     @State private var pulse: CGFloat = 1.0
     @State private var orbit: Double = 0.0
 
-    private let spriteSize: CGFloat = 20
+    private let spriteSize: CGFloat = 18
 
     var body: some View {
         ZStack {
+            // Subtle ground glow — soft-pill warm halo under the cursor
+            Ellipse()
+                .fill(softPillColor.opacity(0.14))
+                .frame(width: spriteSize * 0.55, height: spriteSize * 0.28)
+                .blur(radius: 3)
+                .offset(y: spriteSize * 0.5)
+
             if viewModel.isListening {
                 Circle()
                     .fill(softPillColor.opacity(0.25))
@@ -25,14 +32,12 @@ struct CursorCompanionView: View {
                     .blur(radius: 5)
             }
 
-            Image(systemName: "arrowshape.up.left.fill")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: spriteSize, height: spriteSize)
-                .foregroundStyle(softPillColor)
+            Image(systemName: "cursorarrow")
+                .font(.system(size: spriteSize, weight: .black))
+                .foregroundColor(softPillColor)
                 .scaleEffect(pulse)
-                .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.06), radius: 1, x: 0, y: 1)
-                .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.10), radius: 6, x: 0, y: 3)
+                .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.04), radius: 1, x: 0, y: 1)
+                .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.06), radius: 4, x: 0, y: 2)
 
             if viewModel.isThinking {
                 Circle()
