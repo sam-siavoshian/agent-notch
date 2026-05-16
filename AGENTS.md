@@ -43,9 +43,9 @@ Each feature owns its code. Keep related code together.
 
 ```txt
 Features/Notch/
-├── NotchContentView.swift      — root, tab bar, open/closed, Cmd+D toggle
-├── NotchHomeView.swift         — Home tab: orb, transcript, activity log
-├── AgentSettingsView.swift     — Settings tab: 4 knobs + Advanced section
+├── NotchContentView.swift      — root; open/closed (640×430); Home/Settings/Context tabs; Cmd+D + swipe; tab persisted via @AppStorage
+├── NotchHomeView.swift         — Home tab: orb, transcript, activity log (logs completion entry on run done)
+├── AgentSettingsView.swift     — Settings tab: 4 knobs + Advanced section (system prompt, context diagnostics)
 ├── ClosedNotchView.swift       — resting dot states in closed notch
 ├── NotchShape.swift            — custom Shape for notch geometry
 └── AgentStateView.swift        — standalone status row (available, not in tabs)
@@ -72,15 +72,17 @@ Features/Context/
 ├── ContextModels.swift
 ├── ContextWindowMetadataReader.swift
 ├── ContextTextSignalFilter.swift
-├── ContextDebugView.swift
+├── ContextAIObservationLog.swift   — in-memory Gemini event log + ContextGeminiObservationGate (rate limiter)
+├── ContextDebugView.swift          — Context tab in notch: live snapshots, AI observation log, diagnostics
 └── ContextPerformanceReporter.swift
 
 Features/Agent/
-├── AgentSession.swift          — subscribes to longPressEnded, fires harness
-├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop
+├── VoiceRecordingService.swift — records mic on .longPressBegan; runs WhisperKit (whisper-tiny) on .longPressEnded; posts .transcriptReady
+├── AgentSession.swift          — subscribes to .transcriptReady; reads lastTranscript; fires one harness turn
+├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop (model: claude-sonnet-4-6)
 ├── ComputerUseModels.swift     — Codable API types
 ├── AnthropicClient.swift       — URLSession API client
-├── ToolDispatcher.swift        — tool calls → CGEvent actions
+├── ToolDispatcher.swift        — tool calls → CGEvent actions; handles all computer-use actions incl. F-keys + emoji
 └── AgentRunMetrics.swift       — per-run metrics logging
 
 Features/Onboarding/
@@ -189,15 +191,24 @@ Avoid:
 
 ## 6. Cross-Feature Contracts
 
-The only legal surface between features is `AgentInterfaces`:
+The only legal surface between features is `AgentInterfaces` and the notification bus:
 
 ```swift
 // Core/AgentInterfaces.swift
-AgentInterfaces.cursor   // CursorAppearanceSetting
-AgentInterfaces.context  // RecentActivityContext
+AgentInterfaces.cursor   // CursorAppearanceSetting  — set by CursorCompanion
+AgentInterfaces.context  // RecentActivityContext    — set by ContextCoordinator
 ```
 
-Each module sets its slot in its `start()` or `init`, called from `AppDelegate.bootAgent()`.
+Notification contracts (defined in `Features/Cursor/LongPressEvents.swift`):
+
+| Notification | Posted by | Observed by |
+|---|---|---|
+| `.longPressBegan` | `LongPressDetector` | `VoiceRecordingService` (start recording) |
+| `.longPressEnded` | `LongPressDetector` | `VoiceRecordingService` (stop + transcribe), `CursorCompanion` |
+| `.transcriptReady` | `VoiceRecordingService` | `AgentSession` (fire harness turn) |
+| `.notchToggleRequested` | `NotchWindowController` (Cmd+D) | `NotchContentView` |
+
+Each module sets its `AgentInterfaces` slot in its `start()` method, called from `AppDelegate.bootAgent()`.
 
 Do not import one feature module from another directly.
 
