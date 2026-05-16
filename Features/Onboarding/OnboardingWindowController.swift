@@ -44,7 +44,9 @@ public final class OnboardingWindowController {
         let hosting = NSHostingController(rootView: view)
 
         let window = NSWindow(contentViewController: hosting)
-        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+        window.contentMinSize = NSSize(width: 480, height: 460)
+        window.contentMaxSize = NSSize(width: 760, height: 700)
         window.title = "Agent in the Notch"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden

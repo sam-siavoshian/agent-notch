@@ -150,6 +150,7 @@ final class LongPressDetector {
         state = .listening
         os_unfair_lock_unlock(&lock)
 
+        NSLog("[LongPressDetector] threshold crossed → posting longPressBegan")
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .longPressBegan, object: nil)
         }

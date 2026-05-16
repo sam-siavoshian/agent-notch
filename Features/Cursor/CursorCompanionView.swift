@@ -2,9 +2,9 @@
 //  CursorCompanionView.swift
 //  Agent in the Notch
 //
-//  Renders Wyatt's SVG cursor asset (red/green/blue/yellow) from
-//  Assets.xcassets via CursorColor.assetName. Pulse halo on listening,
-//  ring-spin on thinking.
+//  Soft-pill cursor companion. Apple's chubby `arrowshape.up.left.fill`
+//  SF Symbol = rounded cursor silhouette, no custom path math.
+//  Pastel fill, soft warm two-layer shadow. Cute, not aggressive.
 //
 
 import SwiftUI
@@ -12,49 +12,66 @@ import SwiftUI
 struct CursorCompanionView: View {
     @ObservedObject var viewModel: CursorCompanionViewModel
     @State private var pulse: CGFloat = 1.0
-    @State private var spin: Double = 0.0
+    @State private var orbit: Double = 0.0
 
-    private let spriteSize: CGFloat = 17
+    private let spriteSize: CGFloat = 20
 
     var body: some View {
         ZStack {
-            Image(viewModel.color.assetName)
+            if viewModel.isListening {
+                Circle()
+                    .fill(softPillColor.opacity(0.25))
+                    .frame(width: spriteSize * 1.8 * pulse, height: spriteSize * 1.8 * pulse)
+                    .blur(radius: 5)
+            }
+
+            Image(systemName: "arrowshape.up.left.fill")
                 .resizable()
-                .interpolation(.high)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: spriteSize, height: spriteSize)
+                .foregroundStyle(softPillColor)
                 .scaleEffect(pulse)
+                .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.06), radius: 1, x: 0, y: 1)
+                .shadow(color: Color(red: 0.08, green: 0.10, blue: 0.16).opacity(0.10), radius: 6, x: 0, y: 3)
 
             if viewModel.isThinking {
                 Circle()
-                    .trim(from: 0.0, to: 0.28)
-                    .stroke(
-                        viewModel.color.swatch.opacity(0.95),
-                        style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
-                    )
-                    .frame(width: spriteSize * 1.5, height: spriteSize * 1.5)
-                    .rotationEffect(.degrees(spin))
+                    .fill(Color.white)
+                    .frame(width: 3, height: 3)
+                    .offset(y: -spriteSize * 0.85)
+                    .rotationEffect(.degrees(orbit))
+                    .shadow(color: softPillColor.opacity(0.6), radius: 2)
             }
         }
-        .frame(width: spriteSize * 2.2, height: spriteSize * 2.2)
+        .frame(width: spriteSize * 2.4, height: spriteSize * 2.4)
         .onChange(of: viewModel.isListening) { _, listening in
             withAnimation(
                 listening
-                ? .easeInOut(duration: 0.55).repeatForever(autoreverses: true)
-                : .easeOut(duration: 0.2)
+                ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
+                : .easeOut(duration: 0.25)
             ) {
-                pulse = listening ? 1.15 : 1.0
+                pulse = listening ? 1.18 : 1.0
             }
         }
         .onChange(of: viewModel.isThinking) { _, thinking in
             if thinking {
-                withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-                    spin = 360
+                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                    orbit = 360
                 }
             } else {
-                spin = 0
+                orbit = 0
             }
         }
         .allowsHitTesting(false)
+    }
+
+    /// Wyatt's CursorColor → soft-pill pastel palette.
+    private var softPillColor: Color {
+        switch viewModel.color {
+        case .red:    return Color(red: 0.953, green: 0.478, blue: 0.478) // #F37A7A
+        case .blue:   return Color(red: 0.357, green: 0.486, blue: 0.980) // #5B7CFA
+        case .green:  return Color(red: 0.490, green: 0.831, blue: 0.604) // #7DD49A
+        case .yellow: return Color(red: 0.961, green: 0.725, blue: 0.278) // #F5B947
+        }
     }
 }

@@ -18,7 +18,7 @@ final class CursorCompanionWindow {
     /// Where the sprite center sits relative to the user's real cursor tip
     /// (screen coords, AppKit: +x right, +y up). Tuned so the companion sits
     /// just to the right and slightly below the cursor, like a buddy.
-    private let spriteOffsetFromCursor = CGPoint(x: 15, y: -10)
+    private let spriteOffsetFromCursor = CGPoint(x: 14, y: -8)
 
     private let panel: NSPanel
     private let hostingView: NSHostingView<CursorCompanionView>

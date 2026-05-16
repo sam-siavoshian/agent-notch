@@ -44,14 +44,30 @@ public final class PermissionChecker: ObservableObject {
 
     public func startPolling() {
         stopPolling()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        // Register on .common so the timer keeps firing during window tracking/modal modes.
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+
+        // Refresh on app activation — the user usually grants in Settings then comes back.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleActivate),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleActivate() {
+        Task { @MainActor in self.refresh() }
     }
 
     public func stopPolling() {
         timer?.invalidate()
         timer = nil
+        NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
     }
 
     public func refresh() {

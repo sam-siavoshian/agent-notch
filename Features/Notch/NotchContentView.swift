@@ -51,69 +51,79 @@ struct NotchContentView: View {
     private let closedWidth: CGFloat = 220
     private let closedHeight: CGFloat = 32
 
-    // Wider while open so the context inspector can show real debug state.
-    private let openWidth: CGFloat = 640
-    private let openHeight: CGFloat = 430
+    // Compact open size — fits home/settings/context cleanly without
+    // overhanging the menu bar.
+    private let openWidth: CGFloat = 420
+    private let openHeight: CGFloat = 280
 
     private var width: CGFloat { isOpen ? openWidth : closedWidth }
     private var height: CGFloat { isOpen ? openHeight : closedHeight }
     private var cornerRadius: CGFloat { isOpen ? 22 : 10 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                NotchShape(bottomCornerRadius: cornerRadius)
-                    .fill(Color.black)
-                    .shadow(color: .black.opacity(isOpen ? 0.5 : 0), radius: 16, y: 6)
+        ZStack(alignment: .top) {
+            // One compositing group below shape + shadow so the shadow
+            // rasterizes against the shape once per frame, not separately.
+            NotchShape(bottomCornerRadius: cornerRadius)
+                .fill(Color.black)
+                .shadow(color: .black.opacity(isOpen ? 0.40 : 0), radius: 12, y: 5)
+                .compositingGroup()
 
-                if isOpen {
-                    openContent
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 14)
-                        .padding(.top, NotchSizing.notchHeight(for: NSScreen.main))
-                        .frame(width: openWidth, height: openHeight, alignment: .top)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .move(edge: .top)),
-                                removal: .opacity
-                            )
+            if isOpen {
+                openContent
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
+                    .padding(.top, NotchSizing.notchHeight(for: NSScreen.main))
+                    .frame(width: openWidth, height: openHeight, alignment: .top)
+                    // Insertion: opacity + tiny scale from the notch edge.
+                    // Removal: pure opacity (fastest possible exit).
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity
+                                .combined(with: .scale(scale: 0.985, anchor: .top))
+                                .animation(.easeOut(duration: 0.14)),
+                            removal: .opacity.animation(.easeIn(duration: 0.08))
                         )
-                } else {
-                    ClosedNotchView()
-                        .frame(width: closedWidth, height: closedHeight)
-                        .transition(.opacity.animation(.easeOut(duration: 0.1)))
-                }
+                    )
+            } else {
+                ClosedNotchView()
+                    .frame(width: closedWidth, height: closedHeight)
+                    .transition(.opacity.animation(.easeOut(duration: 0.07)))
             }
-            .frame(width: width, height: height)
-            .contentShape(NotchShape(bottomCornerRadius: cornerRadius))
-            .gesture(
-                DragGesture(minimumDistance: 10)
-                    .onEnded { value in
-                        if !isOpen && value.translation.height > 20 {
-                            open()
-                        } else if isOpen && value.translation.height < -20 {
-                            isOpen = false
-                        }
-                    }
-            )
-            .onHover { hovering in
-                if hovering {
-                    hoverTask?.cancel()
-                    closeTask?.cancel()
-                    hoverTask = Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(160))
-                        guard !Task.isCancelled else { return }
-                        open()
-                    }
-                } else {
-                    hoverTask?.cancel()
-                    hoverTask = nil
-                    scheduleClose()
-                }
-            }
-            .animation(.spring(response: 0.42, dampingFraction: 0.78), value: isOpen)
-            Spacer(minLength: 0)
         }
+        .frame(width: width, height: height, alignment: .top)
+        .contentShape(NotchShape(bottomCornerRadius: cornerRadius))
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .onEnded { value in
+                    if !isOpen && value.translation.height > 20 {
+                        open()
+                    } else if isOpen && value.translation.height < -20 {
+                        close()
+                    }
+                }
+        )
+        .onHover { hovering in
+            if hovering {
+                hoverTask?.cancel()
+                closeTask?.cancel()
+                // 40ms tolerates cursor flicker without feeling laggy.
+                hoverTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(40))
+                    guard !Task.isCancelled else { return }
+                    open()
+                }
+            } else {
+                hoverTask?.cancel()
+                hoverTask = nil
+                scheduleClose()
+            }
+        }
+        // interactiveSpring is interruptible — fast cursor in/out won't queue
+        // up stale animations. Damping kept high so the top edge cannot
+        // overshoot into the real notch cutout.
+        .animation(.interactiveSpring(response: 0.16, dampingFraction: 0.90, blendDuration: 0),
+                   value: isOpen)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
         .onChange(of: isOpen) { _, _ in
@@ -121,7 +131,7 @@ struct NotchContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
             if isOpen {
-                isOpen = false
+                close()
             } else {
                 openViaShortcut()
             }
@@ -158,6 +168,13 @@ struct NotchContentView: View {
         isOpen = true
     }
 
+    private func close() {
+        hoverTask?.cancel()
+        closeTask?.cancel()
+        guard isOpen else { return }
+        isOpen = false
+    }
+
     private func openViaShortcut() {
         closeTask?.cancel()
         guard !isOpen else { return }
@@ -172,7 +189,7 @@ struct NotchContentView: View {
     private func scheduleClose() {
         closeTask?.cancel()
         closeTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
+            try? await Task.sleep(for: .milliseconds(160))
             guard !Task.isCancelled else { return }
             isOpen = false
         }
@@ -187,7 +204,7 @@ private struct NotchTabBar: View {
         HStack(spacing: 0) {
             ForEach(NotchTab.allCases) { tab in
                 Button {
-                    withAnimation(.smooth) { selected = tab }
+                    withAnimation(.easeOut(duration: 0.14)) { selected = tab }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)

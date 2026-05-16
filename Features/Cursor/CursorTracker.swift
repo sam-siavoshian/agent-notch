@@ -10,11 +10,31 @@
 import AppKit
 import Foundation
 
+// Private CoreGraphics SPI — public CGCursorIsVisible was retired.
+// Resolved dynamically via dlsym so the binary still links cleanly if Apple
+// renames or drops the symbol on a future macOS. Falls back to "visible"
+// in that case (no false hides).
+private let _CGSDefaultConnectionFn: (@convention(c) () -> Int32)? = {
+    guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_CGSDefaultConnection") else { return nil }
+    return unsafeBitCast(sym, to: (@convention(c) () -> Int32).self)
+}()
+private let _CGSCursorIsVisibleFn: (@convention(c) (Int32) -> Bool)? = {
+    guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGSCursorIsVisible") else { return nil }
+    return unsafeBitCast(sym, to: (@convention(c) (Int32) -> Bool).self)
+}()
+
+private func systemCursorVisible() -> Bool {
+    guard let conn = _CGSDefaultConnectionFn?(),
+          let isVisible = _CGSCursorIsVisibleFn else { return true }
+    return isVisible(conn)
+}
+
 @MainActor
 final class CursorTracker {
     private let window: CursorCompanionWindow
     private var timer: DispatchSourceTimer?
     private let interval: DispatchTimeInterval = .milliseconds(8) // ~120Hz
+    private var lastVisible: Bool = true
 
     init(window: CursorCompanionWindow) {
         self.window = window
@@ -37,6 +57,12 @@ final class CursorTracker {
     }
 
     private func tick() {
+        let visible = systemCursorVisible()
+        if visible != lastVisible {
+            lastVisible = visible
+            if visible { window.show() } else { window.hide() }
+        }
+        guard visible else { return }
         let location = NSEvent.mouseLocation
         window.reposition(toCursorTip: location)
     }
