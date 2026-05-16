@@ -1,4 +1,4 @@
-# AGENT.md
+# AGENTS.md
 
 ## Purpose
 
@@ -38,12 +38,11 @@ Tests/
 Each feature owns its code.
 
 ```txt
-Features/Chat/
-├── ChatView.swift
-├── ChatViewModel.swift
-├── ChatService.swift
-├── ChatModels.swift
-└── Components/
+Features/Notch/
+├── NotchContentView.swift
+├── AgentStateView.swift
+├── AgentSettingsView.swift
+└── NotchShape.swift
 ```
 
 Keep related code together.
@@ -147,6 +146,7 @@ Use:
 - async/await
 - structs
 - value semantics
+- `@MainActor` on ObservableObject singletons
 
 Avoid:
 - unnecessary protocols

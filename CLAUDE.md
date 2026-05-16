@@ -33,7 +33,7 @@ The app **is not** a fork of boring.notch. The boring.notch source is checked in
 - **Notch UI**: the agent's home, a fresh SwiftUI app (inspired by, but not forked from, boring.notch). Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
-The agent (Claude Haiku) receives: voice transcript (Whisper) + a ≤2-paragraph text summary of recent screen activity (Gemini multimodal pipeline) + user preferences. It then drives computer-use actions.
+The agent (Claude Sonnet) receives: voice transcript (Whisper) + a ≤2-paragraph text summary of recent screen activity (Gemini multimodal pipeline) + user preferences. It then drives computer-use actions.
 
 Full spec: `PRD.md`.
 
@@ -44,14 +44,26 @@ Full spec: `PRD.md`.
 New feature code follows the layout in `AGENTS.md`. The three feature areas map to:
 
 ```
-Features/Notch/       — notch UI, settings panel (Wyatt)
-Features/Cursor/      — PNG overlay, computer use, click hooks (Sam)
-Features/Context/     — long-press/voice, screenshot capture, Gemini summarizer (Ashan)
-Features/Agent/       — Haiku agent wiring, assembles inputs, fires model (Ashan)
-Core/                 — shared types, settings store
+Features/Notch/       — notch UI, settings panel (Wyatt)           ← exists
+Features/Cursor/      — PNG overlay, computer use, click hooks (Sam)  ← create
+Features/Context/     — long-press/voice, screenshot capture, Gemini summarizer (Ashan)  ← create
+Features/Agent/       — Sonnet agent wiring, assembles inputs, fires model (Ashan)        ← create
+Core/                 — shared types, settings store               ← exists
 ```
 
-If `vendored/boring.notch/` is cloned locally for reference (gitignored), useful files to read: `boringNotch/BoringViewModel.swift` (main state), `boringNotch/BoringViewCoordinator.swift` (window/notch lifecycle), `boringNotch/ContentView.swift` (root SwiftUI view), `boringNotch/components/Notch/BoringNotchWindow.swift` (window plumbing).
+### Core/ file map
+
+These are stable — all features should use them, not duplicate:
+
+| File | What it is |
+|---|---|
+| `AgentInterfaces.swift` | Protocol stubs + static DI slots (`AgentInterfaces.cursor`, `.context`) — register your implementation here |
+| `AgentState.swift` | `AgentState.shared` — live status the Notch UI reads; call `AgentState.shared.set()` to reflect what the agent is doing |
+| `AgentSettingsStore.swift` | `AgentSettingsStore.shared` — persisted user settings (reasoning effort, preferences, system prompt, cursor color) |
+| `AgentReasoningEffort.swift` | Enum: `.low` / `.medium` / `.high` |
+| `CursorColor.swift` | Enum: `.red` / `.green` / `.blue` / `.yellow` — has `.assetName` for PNG lookup |
+
+The boring.notch reference is at `vendored/boring.notch/`. Useful files: `boringNotch/BoringViewModel.swift` (main state), `boringNotch/BoringViewCoordinator.swift` (window/notch lifecycle), `boringNotch/ContentView.swift` (root SwiftUI view), `boringNotch/components/Notch/BoringNotchWindow.swift` (window plumbing).
 
 ---
 
@@ -72,8 +84,28 @@ Settings (reasoning effort, preferences text, system prompt, cursor color) are p
 
 | Model | Purpose | Notes |
 |---|---|---|
-| Claude Haiku | Primary agent | Tool calls / computer actions |
+| Claude Sonnet | Primary agent | Tool calls / computer actions |
 | Gemini multimodal | Screenshot batch summarizer | Batches of ~10, parallel, → text |
 | Whisper | Voice transcription | On long-press release |
 
-Context pipeline: click event (debounced 1 s) → screenshot → rolling buffer (cap 20) → Gemini batches → merged ≤2-paragraph string → injected into Haiku system context.
+Context pipeline: click event (debounced 1 s) → screenshot → rolling buffer (cap 20) → Gemini batches → merged ≤2-paragraph string → injected into Sonnet system context.
+
+---
+
+## Adding a New Feature Module
+
+When Sam or Ashan creates their feature directory:
+
+1. **Register with `AgentInterfaces`** — set the static slot from your module's `install()` method called from `AppDelegate.applicationDidFinishLaunching`:
+   ```swift
+   AgentInterfaces.cursor = MyCursorModule()
+   AgentInterfaces.context = MyContextModule()
+   ```
+
+2. **Use `@MainActor` on any `ObservableObject`** — all Core singletons are `@MainActor`; match the pattern.
+
+3. **Read settings from `AgentSettingsStore.shared`** — don't copy settings into your own store.
+
+4. **Update `AgentState.shared`** to reflect live agent status — the Notch UI observes it automatically.
+
+5. **Keep networking in your feature** — e.g. `Features/Agent/AgentService.swift`, not in `Core/`.

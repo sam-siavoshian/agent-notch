@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.2 (hackathon scope)
 **Owner:** Wyatt (notch & UI), Sam (cursor + computer use), Ashan (long-press + context)
-**Model:** Claude Haiku (agent), Gemini multimodal (context summarizer), Whisper (voice)
+**Model:** Claude Sonnet (agent), Gemini multimodal (context summarizer), Whisper (voice)
 
 ---
 
@@ -17,14 +17,14 @@ The project is fundamentally about **agent–human connection**. We're not build
 **Context.** A computer-use agent is only useful if it knows what the user has been doing. But:
 
 - Passing the last hour of activity directly to the model blows the context window.
-- We're using Haiku (small, fast, cheap, dumb). It cannot handle raw screen history.
+- We're using Sonnet. Even so, raw screen history is too noisy to be useful.
 - We need a way to compress "the past hour" into something the agent can actually consume.
 
 ## 3. Core Concept
 
 Two surfaces:
 
-**The Notch.** Forked from NotchNoir, native SwiftUI. This is the agent's home. It shows settings, live agent progress, tool capabilities, and current state.
+**The Notch.** Fresh native SwiftUI app. This is the agent's home. It shows settings, live agent progress, tool capabilities, and current state.
 
 **The Cursor Companion.** A small PNG cursor that follows the user's real cursor around the screen. This is the agent's body. Long-press activates voice input. The cursor's color is user-selectable.
 
@@ -102,7 +102,7 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
                    │
                    ▼
 ┌─────────────────────────────────────────────┐
-│  Haiku Agent                                │
+│  Sonnet Agent                                │
 │  Inputs:                                    │
 │   - Voice transcript (Whisper)              │
 │   - Activity summary (Gemini text)          │
@@ -114,7 +114,7 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 ## 8. Tech Stack
 
 - **Native Swift / SwiftUI** — notch UI, cursor overlay, OS-level click hooks, screenshot capture.
-- **Claude Haiku** — primary agent.
+- **Claude Sonnet** — primary agent.
 - **Gemini multimodal** — screenshot batch summarizer.
 - **Whisper** — voice transcription.
 
@@ -122,9 +122,9 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 
 | Owner | Deliverable | Notes |
 |-------|-------------|-------|
-| **Wyatt** | Notch UI (forked NotchNoir). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. | Exposes a settings API so Sam and Ashan can read user preferences and system prompt. |
-| **Sam** | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Computer use integration: Haiku-driven OS actions (click, type, scroll). Click-hook OS plumbing. | Exposes `setCursorColor(color)` API consumed by Wyatt's settings panel. |
-| **Ashan** | Long-press detection → Whisper voice transcription. Context module: click-triggered screenshot capture (debounced 1s, rolling buffer of 20), Gemini multimodal batch summarizer, merge to ≤2 paragraphs. Core Haiku agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` returning ≤2 paragraphs ready to inject into Haiku's context. |
+| **Wyatt** | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. | Exposes a settings API so Sam and Ashan can read user preferences and system prompt. |
+| **Sam** | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Computer use integration: Sonnet-driven OS actions (click, type, scroll). Click-hook OS plumbing. | Exposes `setCursorColor(color)` API consumed by Wyatt's settings panel. |
+| **Ashan** | Long-press detection → Whisper voice transcription. Context module: click-triggered screenshot capture (debounced 1s, rolling buffer of 20), Gemini multimodal batch summarizer, merge to ≤2 paragraphs. Core Sonnet agent wiring — assembles transcript + summary + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` returning ≤2 paragraphs ready to inject into Sonnet's context. |
 
 **Interfaces are the contract.**
 - Wyatt's settings panel calls `setCursorColor(color)` on Sam's cursor module.
