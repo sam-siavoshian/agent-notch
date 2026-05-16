@@ -15,6 +15,7 @@ final class NotchWindowController: NSObject {
 
     private var window: NotchWindow?
     private var screenObserver: NSObjectProtocol?
+    private var cmdDMonitor: Any?
 
     func install() {
         guard window == nil else { return }
@@ -41,6 +42,14 @@ final class NotchWindowController: NSObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.position() }
         }
+
+        cmdDMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "d" else { return }
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .notchToggleRequested, object: nil)
+            }
+        }
     }
 
     private func position() {
@@ -57,7 +66,7 @@ final class NotchWindowController: NSObject {
 @MainActor
 enum NotchSizing {
     static let openWidth: CGFloat = 520
-    static let openHeight: CGFloat = 380
+    static let openHeight: CGFloat = 410
     static let shadowPadding: CGFloat = 24
 
     static func windowSize(for screen: NSScreen?) -> CGSize {

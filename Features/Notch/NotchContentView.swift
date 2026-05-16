@@ -6,7 +6,12 @@
 //  the hover-driven animation between them, and the tab content.
 //
 
+import AppKit
 import SwiftUI
+
+extension Notification.Name {
+    static let notchToggleRequested = Notification.Name("AgentNotch.notchToggleRequested")
+}
 
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
@@ -38,7 +43,7 @@ struct NotchContentView: View {
     private let closedWidth: CGFloat = 220
     private let closedHeight: CGFloat = 32
     private let openWidth: CGFloat = 520
-    private let openHeight: CGFloat = 360
+    private let openHeight: CGFloat = 390
 
     private var width: CGFloat { isOpen ? openWidth : closedWidth }
     private var height: CGFloat { isOpen ? openHeight : closedHeight }
@@ -55,7 +60,7 @@ struct NotchContentView: View {
                     openContent
                         .padding(.horizontal, 14)
                         .padding(.bottom, 14)
-                        .padding(.top, 6)
+                        .padding(.top, NotchSizing.notchHeight(for: NSScreen.main))
                         .frame(width: openWidth, height: openHeight, alignment: .top)
                         .transition(
                             .asymmetric(
@@ -71,6 +76,16 @@ struct NotchContentView: View {
             }
             .frame(width: width, height: height)
             .contentShape(NotchShape(bottomCornerRadius: cornerRadius))
+            .gesture(
+                DragGesture(minimumDistance: 10)
+                    .onEnded { value in
+                        if !isOpen && value.translation.height > 20 {
+                            open()
+                        } else if isOpen && value.translation.height < -20 {
+                            isOpen = false
+                        }
+                    }
+            )
             .onHover { hovering in
                 if hovering {
                     hoverTask?.cancel()
@@ -91,6 +106,16 @@ struct NotchContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
+        .onChange(of: isOpen) { _, _ in
+            NSHapticFeedbackManager.default.perform(.generic, performanceTime: .default)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
+            if isOpen {
+                isOpen = false
+            } else {
+                openViaShortcut()
+            }
+        }
     }
 
     @ViewBuilder
@@ -117,6 +142,17 @@ struct NotchContentView: View {
         closeTask?.cancel()
         guard !isOpen else { return }
         isOpen = true
+    }
+
+    private func openViaShortcut() {
+        closeTask?.cancel()
+        guard !isOpen else { return }
+        isOpen = true
+        closeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            isOpen = false
+        }
     }
 
     private func scheduleClose() {
