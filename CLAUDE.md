@@ -87,9 +87,9 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `NotchContentView.swift` | Root view — open/closed states, tab bar, Cmd+D toggle |
+| `NotchContentView.swift` | Root view — open/closed (640×430), three tabs (Home/Settings/Context), Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
 | `NotchHomeView.swift` | Home tab — agent orb, last transcript, activity feed |
-| `AgentSettingsView.swift` | Settings tab — 4 knobs + Advanced section |
+| `AgentSettingsView.swift` | Settings tab — 4 knobs + Advanced section (system prompt, context diagnostics) |
 | `ClosedNotchView.swift` | Resting dot/waveform in the closed notch |
 | `NotchShape.swift` | Custom `Shape` for the notch geometry |
 | `AgentStateView.swift` | Standalone status row (available but not used in current tab layout) |
@@ -122,7 +122,8 @@ All features should use these — never duplicate them.
 | `ContextModels.swift` | Data types: `ContextSnapshot`, `ContextDiagnostics`, etc. |
 | `ContextWindowMetadataReader.swift` | Reads active app name + window title |
 | `ContextTextSignalFilter.swift` | Cleans OCR output |
-| `ContextDebugView.swift` | Debug SwiftUI view for snapshot inspection |
+| `ContextAIObservationLog.swift` | In-memory log of Gemini observation events; includes `ContextGeminiObservationGate` (rate limiter) |
+| `ContextDebugView.swift` | Context tab in the notch — live snapshot list, AI observation log, diagnostics |
 | `ContextPerformanceReporter.swift` | Reads stored artifacts and summarizes diagnostics |
 
 ### Features/Agent/ (Ashan)
