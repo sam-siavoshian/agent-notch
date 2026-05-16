@@ -39,17 +39,22 @@ EOF
     exit 1
 fi
 
-# Extract team ID and cert SHA from the line. Format example:
-#   "  1) <40-hex-SHA> "Apple Development: name@example.com (TEAMID)""
-TEAM_ID=$(echo "$TEAM_LINE" | sed -E 's/.*\(([A-Z0-9]+)\)".*/\1/')
+# Extract cert SHA from the find-identity line. Format example:
+#   "  1) <40-hex-SHA> "Apple Development: name@example.com (XXXXXXXXXX)""
 CERT_SHA=$(echo "$TEAM_LINE" | sed -E 's/^[[:space:]]*[0-9]+\)[[:space:]]+([A-F0-9]{40}).*/\1/')
-
-if ! [[ "$TEAM_ID" =~ ^[A-Z0-9]+$ ]]; then
-    echo "✗ Failed to parse team ID from: $TEAM_LINE"
-    exit 1
-fi
 if ! [[ "$CERT_SHA" =~ ^[A-F0-9]{40}$ ]]; then
     echo "✗ Failed to parse cert SHA from: $TEAM_LINE"
+    exit 1
+fi
+
+# Real team ID lives in the cert's subject OU field. The parens in the
+# CN label happen to match for paid teams, but Personal Teams put a
+# different identifier there, so always read OU from the cert itself.
+TEAM_ID=$(security find-certificate -c "Apple Development" -p 2>/dev/null \
+    | openssl x509 -noout -subject -nameopt RFC2253 2>/dev/null \
+    | sed -nE 's/.*OU=([A-Z0-9]+).*/\1/p' | head -1)
+if ! [[ "$TEAM_ID" =~ ^[A-Z0-9]+$ ]]; then
+    echo "✗ Failed to parse team ID (OU) from Apple Development cert"
     exit 1
 fi
 
