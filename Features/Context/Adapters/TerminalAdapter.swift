@@ -1,21 +1,4 @@
-//
-//  TerminalAdapter.swift
-//  Agent in the Notch
-//
-//  AppContextAdapter for macOS terminal emulators (Terminal.app, iTerm2,
-//  Ghostty). The primary cwd path is an OSC 7-style reporter installed
-//  into the user's shell rc by `scripts/install-cwd-reporter.sh`. The
-//  reporter writes the current working directory to
-//  `~/.cache/agentnotch/term-cwd-<ttyname>` on every prompt/cd. We read
-//  whichever file was modified most recently — that's the foreground tab.
-//
-//  Fallback: scrape the visible terminal buffer via AppleScript and pick
-//  out the last `~`/`/`-prefixed token. Best-effort only — fails under
-//  tmux, ssh, and custom prompts.
-//
-
 import Foundation
-import AppKit
 
 /// AppContextAdapter for macOS terminal emulators (Terminal.app, iTerm2, Ghostty).
 ///
@@ -55,20 +38,6 @@ public final class TerminalAdapter: AppContextAdapter {
             dict["git_dirty"] = AnyCodable(dirty)
         }
         return dict
-    }
-
-    public func recentResources(bundleID: String) async -> [CResourceRef] {
-        guard let cwd = readCwdViaOSC7() else { return [] }
-        let appLabel = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
-        return [
-            CResourceRef(
-                kind: "cwd",
-                uri: cwd,
-                label: (cwd as NSString).lastPathComponent,
-                app: appLabel,
-                lastSeen: Date()
-            )
-        ]
     }
 
     // MARK: - OSC 7 file reader
@@ -174,8 +143,7 @@ public final class TerminalAdapter: AppContextAdapter {
             return nil
         }()
 
-        // Dirty check via shell: `git status --porcelain` returns non-empty if dirty.
-        // For a non-shell-blocking spike, just call `git status --porcelain` via Process.
+        // Dirty check: `git status --porcelain` returns non-empty if dirty.
         let task = Process()
         task.launchPath = "/usr/bin/git"
         task.arguments = ["status", "--porcelain"]
