@@ -66,9 +66,7 @@ final class NotchWindowController: NSObject {
         cmdDMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   event.charactersIgnoringModifiers == "d" else { return }
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .notchToggleRequested, object: nil)
-            }
+            NotificationCenter.default.post(name: .notchToggleRequested, object: nil)
         }
     }
 
