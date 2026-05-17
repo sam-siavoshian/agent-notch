@@ -165,6 +165,13 @@ public final class ContextSelector {
     preferences, the user's active task and recent activity, and per-app operational
     recipes the agent can use.
 
+    You may receive a `current_screen.vision` field with structured JSON describing
+    what a vision model sees on the screen. When present, use it ALONGSIDE the AX
+    elements to write a more grounded brief — especially for icons, non-native UI
+    (Electron/Tauri/canvas), or visual state that AX/OCR don't capture. AX is
+    authoritative for tool-callable paths; vision is authoritative for "what's
+    actually on screen" and the focal point.
+
     Your job is two things in one call:
 
     (1) RESOLVE INTENT. Output {verb, target, resolved_target?, entities, confidence}.
