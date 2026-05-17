@@ -57,10 +57,12 @@ struct NotchCalendarView: View {
         )
     }
 
+    private static let eyebrowFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEE • MMM d"; return f
+    }()
+
     private var eyebrowDate: String {
-        let f = DateFormatter()
-        f.dateFormat = "EEE • MMM d"
-        return f.string(from: Date()).uppercased()
+        Self.eyebrowFormatter.string(from: Date()).uppercased()
     }
 
     // MARK: - Authorized
