@@ -21,6 +21,7 @@ public final class AnchorRecorder {
     private var pollTimer: Timer?
     private var pendingSeq: [CEvent] = []
     private var pendingApp: String?
+    private var pendingHasTrigger: Bool = false
 
     public static let storageRoot: URL = {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -80,10 +81,36 @@ public final class AnchorRecorder {
                 pendingApp = event.bundleID
             }
             pendingSeq.append(event)
+            // Determine if this counts as a trigger.
+            if Self.isTriggerEvent(event) {
+                pendingHasTrigger = true
+            }
         case .copyPaste, .search:
             // Treat as parts of the sequence too.
             if pendingApp == nil { pendingApp = event.bundleID }
             pendingSeq.append(event)
+        }
+    }
+
+    /// A "trigger" is an event that signals the user is starting an automatable
+    /// action — as opposed to just typing prose or clicking around.
+    private static func isTriggerEvent(_ event: CEvent) -> Bool {
+        switch event.payload {
+        case let .input(_, _, _, submitKey, modifiers):
+            // Modifier-key shortcut. SubmitKey "shortcut" is set by KeystrokeMonitor
+            // for cmd/ctrl/alt keypresses. Also any non-empty modifier set
+            // (excluding bare shift, which is just capitalization).
+            return submitKey == "shortcut" || !modifiers.filter({ $0 != "shift" }).isEmpty
+        case let .click(elementLabel, axRole, _):
+            // Click on a labeled control with a meaningful role.
+            guard let label = elementLabel, !label.isEmpty else { return false }
+            if let role = axRole, ["AXButton", "AXMenuItem", "AXMenuButton", "AXLink", "AXRadioButton", "AXCheckBox", "AXTab", "AXTabGroup"].contains(role) {
+                return true
+            }
+            // Fallback: any click with a label is at least a hint.
+            return label.count > 0
+        default:
+            return false
         }
     }
 
@@ -92,10 +119,21 @@ public final class AnchorRecorder {
         defer {
             pendingSeq.removeAll()
             pendingApp = nil
+            pendingHasTrigger = false
         }
         guard let bundleID = pendingApp, !bundleID.isEmpty else { return }
 
-        let steps = pendingSeq.compactMap(Self.stepFor)
+        // Outcome required. flushPending() is called on boundary events
+        // (screen, dwell, appSwitch, backtrack). Those ARE the outcome by
+        // definition. But we also need a trigger inside the sequence.
+        guard pendingHasTrigger else { return }
+
+        let rawSteps = pendingSeq.compactMap { Self.terminalAwareStepFor($0, bundleID: bundleID) ?? Self.stepFor($0) }
+        guard !rawSteps.isEmpty else { return }
+
+        // Filter pure-prose steps. If after filtering we have no actionable
+        // steps left, drop.
+        let steps = rawSteps.filter(Self.isActionableStep)
         guard !steps.isEmpty else { return }
 
         var collection = loadCollection(for: bundleID)
@@ -195,6 +233,63 @@ public final class AnchorRecorder {
     }
 
     // MARK: - Step extraction + normalization
+
+    /// Reject steps that look like prose (long literal type values, contain
+    /// control characters, contain backspace runs). These pollute the recipe
+    /// library with non-recipes.
+    private static func isActionableStep(_ step: CRecipe.Step) -> Bool {
+        switch step {
+        case .shortcut, .key, .menu, .url, .shellCmd, .openFile, .appleScript:
+            return true
+        case .type(let value):
+            // Template slot → keep (these are explicit generalizations).
+            if value.hasPrefix("<") && value.hasSuffix(">") { return true }
+            // Long literal text → prose. Drop.
+            if value.count > 30 { return false }
+            // Contains control chars or escape sequences → junk. Drop.
+            for scalar in value.unicodeScalars {
+                // C0 control chars except tab (\u{09}).
+                if scalar.value < 0x20 && scalar.value != 0x09 { return false }
+                // C1 control chars.
+                if scalar.value >= 0x7F && scalar.value < 0xA0 { return false }
+            }
+            // Backspace-heavy → user is correcting mistakes, not running a recipe.
+            if value.filter({ $0 == "\u{08}" }).count > 1 { return false }
+            return true
+        }
+    }
+
+    private static let terminalBundleIDs: Set<String> = [
+        "com.apple.Terminal",
+        "com.googlecode.iterm2",
+        "com.mitchellh.ghostty"
+    ]
+
+    /// Terminal-aware: if the event is in a terminal app AND the input burst
+    /// ends with `\r` (or has submitKey "return"), capture it as a `.shellCmd`
+    /// step instead of a `.type` step.
+    private static func terminalAwareStepFor(_ event: CEvent, bundleID: String) -> CRecipe.Step? {
+        guard terminalBundleIDs.contains(bundleID) else { return nil }
+        guard case let .input(_, text, _, submitKey, _) = event.payload else { return nil }
+        // A shell command ends with return (we detect either an explicit
+        // submitKey OR the text ending in \r).
+        let endsWithReturn = (submitKey == "return") || text.hasSuffix("\r") || text.hasSuffix("\n")
+        guard endsWithReturn else { return nil }
+        // Strip the trailing return + trim whitespace.
+        var cmd = text
+        if cmd.hasSuffix("\r") { cmd = String(cmd.dropLast()) }
+        if cmd.hasSuffix("\n") { cmd = String(cmd.dropLast()) }
+        cmd = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop empty / overlong commands.
+        guard !cmd.isEmpty, cmd.count <= 200 else { return nil }
+        // Heuristic: first token must look command-ish (short, alpha-ish).
+        let firstToken = cmd.split(separator: " ").first.map(String.init) ?? ""
+        guard firstToken.count >= 1, firstToken.count <= 20,
+              firstToken.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." || $0 == "/" }) else {
+            return nil
+        }
+        return .shellCmd(value: cmd, needsCwd: nil)
+    }
 
     /// Convert one CEvent to a CRecipe.Step, or nil if it shouldn't be in a recipe.
     private static func stepFor(_ event: CEvent) -> CRecipe.Step? {
