@@ -56,26 +56,29 @@ public final class ContextDevToolsWindowController: NSObject {
         guard window == nil else { return }
 
         let rect = NSRect(x: 0, y: 0, width: 980, height: 720)
+        // Regular NSWindow (not NSPanel) so the Dev Tools shows up as a
+        // first-class window: appears in the Dock, the app's Window menu,
+        // the Cmd+` window cycler, and Mission Control. Panels are excluded
+        // from all of those by design.
         let styleMask: NSWindow.StyleMask = [.titled, .closable, .resizable, .miniaturizable]
-        let panel = NSPanel(
+        let window = NSWindow(
             contentRect: rect,
             styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
-        panel.title = "Agent Dev Tools"
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        panel.isReleasedWhenClosed = false
-        panel.minSize = NSSize(width: 760, height: 520)
+        window.title = "Agent Dev Tools"
+        window.collectionBehavior = [.fullScreenPrimary, .managed]
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 760, height: 520)
+        window.tabbingMode = .disallowed
+        window.setFrameAutosaveName("AgentDevToolsWindow")
 
         let hosting = NSHostingView(rootView: ContextDebugView())
-        panel.contentView = hosting
-        panel.center()
+        window.contentView = hosting
+        window.center()
 
-        window = panel
+        self.window = window
     }
 
     private static func matchesToggleShortcut(_ event: NSEvent) -> Bool {
