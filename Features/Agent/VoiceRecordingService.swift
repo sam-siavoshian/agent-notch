@@ -30,10 +30,6 @@ public final class VoiceRecordingService {
     private var beganObserver: NSObjectProtocol?
     private var endedObserver: NSObjectProtocol?
 
-    // swiftlint:disable:next force_unwrapping — hardcoded literal
-    private static let whisperEndpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
-    private static let whisperDecoder = JSONDecoder()
-
     private init() {}
 
     public func start() {
@@ -225,6 +221,4 @@ public final class VoiceRecordingService {
         case invalidResponse
         case httpError(Int)
     }
-
-    private static let whisperDecoder = JSONDecoder()
 }
