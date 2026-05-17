@@ -114,8 +114,7 @@ enum PromptCategoryCommands {
         // active_task_kind_in: kind must be one of the listed values (case-insensitive)
         if let allowed = expected["active_task_kind_in"] as? [String] {
             let kind = (taskAny?["kind"] as? String ?? "").lowercased()
-            let allowedLower = allowed.map { $0.lowercased() }
-            let ok = allowedLower.contains(kind)
+            let ok = allowed.contains { $0.lowercased() == kind }
             checks.append(Check(
                 label: "active_task_kind_in",
                 passed: ok,
@@ -184,8 +183,7 @@ enum PromptCategoryCommands {
         if expectedShape == "archive_and_start_new",
            let allowed = expected["new_task_kind_in"] as? [String] {
             let kind = (taskAny?["kind"] as? String ?? "").lowercased()
-            let allowedLower = allowed.map { $0.lowercased() }
-            let ok = allowedLower.contains(kind)
+            let ok = allowed.contains { $0.lowercased() == kind }
             checks.append(Check(
                 label: "new_task_kind_in",
                 passed: ok,
