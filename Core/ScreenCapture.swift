@@ -63,8 +63,13 @@ public actor ScreenCapture {
 
     private func snapshotViaSCKit(displayId: CGDirectDisplayID?, quality: CGFloat, maxLongEdge: Int?) async throws -> Snapshot {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = displayId.flatMap({ id in content.displays.first(where: { $0.displayID == id }) })
-                ?? content.displays.first else {
+        let display: SCDisplay?
+        if let id = displayId {
+            display = content.displays.first(where: { $0.displayID == id }) ?? content.displays.first
+        } else {
+            display = content.displays.first
+        }
+        guard let display else {
             throw NSError(domain: "ScreenCapture", code: -1, userInfo: [NSLocalizedDescriptionKey: "No display available"])
         }
 
