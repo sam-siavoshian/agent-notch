@@ -47,6 +47,7 @@ public enum Env {
     /// Returns the value for `key`. Checks process environment first (so Xcode
     /// scheme env vars win), then the parsed .env file.
     public static func value(_ key: String) -> String? {
+        guard !key.isEmpty else { return nil }
         if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty { return v }
         if let v = overrides[key], !v.isEmpty { return v }
         return nil
