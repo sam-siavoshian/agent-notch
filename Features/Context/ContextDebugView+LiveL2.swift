@@ -72,9 +72,10 @@ public struct ContextDebugLiveL2View: View {
         }
     }
 
+    private static let clickableRoles: Set<String> = ["AXButton", "AXMenuItem", "AXMenuButton", "AXLink", "AXRadioButton", "AXCheckBox", "AXTab", "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea", "AXSearchField"]
+
     private func clickableSection(_ snap: CL2Snapshot) -> some View {
-        let clickableRoles: Set<String> = ["AXButton", "AXMenuItem", "AXMenuButton", "AXLink", "AXRadioButton", "AXCheckBox", "AXTab", "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea", "AXSearchField"]
-        let clickables = snap.axElements.filter { clickableRoles.contains($0.role) }
+        let clickables = snap.axElements.filter { Self.clickableRoles.contains($0.role) }
         return VStack(alignment: .leading, spacing: 4) {
             Text("Clickable elements (\(clickables.count))").font(.system(size: 12, weight: .semibold))
             if clickables.isEmpty {
@@ -95,8 +96,7 @@ public struct ContextDebugLiveL2View: View {
     }
 
     private func passiveSection(_ snap: CL2Snapshot) -> some View {
-        let clickableRoles: Set<String> = ["AXButton", "AXMenuItem", "AXMenuButton", "AXLink", "AXRadioButton", "AXCheckBox", "AXTab", "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea", "AXSearchField"]
-        let passive = snap.axElements.filter { !clickableRoles.contains($0.role) }
+        let passive = snap.axElements.filter { !Self.clickableRoles.contains($0.role) }
         return VStack(alignment: .leading, spacing: 4) {
             Text("Passive elements (\(passive.count))").font(.system(size: 12, weight: .semibold))
             ForEach(0..<min(passive.count, 15), id: \.self) { i in
