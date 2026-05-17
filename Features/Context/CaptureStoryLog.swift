@@ -59,11 +59,6 @@ public final class CaptureStoryLog {
         }
     }
 
-    /// Full in-memory buffer snapshot (capped at `inMemoryCapacity`).
-    public func snapshot() -> [SurfaceObservation] {
-        queue.sync { Array(buffer) }
-    }
-
     // MARK: - Persistence
 
     private static let storageRoot: URL = {

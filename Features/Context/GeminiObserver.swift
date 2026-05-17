@@ -48,20 +48,18 @@ public final class GeminiObserver {
         guard Secrets.geminiAPIKey != nil else { return }    // no key -> skip silently
 
         let started = Date()
-        let systemPrompt = Self.systemPrompt
-        let userText = Self.userText(frontmostHint: frontmostHint)
+        let userText = frontmostHint.map { "Currently frontmost app: \($0)" } ?? ""
 
         let raw: String
         do {
             raw = try await GeminiVisionClient.shared.generate(
-                systemPrompt: systemPrompt,
+                systemPrompt: Self.systemPrompt,
                 userText: userText,
                 imagePNG: screenshotPNG,
                 timeout: 60.0
             )
         } catch {
-            // GeminiVisionClient already logged the failure to AgentObservabilityLog
-            // via the new .geminiCall event — nothing else to do here.
+            // GeminiVisionClient already logged the failure via .geminiCall.
             return
         }
 
@@ -110,8 +108,8 @@ public final class GeminiObserver {
 
     // MARK: - Prompt
 
-    /// Static, cacheable system prompt. Keep this stable across calls — anything
-    /// that varies per call belongs in `userText(frontmostHint:)`.
+    /// Static, cacheable system prompt. Keep this stable across calls — any
+    /// per-call tail (e.g. frontmost-app hint) is appended by the caller.
     private static let systemPrompt: String = """
     You are watching a user's macOS screen passively. Look at this screenshot and
     produce a STRUCTURED JSON observation that captures THREE things:
@@ -235,13 +233,6 @@ public final class GeminiObserver {
       windows that have content.
     - Strict JSON. No backticks. No prose outside the JSON.
     """
-
-    /// Per-call tail — varies between requests so must not be folded into the
-    /// (future) cached prefix.
-    private static func userText(frontmostHint: String?) -> String {
-        guard let hint = frontmostHint else { return "" }
-        return "Currently frontmost app: \(hint)"
-    }
 
     // MARK: - Parse DTO (snake_case wire shape)
 
