@@ -1,11 +1,10 @@
 import Foundation
 
 /// Rolling index of URIs/files/channels the user has touched recently. Adapters
-/// contribute entries via `record(_:)`. Consumers (Phase 4 Selector) read the
-/// top-N via `recent(limit:)`.
+/// call `record(_:)`; Selector reads the top-N via `recent(limit:)`.
 ///
 /// Entries are deduplicated by URI; subsequent calls for the same URI update
-/// `lastSeen` only. Bounded at `capacity` entries with LRU eviction.
+/// `lastSeen` only. Bounded at `capacity` with LRU eviction.
 public final class ResourceIndex {
 
     public static let shared = ResourceIndex()
@@ -18,19 +17,18 @@ public final class ResourceIndex {
         self.capacity = capacity
     }
 
-    /// Add or refresh a single resource. Updates lastSeen if URI is already present.
+    /// Add or refresh a single resource. Updates lastSeen if URI already present.
     public func record(_ ref: CResourceRef) {
         var isNewURI = false
         queue.sync {
-            if var existing = byURI[ref.uri] {
-                existing = CResourceRef(
+            if let existing = byURI[ref.uri] {
+                byURI[ref.uri] = CResourceRef(
                     kind: existing.kind,
                     uri: existing.uri,
                     label: ref.label ?? existing.label,
                     app: ref.app ?? existing.app,
                     lastSeen: ref.lastSeen
                 )
-                byURI[ref.uri] = existing
             } else {
                 byURI[ref.uri] = ref
                 isNewURI = true
@@ -47,11 +45,6 @@ public final class ResourceIndex {
         }
     }
 
-    /// Bulk insert — convenience for adapter `recentResources()` returns.
-    public func record(_ refs: [CResourceRef]) {
-        for ref in refs { record(ref) }
-    }
-
     /// Most recently seen N resources, newest first.
     public func recent(limit: Int = 20) -> [CResourceRef] {
         queue.sync {
@@ -59,15 +52,9 @@ public final class ResourceIndex {
         }
     }
 
-    /// Clear all entries (settings or debug).
-    public func clear() {
-        queue.sync { byURI.removeAll() }
-    }
-
     /// MUST be called from `queue`.
     private func evictIfNeeded() {
         guard byURI.count > capacity else { return }
-        // LRU by lastSeen
         let toRemove = byURI.values.sorted { $0.lastSeen < $1.lastSeen }.prefix(byURI.count - capacity)
         for r in toRemove { byURI.removeValue(forKey: r.uri) }
     }

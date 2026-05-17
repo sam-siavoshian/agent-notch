@@ -2,18 +2,9 @@
 //  L2Snapshotter.swift
 //  Agent in the Notch
 //
-//  Phase 4 (P4-3). Synchronous "current screen" snapshot built from the existing
-//  services. Consumed by the Selector at long-press time.
-//
-//  Each subcomponent has its own short deadline so the worst case stays under
-//  ~400 ms. Components run in parallel where they don't depend on each other:
-//    - Window metadata    (NSWorkspace.frontmost + window title via AX)
-//    - Display identity   (NSScreen of the frontmost window, best-effort)
-//    - Screenshot + OCR   (ScreenCapture + ContextOCRService, ≤250 ms)
-//    - AX element dump    (top-10 children of front window + focused flag, ≤150 ms)
-//    - Selection          (AXObserverManager.shared.focusedElementDescriptor)
-//    - Clipboard          (NSPasteboard.general; source-app taint not yet exposed)
-//    - App-specific blob  (AdapterRegistry.shared.snapshot, 200 ms internal deadline)
+//  Synchronous "current screen" snapshot consumed by the Selector at
+//  long-press time. Independent components run in parallel; per-component
+//  deadlines keep the worst case under ~400ms.
 //
 
 import Foundation
@@ -29,19 +20,14 @@ public enum L2Snapshotter {
         "AXSearchField", "AXSlider", "AXStepper"
     ]
 
-    /// Build the L2 snapshot synchronously (from the caller's perspective). The
-    /// `overallDeadline` parameter is informational — the actual ceiling comes
-    /// from the per-component deadlines below.
+    /// Build the L2 snapshot. Returns both the text payload AND the raw JPEG
+    /// from the same capture — the JPEG is kept OUT of the payload to avoid
+    /// bloating the text-only Mercury prompt. Callers wanting the image
+    /// (AgentSession passing the initiation screenshot to Claude) read it
+    /// from the tuple.
     ///
-    /// Returns both the CL2Snapshot (text payload) AND the raw JPEG bytes of
-    /// the screenshot used for OCR. The JPEG is kept OUT of CL2Snapshot to
-    /// avoid bloating the Mercury 2 (text-only) selector prompt by hundreds
-    /// of KB — callers that want the image (e.g. AgentSession passing the
-    /// initiation screenshot through to Claude) read it from the tuple.
-    ///
-    /// There is no per-long-press vision call — the continuous GeminiObserver
-    /// is the only vision path; its accumulated SurfaceMemoryStore feeds
-    /// Mercury via the `learned_surfaces` payload field.
+    /// `overallDeadline` is informational; the actual ceiling comes from the
+    /// per-component deadlines below.
     public static func snapshot(overallDeadline: TimeInterval = 0.4) async -> (l2: CL2Snapshot, screenshotJPEG: Data?) {
         _ = overallDeadline // reserved for future use (e.g. Dev Tools timing assertions)
 
@@ -104,7 +90,7 @@ public enum L2Snapshotter {
 
     /// Returns (windowID, displayID, displayBounds). Best-effort — falls back to
     /// the main screen. windowID requires CGWindowListCopyWindowInfo; left nil
-    /// for Phase 4 to stay under the time budget.
+    /// to stay under the time budget.
     private static func readWindowAndDisplay(pid: Int) -> (Int?, Int, [Double]) {
         let mainScreen = NSScreen.main ?? NSScreen.screens.first
         let displayID = (mainScreen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue ?? 1
@@ -120,17 +106,15 @@ public enum L2Snapshotter {
 
     // MARK: - Screenshot + OCR
 
-    /// Bundle returned from `captureScreenshotAndOCR`: the OCR text and the
-    /// JPEG bytes from the same capture. JPEG is the downsampled (≤1568 long
-    /// edge) version because that's what Anthropic auto-downsamples to anyway
-    /// — sending the full-res image just costs upload time.
+    /// OCR text + downsampled (≤1568 long-edge) JPEG from one capture.
+    /// 1568 matches Anthropic's auto-downsample, so the full-res upload
+    /// would be wasted bytes.
     private struct CaptureResult: Sendable {
         let ocrLines: [String]
         let jpegData: Data?
     }
 
-    /// Race the real screenshot+OCR pipeline against a wall-clock deadline.
-    /// Whichever finishes first wins; the other task is cancelled.
+    /// Race the screenshot+OCR pipeline against a wall-clock deadline.
     private static func captureScreenshotAndOCR(deadline: TimeInterval) async -> CaptureResult {
         return await withTaskGroup(of: CaptureResult.self) { group in
             group.addTask {
@@ -146,21 +130,16 @@ public enum L2Snapshotter {
         }
     }
 
-    /// Bridge to the existing ScreenCapture + ContextOCRService stack.
-    /// One screenshot serves two purposes: full-res raw image for OCR (small
-    /// UI text stays legible) and a downsampled JPEG for the multimodal
-    /// model. ScreenCapture returns both in a single Snapshot.
+    /// One screenshot, two outputs: full-res rawImage for OCR (small UI text
+    /// stays legible) + downsampled jpegData for the multimodal model.
     private static func invokeCaptureAndOCR() async -> CaptureResult {
         do {
-            // Use the default maxLongEdge (1568) so jpegData is sized for
-            // Anthropic. rawImage is still the full-res capture.
             let snapshot = try await ScreenCapture.shared.snapshot(
                 displayId: nil,
                 quality: 0.7,
                 maxLongEdge: 1568
             )
             guard let raw = snapshot.rawImage else {
-                // Shouldn't happen with the SCKit path, but be defensive.
                 return CaptureResult(ocrLines: [], jpegData: snapshot.jpegData)
             }
             let recognized = await ContextOCRService.shared.recognizeText(in: raw, maxResults: 80)
@@ -207,13 +186,17 @@ public enum L2Snapshotter {
         var collected: [CL2Snapshot.AXElement] = []
         walk(element: window, parentPath: "AXWindow", depth: 0, maxDepth: 3, focused: focused, collected: &collected)
 
-        // Prioritize clickable elements; drop unlabeled passive ones; cap at 50.
-        let withLabel = collected.filter { ($0.label?.isEmpty == false) || $0.focused }
-        let clickable = withLabel.filter { Self.clickableRoles.contains($0.role) }
-        let passive = withLabel.filter { !Self.clickableRoles.contains($0.role) }
-        // Take clickables first, fill the rest with passives.
-        let combined = (clickable + passive).prefix(50)
-        return Array(combined)
+        // Drop unlabeled passive elements; partition clickables ahead of the rest; cap at 50.
+        var clickable: [CL2Snapshot.AXElement] = []
+        var passive: [CL2Snapshot.AXElement] = []
+        for el in collected where (el.label?.isEmpty == false) || el.focused {
+            if Self.clickableRoles.contains(el.role) {
+                clickable.append(el)
+            } else {
+                passive.append(el)
+            }
+        }
+        return Array((clickable + passive).prefix(50))
     }
 
     private static func walk(
@@ -295,10 +278,8 @@ public enum L2Snapshotter {
         return [Int(p.x), Int(p.y)]
     }
 
-    /// Read the current clipboard contents synchronously. ClipboardWatcher's
-    /// internal CopySource (which carries source-app taint) is private; until
-    /// it's exposed we set sourceApp/sourceBundleID to nil. Selector + Mercury
-    /// can still benefit from preview + bytes.
+    /// Read the current clipboard. Source-app taint (from ClipboardWatcher)
+    /// isn't exposed yet, so sourceApp/sourceBundleID are nil.
     private static func readClipboard() -> CL2Snapshot.ClipboardSnapshot? {
         let pb = NSPasteboard.general
         guard let s = pb.string(forType: .string), !s.isEmpty else { return nil }

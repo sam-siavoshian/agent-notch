@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 /// Periodic Mercury synthesis maintaining the rolling `active_task`. Runs every ~90s
-/// while the user is active, or on demand from Selector (Phase 4) when the task is stale.
+/// while the user is active, or on demand from Selector when the task is stale.
 ///
 /// Trigger conditions (any of):
 ///   - ≥90 s since last update AND at least one substantive event (not just dwell)
@@ -18,7 +18,6 @@ public final class ActiveTaskUpdater {
     private var lastEventSeqAtUpdate: Int = 0
     private var lastAppSwitchTrigger: Date = .distantPast
     private static let appSwitchDebounceInterval: TimeInterval = 10.0
-    private let queue = DispatchQueue(label: "AgentNotch.ActiveTaskUpdater.queue")
 
     private init() {}
 
@@ -26,12 +25,10 @@ public final class ActiveTaskUpdater {
 
     public func start() {
         stop()
-        // Fire every 30s for the trigger-condition check; the actual Mercury call
-        // happens only when triggers fire.
+        // 30s tick checks trigger conditions; Mercury only fires when one matches.
         timer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             Task { await self?.tick() }
         }
-        // Subscribe to app-switch notifications for the second trigger.
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(handleAppSwitch(_:)),
@@ -40,7 +37,7 @@ public final class ActiveTaskUpdater {
         )
     }
 
-    public func stop() {
+    private func stop() {
         timer?.invalidate()
         timer = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -48,41 +45,32 @@ public final class ActiveTaskUpdater {
 
     @objc private func handleAppSwitch(_ notification: Notification) {
         let now = Date()
-        let elapsed = now.timeIntervalSince(lastAppSwitchTrigger)
-        guard elapsed >= Self.appSwitchDebounceInterval else {
-            // Debounced — too soon since last app-switch-triggered tick.
-            return
-        }
+        guard now.timeIntervalSince(lastAppSwitchTrigger) >= Self.appSwitchDebounceInterval else { return }
         lastAppSwitchTrigger = now
         Task { await self.tick() }
     }
 
     // MARK: - Trigger evaluation + Mercury call
 
-    /// Periodic / event-driven update tick. Returns the new active_task (or nil if no
-    /// update fired). Idempotent — runs only when triggers say so.
-    @discardableResult
-    public func tick() async -> CActiveTask? {
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastUpdateAt)
+    /// Periodic / event-driven tick. Runs only when triggers say so.
+    private func tick() async {
+        let elapsed = Date().timeIntervalSince(lastUpdateAt)
         let latestSeq = EventLog.shared.tail(1).last?.seq ?? 0
-        let newEvents = latestSeq > lastEventSeqAtUpdate
-        guard elapsed >= 90.0 && newEvents else { return nil }
-        return await refresh(timeout: 8.0)
+        guard elapsed >= 90.0 && latestSeq > lastEventSeqAtUpdate else { return }
+        _ = await refresh(timeout: 8.0)
     }
 
-    /// On-demand refresh used by Selector (Phase 4) with a tight deadline.
-    /// Returns the latest `CActiveTask` on success, or nil if Mercury fails / times out.
+    /// On-demand refresh used by Selector with a tight deadline. Returns the
+    /// latest `CActiveTask` on success, or nil if Mercury fails / times out.
     @discardableResult
     public func refresh(timeout: TimeInterval) async -> CActiveTask? {
         let current = L5Store.shared.loadActiveTask()
         let events = EventLog.shared.tail(20)
         let resources = ResourceIndex.shared.recent(limit: 10)
 
-        // Pull the last few snapshots and reduce them to (app, surface, ocr_excerpt)
-        // entries — gives Mercury actual on-screen text to write a SPECIFIC
-        // active_task.title (e.g. "Drafting letter to Marcus") instead of
-        // app-and-surface-level generic titles.
+        // Reduce recent snapshots to (app, surface, ocr_excerpt) so Mercury
+        // can write specific labels ("Drafting letter to Marcus") instead of
+        // generic app-and-surface ones.
         let recentSnapshots = await ContextCoordinator.shared.recentSnapshots()
         let recentScreenText = Self.buildRecentScreenText(from: recentSnapshots, limit: 5)
 
@@ -111,7 +99,6 @@ public final class ActiveTaskUpdater {
                 return nil
             }
 
-            // Apply
             switch result {
             case .update(let updated):
                 try? L5Store.shared.saveActiveTask(updated)
@@ -148,9 +135,9 @@ public final class ActiveTaskUpdater {
         }
     }
 
-    // MARK: - System prompt (will move to EvalHarness-style baseline in Phase 4 cleanup)
+    // MARK: - System prompt
 
-    static let systemPrompt: String = """
+    private static let systemPrompt: String = """
     You maintain a structured Active Task object representing what the user is working on.
 
     You will receive:
@@ -245,97 +232,70 @@ public final class ActiveTaskUpdater {
     // MARK: - Prompt builder
 
     /// Compact (app, surface, ocr_excerpt) entry used to enrich the Mercury prompt.
-    struct RecentScreenTextEntry: Codable {
+    private struct RecentScreenTextEntry: Codable {
         let app: String
         let surface: String
         let ocrExcerpt: String
 
         enum CodingKeys: String, CodingKey {
-            case app
-            case surface
+            case app, surface
             case ocrExcerpt = "ocr_excerpt"
         }
     }
 
-    /// Reduces a list of recent ContextSnapshots into ≤ `limit` entries of
-    /// (app, surface, ocr_excerpt). Dedups by (app, surface) keeping the
-    /// most-recent OCR. Strips whitespace-only lines and caps the excerpt at
-    /// 600 chars so the prompt doesn't bloat.
-    static func buildRecentScreenText(from snapshots: [ContextSnapshot], limit: Int) -> [RecentScreenTextEntry] {
-        // Walk newest-first so the first time we encounter an (app, surface)
-        // pair we get the freshest OCR. Then reverse back to chronological
-        // order before truncating.
+    /// Dedup snapshots by (app, surface), keep the freshest OCR per pair,
+    /// cap to `limit`, and truncate each excerpt at 600 chars.
+    private static func buildRecentScreenText(from snapshots: [ContextSnapshot], limit: Int) -> [RecentScreenTextEntry] {
         var seen: Set<String> = []
-        var picked: [(snapshot: ContextSnapshot, key: String)] = []
+        var picked: [ContextSnapshot] = []
         for snap in snapshots.reversed() {
             let app = snap.appName.trimmingCharacters(in: .whitespacesAndNewlines)
             let surface = snap.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             let key = "\(app)\u{1F}\(surface)"
-            if seen.contains(key) { continue }
-            seen.insert(key)
-            picked.append((snap, key))
+            if seen.insert(key).inserted {
+                picked.append(snap)
+            }
         }
-        // Now newest-first; cap to `limit` then map.
-        return picked.prefix(max(0, limit)).map { entry in
-            let snap = entry.snapshot
-            let lines = snap.recognizedText.compactMap { rec -> String? in
-                let trimmed = rec.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            }
-            let joined = lines.joined(separator: "\n")
-            let excerpt: String
-            if joined.count > 600 {
-                excerpt = String(joined.prefix(600))
-            } else {
-                excerpt = joined
-            }
+        return picked.prefix(max(0, limit)).map { snap in
+            let joined = snap.recognizedText
+                .compactMap { rec -> String? in
+                    let trimmed = rec.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? nil : trimmed
+                }
+                .joined(separator: "\n")
+            let excerpt = joined.count > 600 ? String(joined.prefix(600)) : joined
             let surface = snap.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let resolvedSurface = surface.isEmpty ? snap.appName : surface
             return RecentScreenTextEntry(
                 app: snap.appName,
-                surface: resolvedSurface,
+                surface: surface.isEmpty ? snap.appName : surface,
                 ocrExcerpt: excerpt
             )
         }
     }
 
-    static func buildPrompt(
+    private static let promptEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = [.sortedKeys]
+        return e
+    }()
+
+    private static func encodeJSON<T: Encodable>(_ value: T, fallback: String) -> String {
+        guard let data = try? promptEncoder.encode(value),
+              let str = String(data: data, encoding: .utf8) else { return fallback }
+        return str
+    }
+
+    private static func buildPrompt(
         current: CActiveTask?,
         events: [CEvent],
         resources: [CResourceRef],
         recentScreenText: [RecentScreenTextEntry] = []
     ) -> String {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-
-        let currentJSON: String = {
-            if let current, let data = try? encoder.encode(current) {
-                return String(data: data, encoding: .utf8) ?? "null"
-            }
-            return "null"
-        }()
-
-        let eventsJSON: String = {
-            if let data = try? encoder.encode(events) {
-                return String(data: data, encoding: .utf8) ?? "[]"
-            }
-            return "[]"
-        }()
-
-        let resourcesJSON: String = {
-            if let data = try? encoder.encode(resources) {
-                return String(data: data, encoding: .utf8) ?? "[]"
-            }
-            return "[]"
-        }()
-
-        let recentScreenTextJSON: String = {
-            if let data = try? encoder.encode(recentScreenText) {
-                return String(data: data, encoding: .utf8) ?? "[]"
-            }
-            return "[]"
-        }()
+        let currentJSON = current.map { encodeJSON($0, fallback: "null") } ?? "null"
+        let eventsJSON = encodeJSON(events, fallback: "[]")
+        let resourcesJSON = encodeJSON(resources, fallback: "[]")
+        let recentScreenTextJSON = encodeJSON(recentScreenText, fallback: "[]")
 
         return """
         CURRENT active_task:
@@ -356,32 +316,36 @@ public final class ActiveTaskUpdater {
 
     // MARK: - Response parser
 
-    enum Result {
+    private enum ParseResult {
         case update(CActiveTask)
         case archiveAndStartNew(ended: CArchivedTask, new: CActiveTask)
     }
 
-    static func parseResponse(_ raw: String, fallback: CActiveTask?) -> Result? {
+    private static let responseDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
+    private static func parseResponse(_ raw: String, fallback: CActiveTask?) -> ParseResult? {
         guard let data = raw.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
 
-        if let updateAny = obj["update"], let updateData = try? JSONSerialization.data(withJSONObject: updateAny) {
-            if let updated = try? decoder.decode(CActiveTask.self, from: updateData) {
-                return .update(updated)
-            }
+        if let updateAny = obj["update"],
+           let updateData = try? JSONSerialization.data(withJSONObject: updateAny),
+           let updated = try? responseDecoder.decode(CActiveTask.self, from: updateData) {
+            return .update(updated)
         }
-        if let pairAny = obj["archive_and_start_new"] as? [String: Any] {
-            if let endedAny = pairAny["ended_task"], let newAny = pairAny["new_task"],
-               let endedData = try? JSONSerialization.data(withJSONObject: endedAny),
-               let newData = try? JSONSerialization.data(withJSONObject: newAny),
-               let ended = try? decoder.decode(CArchivedTask.self, from: endedData),
-               let newTask = try? decoder.decode(CActiveTask.self, from: newData) {
-                return .archiveAndStartNew(ended: ended, new: newTask)
-            }
+        if let pairAny = obj["archive_and_start_new"] as? [String: Any],
+           let endedAny = pairAny["ended_task"],
+           let newAny = pairAny["new_task"],
+           let endedData = try? JSONSerialization.data(withJSONObject: endedAny),
+           let newData = try? JSONSerialization.data(withJSONObject: newAny),
+           let ended = try? responseDecoder.decode(CArchivedTask.self, from: endedData),
+           let newTask = try? responseDecoder.decode(CActiveTask.self, from: newData) {
+            return .archiveAndStartNew(ended: ended, new: newTask)
         }
         return nil
     }

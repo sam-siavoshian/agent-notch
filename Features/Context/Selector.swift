@@ -12,41 +12,33 @@ public final class ContextSelector {
     /// emitted to the harness as a system block, plus diagnostics for Dev Tools.
     public struct Result {
         public let intent: CIntent
-        /// Markdown rendering of the brief, handed to the computer-use harness
-        /// verbatim. When Mercury succeeds this is rendered from `structuredBrief`
-        /// in Swift (deterministic shape); when we fall back to LocalBriefRenderer
-        /// it comes from there directly.
+        /// Markdown rendering of the brief handed to the computer-use harness.
+        /// Rendered from `structuredBrief` on the Mercury path; comes directly
+        /// from `LocalBriefRenderer` on the fallback path.
         public let brief: String
-        /// Typed brief object as returned by Mercury. Nil when degraded — the
-        /// LocalBriefRenderer path does not produce a structured shape today.
-        /// Consumers that want to render the brief differently (Dev Tools,
-        /// validation, future agents) should prefer this over `brief`.
+        /// Typed brief as returned by Mercury. Nil on the LocalBriefRenderer path.
         public let structuredBrief: StructuredBrief?
         public let l2: CL2Snapshot
-        /// JPEG bytes captured at long-press time (same frame OCR ran on).
-        /// Forwarded to the harness as the first user-message image so Claude
-        /// sees the screen without taking a `computer.screenshot` tool call.
-        /// Nil if capture failed or timed out.
+        /// JPEG bytes captured at long-press time. Forwarded to the harness as
+        /// the first user-message image so Claude sees the screen without taking
+        /// a `computer.screenshot` tool call. Nil if capture failed or timed out.
         public let initiationScreenshot: Data?
         public let degraded: Bool        // true if we fell back to LocalBriefRenderer
         public let latencyS: Double
         public let modelUsed: String?    // nil when degraded
     }
 
-    /// Snapshot of the last selector run — surfaced in Dev Tools.
-    public private(set) var lastRun: Result?
-
     /// In-memory ring of the most recent selector runs (oldest → newest).
-    /// Bounded to `maxRecentRuns`. Powers the Dev Tools Intent history view.
-    /// Note: `recentRuns.last == lastRun` by construction — that duplication
-    /// is intentional for caller ergonomics.
+    /// Powers the Intent Dev Tools tab.
     public private(set) var recentRuns: [Result] = []
     private let maxRecentRuns = 20
+
+    /// Snapshot of the last selector run — surfaced in Dev Tools.
+    public var lastRun: Result? { recentRuns.last }
 
     private init() {}
 
     private func recordRun(_ result: Result) {
-        lastRun = result
         recentRuns.append(result)
         if recentRuns.count > maxRecentRuns {
             recentRuns.removeFirst(recentRuns.count - maxRecentRuns)
@@ -60,19 +52,15 @@ public final class ContextSelector {
         let l2 = snap.l2
         let initiationScreenshot = snap.screenshotJPEG
 
-        // Refresh active_task when it's either time-stale OR doesn't cover the
-        // current app. The second trigger matters when the 30s/90s gates in
-        // ActiveTaskUpdater have blocked a recent app-switch tick: the user
-        // long-presses in VSCode but the on-disk task still describes Slack.
-        // Forcing a refresh here (tight 2s deadline) keeps Mercury from
-        // writing a brief grounded in the wrong context.
+        // Refresh active_task when it's time-stale OR doesn't cover the current
+        // app. The second trigger matters when ActiveTaskUpdater's 30s/90s gates
+        // have blocked a recent app-switch tick.
         let staleThreshold: TimeInterval = 30.0
         let currentTask = L5Store.shared.loadActiveTask()
         let staleByTime = currentTask.flatMap { $0.staleSince.map { Date().timeIntervalSince($0) > staleThreshold } } ?? false
         let staleByContext = !Self.currentTaskCoversBundle(currentTask, l2: l2)
-        let needsRefresh = staleByTime || staleByContext
         let activeTask: CActiveTask?
-        if needsRefresh {
+        if staleByTime || staleByContext {
             activeTask = (await ActiveTaskUpdater.shared.refresh(timeout: 2.0)) ?? currentTask
         } else {
             activeTask = currentTask
@@ -82,11 +70,9 @@ public final class ContextSelector {
         let resources = ResourceIndex.shared.recent(limit: 20)
         let recipes = AnchorRecorder.shared.recipes(for: l2.bundleID).recipes
 
-        // Read user-tunable settings on the main actor.
         let mercuryEnabled = await MainActor.run { AgentSettingsStore.shared.mercuryEnabled }
         let userPrefs = await MainActor.run { AgentSettingsStore.shared.preferences }
 
-        // Try Mercury first (when enabled + key available)
         if mercuryEnabled {
             do {
                 let raw = try await callMercury(
@@ -100,15 +86,9 @@ public final class ContextSelector {
                     timeout: 2.5
                 )
                 if let parsed = Self.parseResponse(raw) {
-                    // Validation gate: if the user has a matching learned surface
-                    // with controls, Mercury MUST have cited them in
-                    // navigation_anchors. An empty anchors list when ground
-                    // truth was available means Mercury "decided" the anchors
-                    // weren't useful and dropped them — exactly the failure
-                    // mode the structured brief is meant to catch. Log but
-                    // proceed; the brief is still likely usable.
-                    let hadMatchingLearned = Self.hadMatchingLearnedSurface(l2: l2)
-                    if hadMatchingLearned && parsed.brief.navigationAnchors.isEmpty {
+                    // Validation: when ground-truth learned controls exist,
+                    // Mercury must cite them. Empty anchors = silent drop.
+                    if Self.hadMatchingLearnedSurface(l2: l2) && parsed.brief.navigationAnchors.isEmpty {
                         NSLog("[Selector] WARN: Mercury returned empty navigation_anchors despite matching learned surface for \(l2.bundleID) / \(l2.windowTitle ?? "?")")
                     }
                     let result = Result(
@@ -124,13 +104,11 @@ public final class ContextSelector {
                     recordRun(result)
                     return result
                 }
-                // Parse failed — fall through to local renderer.
             } catch {
-                // Timeout, no key, malformed — fall through.
+                // Timeout, no key, malformed — fall through to local renderer.
             }
         }
 
-        // Local fallback
         let (intent, brief) = LocalBriefRenderer.render(
             transcript: transcript,
             l2: l2,
@@ -184,9 +162,9 @@ public final class ContextSelector {
         )
     }
 
-    // MARK: - System prompt (kept here; Phase 5 cleanup can move to a shared constant)
+    // MARK: - System prompt
 
-    static let systemPrompt: String = """
+    private static let systemPrompt: String = """
     You are the context selector for a macOS computer-use agent.
 
     You receive a JSON payload describing what the user is doing right now:
@@ -271,7 +249,7 @@ public final class ContextSelector {
 
     // MARK: - Prompt builder
 
-    static func buildSelectorPrompt(
+    private static func buildSelectorPrompt(
         transcript: String,
         l2: CL2Snapshot,
         activeTask: CActiveTask?,
@@ -280,13 +258,9 @@ public final class ContextSelector {
         events: [CEvent],
         userPrefs: String
     ) throws -> String {
-        let encoder = Self.promptEncoder
-
-        /// Compact per-entry projection of `SurfaceObservation` for the
-        /// Mercury payload. We drop fields Mercury doesn't need (controls,
-        /// correlations, latency, allVisibleApps) to keep prompt size bounded;
-        /// what's left is the user-centric story: when, where, doing what,
-        /// with what content.
+        /// Compact per-entry projection of `SurfaceObservation`. Drops fields
+        /// Mercury doesn't need (controls, correlations, latency, allVisibleApps)
+        /// to keep prompt size bounded.
         struct StoryEntry: Encodable {
             let t: Date
             let app: String?
@@ -294,10 +268,6 @@ public final class ContextSelector {
             let narrative: String?
             let current_goal_guess: String?
             let content_type: String?
-            /// Per-visible-app structured content from this observation.
-            /// Mercury reads it to resolve deictic references — "the doc"
-            /// pulls the entry whose content_type is document, "her message"
-            /// pulls a chat entry, etc.
             let artifacts: [SurfaceObservation.Artifact]?
         }
 
@@ -309,29 +279,14 @@ public final class ContextSelector {
             let recent_events: [CEvent]
             let recent_resources: [CResourceRef]
             let recipes_for_active_app: [CRecipe]
-            /// Accumulated per-(app, surface) UI knowledge built up by
-            /// `GeminiObserver` over many observations. Mercury should treat
-            /// this as the canonical "how this app's surfaces actually work"
-            /// reference and lean on it when AX/OCR are sparse.
             let learned_surfaces: [SurfaceMemoryStore.SurfaceMemory]
-            /// Recent chronological story of what the user has been doing, built
-            /// up by GeminiObserver per capture and persisted to CaptureStoryLog.
-            /// Mercury uses this to write briefs with real continuity rather than
-            /// guessing from sparse events. Last ~20 entries OR last 5 minutes,
-            /// whichever is shorter.
             let recent_story: [StoryEntry]
         }
 
-        // Rank surfaces with the CURRENT one first, then the rest by frequency.
-        // Ranking by raw observationCount alone meant a long-press in a niche
-        // surface (e.g. one specific Slack channel) could exclude that surface
-        // from the top-6 entirely, since busier channels dominate the count.
-        // Now any surface whose label shares a meaningful token with the live
-        // window title floats to the top, regardless of count.
-        //
-        // Within each surface, controls whose labels appear in the transcript
-        // are boosted ahead of high-frequency-but-irrelevant ones (e.g. asking
-        // "send" pulls the Send button forward over Channels/Settings).
+        // Rank learned surfaces: any surface whose label shares a token with
+        // the live window title floats above frequency-only ordering. Within
+        // each surface, controls whose labels appear in the transcript are
+        // boosted ahead of high-frequency-but-irrelevant ones.
         let allMemories = SurfaceMemoryStore.shared.memories(forBundle: l2.bundleID)
         let lowerTranscript = transcript.lowercased()
         var matchesCurrent: [SurfaceMemoryStore.SurfaceMemory] = []
@@ -346,7 +301,7 @@ public final class ContextSelector {
         let learned: [SurfaceMemoryStore.SurfaceMemory] = (
             matchesCurrent.sorted { $0.observationCount > $1.observationCount } +
             others.sorted { $0.observationCount > $1.observationCount }
-        ).prefix(6).map { mem -> SurfaceMemoryStore.SurfaceMemory in
+        ).prefix(6).map { mem in
             var trimmed = mem
             trimmed.controls = Array(mem.controls.sorted { lhs, rhs in
                 let lInTranscript = lowerTranscript.contains(lhs.label.lowercased())
@@ -357,8 +312,7 @@ public final class ContextSelector {
             return trimmed
         }
 
-        // Pull the last 20 story entries, then keep only those within the last
-        // 5 minutes. If fewer fit the window, that's fine — emit what's there.
+        // Last 20 story entries within the 5-minute window.
         let storyWindowSeconds: TimeInterval = 300
         let now = Date()
         let recentStory: [StoryEntry] = CaptureStoryLog.shared.tail(20)
@@ -386,18 +340,13 @@ public final class ContextSelector {
             learned_surfaces: learned,
             recent_story: recentStory
         )
-        let data = try encoder.encode(payload)
+        let data = try Self.promptEncoder.encode(payload)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
     // MARK: - Response parser
 
-    // Hoisted JSON coders — upstream's optimization, kept here so both the
-    // typed brief decode and the prompt encode pay zero allocation cost
-    // per call. `briefDecoder` handles `StructuredBrief`; `intentDecoder`
-    // handles the inner `CIntent` payload.
-    private static let intentDecoder = JSONDecoder()
-    private static let briefDecoder = JSONDecoder()
+    private static let jsonDecoder = JSONDecoder()
 
     private static let promptEncoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -406,22 +355,21 @@ public final class ContextSelector {
         return e
     }()
 
-    /// Decode Mercury's `{intent, brief}` envelope where `brief` is a typed
-    /// `StructuredBrief` object (no longer a free-form markdown string).
-    /// Robust: when `intent` is malformed but `brief` is valid we still
-    /// return — the brief is the load-bearing artifact for the harness.
-    static func parseResponse(_ raw: String) -> (intent: CIntent, brief: StructuredBrief)? {
+    /// Decode Mercury's `{intent, brief}` envelope. Robust: when `intent` is
+    /// malformed but `brief` is valid we still return — the brief is the
+    /// load-bearing artifact for the harness.
+    private static func parseResponse(_ raw: String) -> (intent: CIntent, brief: StructuredBrief)? {
         guard let data = raw.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let briefAny = obj["brief"],
               let briefData = try? JSONSerialization.data(withJSONObject: briefAny),
-              let brief = try? Self.briefDecoder.decode(StructuredBrief.self, from: briefData)
+              let brief = try? jsonDecoder.decode(StructuredBrief.self, from: briefData)
         else { return nil }
 
-        var intent: CIntent
+        let intent: CIntent
         if let intentAny = obj["intent"],
            let intentData = try? JSONSerialization.data(withJSONObject: intentAny),
-           let parsed = try? Self.intentDecoder.decode(CIntent.self, from: intentData) {
+           let parsed = try? jsonDecoder.decode(CIntent.self, from: intentData) {
             intent = parsed
         } else {
             intent = CIntent(verb: "do", target: nil, resolvedTarget: nil, entities: [], confidence: 0.2)
@@ -432,11 +380,9 @@ public final class ContextSelector {
     // MARK: - Surface matching
 
     /// Fuzzy match between a learned surface label and the live window title.
-    /// Tokenizes both into alphanumeric chunks ≥3 chars and returns true on
-    /// any shared token. Cheap, language-agnostic, and good enough to catch
-    /// "Slack #design composer" ↔ "Slack — design" without dragging in a
-    /// real string-similarity dependency.
-    static func surfaceMatchesTitle(_ surface: String, title: String?) -> Bool {
+    /// Tokenizes both into alphanumeric chunks ≥3 chars; returns true on any
+    /// shared token.
+    private static func surfaceMatchesTitle(_ surface: String, title: String?) -> Bool {
         guard let title, !title.isEmpty else { return false }
         return !tokens(surface).intersection(tokens(title)).isEmpty
     }
@@ -449,25 +395,21 @@ public final class ContextSelector {
         )
     }
 
-    /// True when the on-disk active_task mentions the live app/bundleID
-    /// anywhere in its label, narrative, or resources. When false, the task
-    /// is "context-stale" relative to where the user is right now and the
-    /// Selector forces a refresh regardless of `staleSince`.
-    static func currentTaskCoversBundle(_ task: CActiveTask?, l2: CL2Snapshot) -> Bool {
+    /// True when the active_task mentions the live app/bundleID anywhere in
+    /// its label, narrative, or resources.
+    private static func currentTaskCoversBundle(_ task: CActiveTask?, l2: CL2Snapshot) -> Bool {
         guard let task else { return false }
         let needles = [l2.bundleID.lowercased(), l2.app.lowercased()].filter { !$0.isEmpty }
         guard !needles.isEmpty else { return false }
-        let haystack = ([
-            task.label,
-            task.narrative
-        ] + task.resources).joined(separator: " ").lowercased()
+        let haystack = ([task.label, task.narrative] + task.resources)
+            .joined(separator: " ")
+            .lowercased()
         return needles.contains(where: { haystack.contains($0) })
     }
 
-    /// True iff at least one learned surface for the live bundleID both
-    /// matches the live window title AND has any controls. Used by `select`
-    /// to detect when Mercury silently dropped anchors despite ground truth.
-    static func hadMatchingLearnedSurface(l2: CL2Snapshot) -> Bool {
+    /// True iff at least one learned surface for the live bundleID both matches
+    /// the live window title AND has any controls.
+    private static func hadMatchingLearnedSurface(l2: CL2Snapshot) -> Bool {
         SurfaceMemoryStore.shared
             .memories(forBundle: l2.bundleID)
             .contains { mem in
@@ -477,12 +419,9 @@ public final class ContextSelector {
 
     // MARK: - Markdown renderer
 
-    /// Render a `StructuredBrief` into the markdown the harness has always
-    /// consumed via `Input.contextSummary`. The shape is deterministic and
-    /// driven entirely by what Mercury filled in — Swift never paraphrases,
-    /// reorders, or invents. Sections with empty arrays / nil fields are
-    /// omitted so the rendered prose stays tight.
-    static func renderMarkdown(_ b: StructuredBrief) -> String {
+    /// Render a `StructuredBrief` into the markdown the harness consumes via
+    /// `Input.contextSummary`. Sections with empty arrays / nil fields are omitted.
+    private static func renderMarkdown(_ b: StructuredBrief) -> String {
         var lines: [String] = []
         lines.append("## What the user wants")
         lines.append(b.goal)
@@ -542,10 +481,9 @@ public final class ContextSelector {
 
 // MARK: - StructuredBrief
 
-/// Typed shape Mercury must fill in. Driven by the system-prompt schema in
-/// `ContextSelector.systemPrompt`. Decoding-fail acts as the validation
-/// gate: if Mercury drops a required field, the selector falls through to
-/// `LocalBriefRenderer`.
+/// Typed shape Mercury must fill in. Driven by the system-prompt schema.
+/// Decoding-fail acts as the validation gate: if Mercury drops a required
+/// field, the selector falls through to `LocalBriefRenderer`.
 public struct StructuredBrief: Codable {
     public let goal: String
     public let currentSurface: CurrentSurface?

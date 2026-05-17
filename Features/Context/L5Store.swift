@@ -1,11 +1,11 @@
 import Foundation
 
 /// Persistence for the L5 narrative layer:
-///   - active_task.json           ← current CActiveTask (or absent if no active task)
-///   - task_archive/YYYY-MM-DD.jsonl  ← one JSON line per archived CArchivedTask
-///   - resources_index.json       ← snapshot of ResourceIndex (rebuilt at boot)
+///   - active_task.json              ← current CActiveTask (or absent if none)
+///   - task_archive/YYYY-MM-DD.jsonl ← one JSON line per archived CArchivedTask
+///   - resources_index.json          ← snapshot of ResourceIndex (rebuilt at boot)
 ///
-/// All writes are atomic (write-to-temp + rename). Reads return nil/defaults on absence.
+/// All writes are atomic. Reads return nil/defaults on absence.
 public final class L5Store {
 
     public static let shared = L5Store()
@@ -22,25 +22,21 @@ public final class L5Store {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         self.decoder = d
-        ensureDirectories()
+        try? FileManager.default.createDirectory(at: Self.storageRoot, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: Self.taskArchiveRoot, withIntermediateDirectories: true)
     }
 
     // MARK: - Paths
 
-    public static let storageRoot: URL = {
+    private static let storageRoot: URL = {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AgentNotch", isDirectory: true)
             .appendingPathComponent("ContextMemory", isDirectory: true)
     }()
 
-    public static var activeTaskURL: URL { storageRoot.appendingPathComponent("active_task.json") }
-    public static var resourcesIndexURL: URL { storageRoot.appendingPathComponent("resources_index.json") }
-    public static var taskArchiveRoot: URL { storageRoot.appendingPathComponent("task_archive", isDirectory: true) }
-
-    private func ensureDirectories() {
-        try? FileManager.default.createDirectory(at: Self.storageRoot, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: Self.taskArchiveRoot, withIntermediateDirectories: true)
-    }
+    private static var activeTaskURL: URL { storageRoot.appendingPathComponent("active_task.json") }
+    private static var resourcesIndexURL: URL { storageRoot.appendingPathComponent("resources_index.json") }
+    private static var taskArchiveRoot: URL { storageRoot.appendingPathComponent("task_archive", isDirectory: true) }
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -66,12 +62,6 @@ public final class L5Store {
         }
     }
 
-    public func clearActiveTask() {
-        queue.sync {
-            try? FileManager.default.removeItem(at: Self.activeTaskURL)
-        }
-    }
-
     // MARK: - task_archive/<date>.jsonl
 
     /// Append an archived task to today's archive file.
@@ -86,29 +76,6 @@ public final class L5Store {
         }
     }
 
-    /// Load all archived tasks for a date range (inclusive).
-    /// Returns `[]` for any missing day. Useful for the "today" view in Selector / Dev Tools.
-    public func loadArchive(from start: Date, to end: Date) -> [CArchivedTask] {
-        queue.sync {
-            var out: [CArchivedTask] = []
-            var cursor = start
-            while cursor <= end {
-                let day = Self.dayFormatter.string(from: cursor)
-                let url = Self.taskArchiveRoot.appendingPathComponent("\(day).jsonl")
-                if let data = try? String(contentsOf: url, encoding: .utf8) {
-                    for line in data.split(separator: "\n") where !line.isEmpty {
-                        let lineData = Data(line.utf8)
-                        if let task = try? decoder.decode(CArchivedTask.self, from: lineData) {
-                            out.append(task)
-                        }
-                    }
-                }
-                cursor = Calendar.current.date(byAdding: .day, value: 1, to: cursor) ?? end.addingTimeInterval(86_400)
-            }
-            return out
-        }
-    }
-
     // MARK: - resources_index.json
 
     public func loadResourcesIndex() -> [CResourceRef] {
@@ -119,19 +86,11 @@ public final class L5Store {
         }
     }
 
-    public func saveResourcesIndex(_ refs: [CResourceRef]) throws {
-        try queue.sync {
-            let data = try encoder.encode(refs)
-            try writeAtomic(data: data, to: Self.resourcesIndexURL)
-        }
-    }
-
     // MARK: - File helpers
 
     private func writeAtomic(data: Data, to url: URL) throws {
         let tmp = url.appendingPathExtension("tmp-\(UUID().uuidString)")
         try data.write(to: tmp, options: [.atomic])
-        // Replace destination atomically.
         _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
     }
 
