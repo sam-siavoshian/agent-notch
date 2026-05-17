@@ -61,11 +61,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Keep polling TCC state after onboarding so the Notch UI can show a
         // banner the moment a permission is revoked / not yet granted.
-        PermissionChecker.shared.startPolling()
+        let p = PermissionChecker.shared
+        p.startPolling()
         // Spotify: user-opt-in. Resume the connection if they previously
         // tapped Connect (state persists in UserDefaults).
         SpotifyController.shared.startIfPreviouslyConnected()
-        let p = PermissionChecker.shared
         log.info("boot.complete ax=\(p.statuses[.accessibility]?.rawValue ?? "?") screen=\(p.statuses[.screenRecording]?.rawValue ?? "?") mic=\(p.statuses[.microphone]?.rawValue ?? "?")")
     }
 }
