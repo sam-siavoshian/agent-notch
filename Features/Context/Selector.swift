@@ -4,7 +4,7 @@ import AppKit
 /// The long-press entry point. Assembles the selector input from L2 + L3 + L4 + L5
 /// and calls Mercury 2 via OpenRouter for `{intent, brief}`. Falls back to
 /// `LocalBriefRenderer` when Mercury times out or returns malformed JSON.
-public final class Selector {
+public final class ContextSelector {
 
     public static let shared = ContextSelector()
 
