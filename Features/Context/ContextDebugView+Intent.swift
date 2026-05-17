@@ -153,14 +153,18 @@ private struct IntentRow: View {
         .padding(.vertical, 6)
     }
 
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
     private var timeLabel: String {
         // recentRuns doesn't carry a wall-clock timestamp on the Result.
         // The wall-clock for "now" is more useful than nothing — but to keep
         // a stable display, show the L2 capturedAt time (which is the same
         // instant the selector started, within ~400ms).
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter.string(from: run.l2.capturedAt)
+        return Self.timeFormatter.string(from: run.l2.capturedAt)
     }
 
     private var targetSummary: String {
