@@ -178,7 +178,9 @@ struct NotchContentView: View {
 
             openContent
                 .padding(.horizontal, 10)
-                .padding(.bottom, 10)
+                // Bottom padding ≥ bottom corner radius so rows near the
+                // last line don't get clipped by the rounded notch curve.
+                .padding(.bottom, 24)
                 .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 2)
                 .frame(width: openWidth, alignment: .top)
                 .fixedSize(horizontal: false, vertical: true)
