@@ -1,14 +1,10 @@
 //
 //  VoiceRecordingService.swift
-//  Agent in the Notch
 //
-//  Handles the full voice pipeline: record on longPressBegan, transcribe on
-//  longPressEnded via OpenAI Whisper API, write result to AgentState.lastTranscript,
-//  then post .transcriptReady for AgentSession to consume.
+//  Voice pipeline: record on .longPressBegan, transcribe via OpenAI Whisper on
+//  .longPressEnded, post .transcriptReady.
 //
-//  Demo mode: if ANTHROPIC_NOTCH_DEMO_PROMPT is set and no recording happened,
-//  the env var is used as the transcript so the end-to-end loop works without
-//  a microphone.
+//  Demo mode: ANTHROPIC_NOTCH_DEMO_PROMPT substitutes when no audio is captured.
 //
 
 import AVFoundation
@@ -168,26 +164,19 @@ public final class VoiceRecordingService {
     }
 
     private func transcribeWithOpenAI(audioURL: URL) async throws -> String {
-        guard let apiKey = Secrets.openAIAPIKey else {
-            throw TranscriptionError.missingAPIKey
-        }
+        guard let apiKey = Secrets.openAIAPIKey else { throw TranscriptionError.missingAPIKey }
 
         let audioData = try Data(contentsOf: audioURL)
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
-
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
-        body.append("whisper-1\r\n".data(using: .utf8)!)
-
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n".data(using: .utf8)!)
-        body.append("en\r\n".data(using: .utf8)!)
-
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n".data(using: .utf8)!)
-        body.append("Computer command for a Mac agent. App names, URLs, system actions.\r\n".data(using: .utf8)!)
-
+        func appendField(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+        appendField("model", "whisper-1")
+        appendField("language", "en")
+        appendField("prompt", "Computer command for a Mac agent. App names, URLs, system actions.")
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
@@ -201,13 +190,9 @@ public final class VoiceRecordingService {
         request.httpBody = body
 
         let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let http = response as? HTTPURLResponse else {
-            throw TranscriptionError.invalidResponse
-        }
+        guard let http = response as? HTTPURLResponse else { throw TranscriptionError.invalidResponse }
         guard http.statusCode == 200 else {
-            let responseBody = String(data: data, encoding: .utf8) ?? ""
-            log.error("openai whisper status=\(http.statusCode) body=\(responseBody)")
+            log.error("openai whisper status=\(http.statusCode) body=\(String(data: data, encoding: .utf8) ?? "")")
             throw TranscriptionError.httpError(http.statusCode)
         }
 

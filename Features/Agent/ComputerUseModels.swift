@@ -1,9 +1,7 @@
 //
 //  ComputerUseModels.swift
-//  Agent in the Notch
 //
-//  Codable types for Anthropic Messages API with computer-use beta tool.
-//  Schema reference: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
+//  Codable types for Anthropic Messages API with the computer-use beta tool.
 //
 
 import Foundation
@@ -11,7 +9,6 @@ import Foundation
 public enum AnthropicModel {
     public static let haiku45 = "claude-haiku-4-5-20251001"
     public static let sonnet46 = "claude-sonnet-4-6"
-    public static let opus47 = "claude-opus-4-7"
 }
 
 /// Anthropic prompt cache marker. Server caches everything up to and including
@@ -58,7 +55,6 @@ public struct AnthropicMessageRequest: Codable, Sendable {
     public var system: [SystemBlock]?
     public var messages: [Message]
     public var tools: [Tool]
-    public var toolChoice: ToolChoice?
     public var thinking: ThinkingConfig?
 
     public init(
@@ -67,7 +63,6 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         system: [SystemBlock]?,
         messages: [Message],
         tools: [Tool],
-        toolChoice: ToolChoice? = nil,
         thinking: ThinkingConfig? = nil
     ) {
         self.model = model
@@ -75,31 +70,19 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         self.system = system
         self.messages = messages
         self.tools = tools
-        self.toolChoice = toolChoice
         self.thinking = thinking
     }
 
     enum CodingKeys: String, CodingKey {
-        case model
+        case model, system, messages, tools, thinking
         case maxTokens = "max_tokens"
-        case system
-        case messages
-        case tools
-        case toolChoice = "tool_choice"
-        case thinking
-    }
-
-    public struct ToolChoice: Codable, Sendable {
-        public var type: String // "auto" | "any" | "tool" | "none"
-        public init(type: String) { self.type = type }
     }
 }
 
 public enum Tool: Sendable {
-    /// `toolType` is the wire-protocol string Anthropic expects (e.g.
-    /// "computer_20250124" for Haiku 4.5, "computer_20251124" for Sonnet 4.6
-    /// and Opus 4.x). Must match the `computer-use-*` beta header on the
-    /// request — see `AgentModel.computerUseToolType`.
+    /// `toolType` is the Anthropic wire-protocol string (e.g. "computer_20250124"
+    /// for Haiku 4.5, "computer_20251124" for Sonnet 4.6). MUST match the
+    /// `computer-use-*` beta header — see `AgentModel.computerUseToolType`.
     case computer(displayWidth: Int, displayHeight: Int, displayNumber: Int?, cache: Bool = false, toolType: String)
     case custom(name: String, description: String, inputSchema: JSON, cache: Bool = false)
 

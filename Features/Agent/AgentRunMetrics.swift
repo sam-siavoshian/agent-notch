@@ -1,8 +1,3 @@
-//
-//  AgentRunMetrics.swift
-//  Agent in the Notch
-//
-
 import Foundation
 
 public struct AgentRunMetricsRecord: Codable, Sendable {
@@ -37,51 +32,18 @@ public func printRunMetrics(_ r: AgentRunMetricsRecord) {
     if let data = try? metricsEncoder.encode(r), let json = String(data: data, encoding: .utf8) {
         print("[INFO]  [metrics] run \(json)")
     }
-    Task { await AgentRunMetricsStore.shared.append(r) }
-}
-
-public actor AgentRunMetricsStore {
-    public static let shared = AgentRunMetricsStore()
-
-    public let capacity: Int
-    private var buffer: [AgentRunMetricsRecord] = []
-
-    public init(capacity: Int = 50) {
-        self.capacity = capacity
-    }
-
-    public func append(_ record: AgentRunMetricsRecord) {
-        buffer.append(record)
-        if buffer.count > capacity {
-            buffer.removeFirst(buffer.count - capacity)
-        }
-    }
-
-    /// Newest first.
-    public func recentRuns(limit: Int = 50) -> [AgentRunMetricsRecord] {
-        let slice = buffer.suffix(min(limit, buffer.count))
-        return Array(slice.reversed())
-    }
-
-    public func clear() {
-        buffer.removeAll()
-    }
 }
 
 // MARK: - Per-turn harness detail
 
-/// One Anthropic request/response inside a multi-turn harness run. Captures
-/// usage tokens so prompt caching can be verified end to end, plus the tool
-/// calls the model emitted that turn and a preview of their results.
+/// One Anthropic request/response inside a multi-turn harness run. Token usage
+/// confirms prompt caching is firing; toolCalls + previews drive the DevTools
+/// pane.
 public struct HarnessTurnRecord: Sendable, Identifiable {
     public let id: UUID
     public let turnIndex: Int
     public let model: String
-    public let requestedAt: Date
-    public let respondedAt: Date?
     public let stopReason: String?
-    /// Anthropic usage (from response.usage). cache_read_input_tokens +
-    /// cache_creation_input_tokens confirm prompt caching is firing.
     public let inputTokens: Int?
     public let outputTokens: Int?
     public let cacheReadInputTokens: Int?
@@ -92,8 +54,6 @@ public struct HarnessTurnRecord: Sendable, Identifiable {
         id: UUID = UUID(),
         turnIndex: Int,
         model: String,
-        requestedAt: Date,
-        respondedAt: Date?,
         stopReason: String?,
         inputTokens: Int?,
         outputTokens: Int?,
@@ -104,8 +64,6 @@ public struct HarnessTurnRecord: Sendable, Identifiable {
         self.id = id
         self.turnIndex = turnIndex
         self.model = model
-        self.requestedAt = requestedAt
-        self.respondedAt = respondedAt
         self.stopReason = stopReason
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
@@ -190,9 +148,8 @@ public struct HarnessRunDetail: Sendable, Identifiable {
     }
 }
 
-/// In-memory ring of the last `capacity` harness runs, with the per-turn
-/// payload the Dev Tools "Harness Detail" pane needs to verify prompt caching
-/// and inspect tool dispatch.
+/// In-memory ring of the last `capacity` harness runs, read by the Dev Tools
+/// "Harness Detail" pane.
 public actor HarnessRunDetailStore {
     public static let shared = HarnessRunDetailStore()
 
@@ -226,9 +183,5 @@ public actor HarnessRunDetailStore {
         let take = min(max(limit, 0), runs.count)
         guard take > 0 else { return [] }
         return Array(runs.suffix(take).reversed())
-    }
-
-    public func clear() {
-        runs.removeAll()
     }
 }
