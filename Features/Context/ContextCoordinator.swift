@@ -174,6 +174,9 @@ public final class ContextCoordinator: RecentActivityContext {
         let metadata = await MainActor.run {
             ContextWindowMetadataReader.current()
         }
+        let bundleID = await MainActor.run {
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        }
         guard !Self.shouldIgnoreCapture(metadata) else {
             log.debug("ignored \(trigger.rawValue) capture for AgentNotch UI")
             return
@@ -204,6 +207,22 @@ public final class ContextCoordinator: RecentActivityContext {
                 height: snapshot.height,
                 recognizedText: recognizedText
             )
+
+            // Record the current window as a generic resource so the long-press
+            // Selector can resolve deictic references like "the doc I had open"
+            // even after the user has switched apps. No adapter required.
+            // ResourceIndex dedups by URI and refreshes lastSeen on repeats.
+            let trimmedTitle = metadata.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTitle.isEmpty {
+                let resource = CResourceRef(
+                    kind: "window",
+                    uri: "\(bundleID)//\(trimmedTitle)",
+                    label: trimmedTitle,
+                    app: metadata.appName,
+                    lastSeen: contextSnapshot.capturedAt
+                )
+                ResourceIndex.shared.record(resource)
+            }
 
             // Dirty-region classification still drives memory hygiene and the
             // Dev Tools dirty pane. Phase 5b removed the Gemini fan-out that
