@@ -288,7 +288,7 @@ public final class AnchorRecorder {
         // Drop empty / overlong commands.
         guard !cmd.isEmpty, cmd.count <= 200 else { return nil }
         // Heuristic: first token must look command-ish (short, alpha-ish).
-        let firstToken = cmd.split(separator: " ").first.map(String.init) ?? ""
+        let firstToken = cmd.split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
         guard !firstToken.isEmpty, firstToken.count <= 20,
               firstToken.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == "." || $0 == "/" }) else {
             return nil
