@@ -32,7 +32,6 @@ Features/
   Context/            — screenshot capture, OCR, Gemini, memory
   Agent/              — Sonnet wiring, computer-use harness
   Onboarding/         — first-launch permission prompts
-  Music/              — Spotify now-playing tab + lyrics
 vendored/             — read-only reference code (do not edit, do not include in target)
 ```
 
@@ -63,45 +62,34 @@ Features/Cursor/
 Features/Context/
 ├── ContextCoordinator.swift    — entry point; implements RecentActivityContext
 ├── ContextClickMonitor.swift   — debounced click hook (Accessibility API)
-├── ContextAppSwitchMonitor.swift — capture trigger on NSWorkspace.didActivateApplicationNotification
 ├── ContextSnapshotStore.swift  — rolling buffer of screenshots (max 20)
 ├── ContextMemoryStore.swift    — learned UI memory on disk
 ├── ContextOCRService.swift     — native OCR via Vision framework
 ├── ContextGeminiObservationService.swift
-├── ContextGeminiObservationService+Parsing.swift  — response parsing
-├── ContextGeminiObservationService+Payloads.swift — request payload construction
-├── ContextGeminiObservationService+Prompts.swift  — prompt templates for the four analysis lanes
 ├── ContextGeminiObservationModels.swift
 ├── ContextActivationBuilder.swift  — buffer → compact prompt packet
 ├── ContextMemoryRenderer.swift
 ├── ContextModels.swift
 ├── ContextWindowMetadataReader.swift
 ├── ContextTextSignalFilter.swift
-└── ContextAIObservationLog.swift   — in-memory Gemini event log + ContextGeminiObservationGate (rate limiter)
+├── ContextAIObservationLog.swift   — in-memory Gemini event log + ContextGeminiObservationGate (rate limiter)
+├── ContextDevToolsWindowController.swift — separate Dev Tools window for telemetry (Cmd+Option+D)
+├── ContextDebugView.swift          — Dev Tools console: pause/resume gathering, overview, injected packet, captures/OCR, Gemini I/O, learned memory, metrics
+└── ContextPerformanceReporter.swift
 
 Features/Agent/
-├── VoiceRecordingService.swift — records mic on .longPressBegan; transcribes via OpenAI Whisper API on .longPressEnded; posts .transcriptReady
+├── VoiceRecordingService.swift — records mic on .longPressBegan; uploads to OpenAI Whisper API (whisper-1) on .longPressEnded; posts .transcriptReady
 ├── AgentSession.swift          — subscribes to .transcriptReady; reads lastTranscript; fires one harness turn
 ├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop (model: claude-sonnet-4-6)
 ├── ComputerUseModels.swift     — Codable API types
 ├── AnthropicClient.swift       — URLSession API client
 ├── ToolDispatcher.swift        — tool calls → CGEvent actions; handles all computer-use actions incl. F-keys + emoji
-├── AgentRunMetrics.swift       — per-run metrics logging
-└── TextToSpeechService.swift   — AVSpeechSynthesizer wrapper; TextToSpeechService.shared.speak(_:) / .stop()
+└── AgentRunMetrics.swift       — per-run metrics logging
 
 Features/Onboarding/
 ├── OnboardingView.swift        — three permission cards
 ├── OnboardingWindowController.swift
-├── PermissionChecker.swift     — live permission polling
-└── LucideIcons.swift           — Lucide icon name constants used by onboarding cards
-
-Features/Music/
-├── NotchMusicView.swift        — Spotify tab: now-playing card + lyrics scroll
-├── SpotifyController.swift     — reads Spotify state via AppleScript; subscribes to com.spotify.client.PlaybackStateChanged
-├── SpotifyNowPlayingView.swift — now-playing row: album art, track name, artist
-├── LyricsView.swift            — scrolling lyrics display
-├── LyricsService.swift         — fetches lyrics for the current track
-└── AppleScriptHelper.swift     — thin AppleScript execution wrapper
+└── PermissionChecker.swift     — live permission polling
 ```
 
 Do not create:

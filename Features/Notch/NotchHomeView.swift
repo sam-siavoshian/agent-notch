@@ -119,6 +119,7 @@ struct NotchHomeView: View {
                     .help("Drag onto the privacy list in System Settings to add AgentNotch")
                 GrantPermissionButton(target: fix)
             }
+            QuitIconButton()
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -232,6 +233,43 @@ struct NotchHomeView: View {
             case .screenRecording, .microphone: return true
             }
         }
+    }
+}
+
+// MARK: - Quit icon button
+//
+// Tiny power glyph that terminates AgentNotch. Lives in the status hero so
+// it is one click away without diving into Settings. Hover tints red to
+// signal destructive intent; press scales down for tactile feedback.
+
+private struct QuitIconButton: View {
+    @State private var hover = false
+    @State private var pressed = false
+
+    var body: some View {
+        Button {
+            NSApp.terminate(nil)
+        } label: {
+            Image(systemName: "power")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(hover ? SoftPill.Status.red : SoftPill.Text.muted)
+                .frame(width: 18, height: 18)
+                .background(
+                    Circle().fill(
+                        hover ? SoftPill.Status.red.opacity(0.14) : SoftPill.Surface.inset
+                    )
+                )
+                .overlay(
+                    Circle().stroke(
+                        hover ? SoftPill.Status.red.opacity(0.40) : Color.clear,
+                        lineWidth: 0.6
+                    )
+                )
+                .scaleEffect(pressed ? 0.90 : (hover ? 1.05 : 1.0))
+        }
+        .buttonStyle(PressTrackingStyle(pressed: $pressed))
+        .onHover { h in withAnimation(.easeOut(duration: 0.14)) { hover = h } }
+        .help("Quit Agent in the Notch")
     }
 }
 

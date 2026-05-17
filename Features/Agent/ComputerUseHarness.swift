@@ -251,7 +251,10 @@ public final class ComputerUseHarness {
                 }
                 let status = err.status.map(String.init) ?? "nil"
                 log.error("harness.api_error run_id=\(runID.uuidString) turn=\(turn) status=\(status) body=\(err.body ?? "nil")")
-                AgentState.shared.set(.error(message: "Anthropic error: \(status)"))
+                let snippet = (err.body ?? "")
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .prefix(400)
+                AgentState.shared.set(.error(message: "Anthropic \(status): \(snippet)"))
                 await recordMetrics(status: "anthropic_error", errorMessage: "\(err)")
                 return
             } catch {

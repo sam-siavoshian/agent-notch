@@ -51,6 +51,7 @@ struct NotchContentView: View {
     @State private var isOpen = false
     @State private var closeTask: Task<Void, Never>?
     @State private var hoverTask: Task<Void, Never>?
+    @ObservedObject private var agentState = AgentState.shared
 
     private var selectedTab: NotchTab { NotchTab(rawValue: selectedTabRaw) ?? .home }
     private var selectedTabBinding: Binding<NotchTab> {
@@ -60,18 +61,38 @@ struct NotchContentView: View {
     private let closedWidth: CGFloat = 180
     private let closedHeight: CGFloat = 30
 
+    private let liveWidth: CGFloat = 280
+    private let liveHeight: CGFloat = 36
+
     private let openWidth: CGFloat = NotchSizing.openWidth
     /// Measured height of the open content — flows from a GeometryReader in
     /// openContent. Springs to its new value when sections expand/collapse.
     @State private var measuredOpenHeight: CGFloat = 200
 
-    private var width: CGFloat { isOpen ? openWidth : closedWidth }
-    private var height: CGFloat {
-        isOpen
-            ? min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax)
-            : closedHeight
+    /// True while the agent is actively doing work the user should see at a
+    /// glance. Drives the intermediate "live activity" notch size.
+    private var liveActive: Bool {
+        switch agentState.activity {
+        case .thinking, .toolCall: return true
+        default: return false
+        }
     }
-    private var cornerRadius: CGFloat { isOpen ? 22 : 10 }
+
+    private var width: CGFloat {
+        if isOpen { return openWidth }
+        if liveActive { return liveWidth }
+        return closedWidth
+    }
+    private var height: CGFloat {
+        if isOpen {
+            return min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax)
+        }
+        return liveActive ? liveHeight : closedHeight
+    }
+    private var cornerRadius: CGFloat {
+        if isOpen { return 22 }
+        return liveActive ? 16 : 10
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -100,8 +121,13 @@ struct NotchContentView: View {
             // lock-step, so nothing appears before the box has grown.
             ClosedNotchView()
                 .frame(width: closedWidth, height: closedHeight)
-                .opacity(isOpen ? 0 : 1)
-                .allowsHitTesting(!isOpen)
+                .opacity(isOpen || liveActive ? 0 : 1)
+                .allowsHitTesting(!isOpen && !liveActive)
+
+            NotchLiveActivityView()
+                .frame(width: liveWidth, height: liveHeight)
+                .opacity(!isOpen && liveActive ? 1 : 0)
+                .allowsHitTesting(false)
 
             openContent
                 .padding(.horizontal, 10)
@@ -161,6 +187,8 @@ struct NotchContentView: View {
                    value: isOpen)
         .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
                    value: measuredOpenHeight)
+        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
+                   value: liveActive)
         .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
             // Update even while closed so the first open animates to the
             // right size in a single motion (no two-step pop).

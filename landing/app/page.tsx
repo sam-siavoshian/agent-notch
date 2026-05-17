@@ -246,7 +246,7 @@ export default function Home() {
           free. open source. yours.
         </p>
         <div className="cta-row">
-          <a className="pill pill--dark" href="#">
+          <a className="pill pill--dark" href="/AgentNotch.dmg" download>
             download for mac
           </a>
           <a className="pill pill--soft" href="#github">

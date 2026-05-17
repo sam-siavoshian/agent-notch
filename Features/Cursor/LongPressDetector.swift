@@ -2,15 +2,27 @@
 //  LongPressDetector.swift
 //  Agent in the Notch
 //
-//  Session-level CGEventTap that detects a left-mouse-button hold of 350ms+.
-//  Emits .longPressBegan when threshold crosses, .longPressEnded on release.
-//  Swallows the eventual mouseUp so the underlying app doesn't fire a click.
+//  Long-press detector with drag rejection.
 //
-//  Tradeoff: the initial mouseDown is passed through immediately (otherwise
-//  every click pays 350ms latency), which means an app that latches state on
-//  mouseDown alone (rare on macOS — most fire on mouseUp) will appear stuck
-//  until the user clicks elsewhere. Long-press is meant to be performed over
-//  the cursor companion or a neutral area, not on a UI control.
+//  Fires .longPressBegan when the user holds the left mouse button down for
+//  at least `holdThreshold` seconds AND the cursor has moved less than
+//  `movementThreshold` points since mouseDown. Any larger movement during
+//  the hold cancels the gesture — that's how we distinguish "I want to talk"
+//  from drag-select, text selection, or window drag.
+//
+//  Why not hardware Force Touch:
+//    - NSEvent .pressure events are only delivered to the focused app's first
+//      responder. Global monitors do NOT receive them.
+//    - CGEvent's `kCGMouseEventPressure` field is unreliable across hardware:
+//      regular USB mice report constant 1.0 on every drag, non-FT trackpads
+//      report ~0.166. We can't threshold reliably without device detection.
+//    - Doing real global force-click detection requires private
+//      MultitouchSupport.framework. Out of scope for hackathon.
+//
+//  Tradeoff (unchanged from earlier time-based version): the initial
+//  mouseDown is passed through immediately so every click does not pay
+//  latency. mouseUp is swallowed only when we have already fired
+//  longPressBegan, so the underlying app does not see a phantom click.
 //
 
 import ApplicationServices
@@ -23,11 +35,17 @@ private let log = Log(category: "longpress")
 final class LongPressDetector {
     private enum State {
         case idle
-        case pressing(timer: DispatchSourceTimer)
+        case pressing(timer: DispatchSourceTimer, startLocation: CGPoint)
+        case cancelled  // moved too far; stay here until mouseUp
         case listening
     }
 
-    private let threshold: TimeInterval = 0.20
+    /// Minimum hold time before we treat it as a long-press.
+    private let holdThreshold: TimeInterval = 0.35
+    /// Maximum total cursor displacement (in points) during the hold.
+    /// Anything beyond this cancels — that's a drag, not a press.
+    private let movementThreshold: CGFloat = 6.0
+
     private let queue = DispatchQueue(label: "agentnotch.longpress", qos: .userInteractive)
     private var lock = os_unfair_lock_s()
     private var state: State = .idle
@@ -49,6 +67,8 @@ final class LongPressDetector {
 
         let mask = (1 << CGEventType.leftMouseDown.rawValue)
                  | (1 << CGEventType.leftMouseUp.rawValue)
+                 | (1 << CGEventType.leftMouseDragged.rawValue)
+                 | (1 << CGEventType.mouseMoved.rawValue)
 
         let opaqueSelf = Unmanaged.passUnretained(self).toOpaque()
 
@@ -76,7 +96,7 @@ final class LongPressDetector {
 
         self.eventTap = tap
         self.runLoopSource = source
-        log.info("longpress.ready ax_trusted=\(trusted) tap_installed=true threshold_s=\(self.threshold)")
+        log.info("longpress.ready ax_trusted=\(trusted) tap_installed=true hold_s=\(self.holdThreshold) movement_pt=\(self.movementThreshold)")
     }
 
     func stop() {
@@ -101,14 +121,18 @@ final class LongPressDetector {
             return Unmanaged.passUnretained(event)
 
         case .leftMouseDown:
-            handleMouseDown()
+            handleMouseDown(at: event.location)
+            return Unmanaged.passUnretained(event)
+
+        case .leftMouseDragged, .mouseMoved:
+            handleMovement(to: event.location)
             return Unmanaged.passUnretained(event)
 
         case .leftMouseUp:
             if handleMouseUp() {
                 return Unmanaged.passUnretained(event)
             } else {
-                return nil // swallow
+                return nil // swallow — user was talking, not clicking
             }
 
         default:
@@ -116,22 +140,40 @@ final class LongPressDetector {
         }
     }
 
-    private func handleMouseDown() {
-        log.debug("mouseDown")
+    private func handleMouseDown(at location: CGPoint) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
 
-        if case .pressing(let oldTimer) = state {
+        if case .pressing(let oldTimer, _) = state {
             oldTimer.cancel()
         }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + threshold)
+        timer.schedule(deadline: .now() + holdThreshold)
         timer.setEventHandler { [weak self] in
             self?.onThresholdCrossed()
         }
-        state = .pressing(timer: timer)
+        state = .pressing(timer: timer, startLocation: location)
         timer.resume()
+    }
+
+    private func handleMovement(to location: CGPoint) {
+        os_unfair_lock_lock(&lock)
+        guard case .pressing(let timer, let start) = state else {
+            os_unfair_lock_unlock(&lock)
+            return
+        }
+        let dx = location.x - start.x
+        let dy = location.y - start.y
+        let distance = (dx * dx + dy * dy).squareRoot()
+        if distance > movementThreshold {
+            timer.cancel()
+            state = .cancelled
+            os_unfair_lock_unlock(&lock)
+            log.debug("long-press cancelled by movement distance=\(distance)pt")
+            return
+        }
+        os_unfair_lock_unlock(&lock)
     }
 
     /// Returns true if the mouseUp event should pass through to the OS.
@@ -140,10 +182,13 @@ final class LongPressDetector {
         defer { os_unfair_lock_unlock(&lock) }
 
         switch state {
-        case .pressing(let timer):
+        case .pressing(let timer, _):
             timer.cancel()
             state = .idle
             return true // quick click, let OS handle
+        case .cancelled:
+            state = .idle
+            return true // was a drag, let OS handle the up
         case .listening:
             state = .idle
             DispatchQueue.main.async {
@@ -164,7 +209,7 @@ final class LongPressDetector {
         state = .listening
         os_unfair_lock_unlock(&lock)
 
-        log.info("threshold crossed → posting longPressBegan")
+        log.info("hold threshold crossed without drag → longPressBegan")
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .longPressBegan, object: nil)
         }
