@@ -24,6 +24,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Agent in the Notch sends events to other apps when performing computer-use actions.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Agent in the Notch reads your calendar to show upcoming events in the notch.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Agent in the Notch team.</string>
 	<key>NSMicrophoneUsageDescription</key>

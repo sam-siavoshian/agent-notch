@@ -54,6 +54,7 @@ targets:
         NSMicrophoneUsageDescription: "Agent in the Notch listens to your voice when you long-press the cursor companion."
         NSAppleEventsUsageDescription: "Agent in the Notch sends events to other apps when performing computer-use actions."
         NSScreenCaptureDescription: "Agent in the Notch captures screenshots on click events to build short context summaries for the agent."
+        NSCalendarsFullAccessUsageDescription: "Agent in the Notch reads your calendar to show upcoming events in the notch."
     entitlements:
       path: App/AgentNotch.entitlements
       properties:
