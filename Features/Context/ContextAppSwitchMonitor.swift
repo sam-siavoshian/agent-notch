@@ -7,7 +7,6 @@
 //
 
 import AppKit
-import Foundation
 
 final class ContextAppSwitchMonitor {
     private let onSwitch: @Sendable (String) -> Void
