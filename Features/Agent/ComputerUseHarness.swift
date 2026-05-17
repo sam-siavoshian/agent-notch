@@ -564,7 +564,7 @@ public final class ComputerUseHarness {
         )
         let applescript: Tool = .custom(
             name: "applescript",
-            description: "Run an AppleScript via NSAppleScript. ALLOWLISTED target apps only: Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. Use for one-shot intents like 'tell application \"Spotify\" to play track \"...\"' or 'tell application \"Notes\" to make new note...'. Far faster than clicking the UI.",
+            description: "Run an AppleScript via NSAppleScript. ALLOWLISTED target apps only: Safari, Firefox, Terminal, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. Use for one-shot intents like 'tell application \"Spotify\" to play track \"...\"' or 'tell application \"Notes\" to make new note...'. Far faster than clicking the UI.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -671,6 +671,12 @@ public final class ComputerUseHarness {
           5. ax_query + ax_press / ax_set_value — for buttons, links, and text fields you can name. Faster and more reliable than clicking pixels.
           6. menu_shortcut — for any menu item; sends the registered keyboard shortcut instead of clicking the menu.
           7. computer — vision + click/type/scroll. ONLY when nothing above applies.
+
+        Application preferences — when a tool choice is flexible, apply these rules:
+        - Commands / shell tasks: use Terminal.app. AppleScript: `tell application "Terminal" to do script "<cmd>"`. If Terminal is already open, target the front window. Never use iTerm2, Ghostty, or other terminals unless the user explicitly names one.
+        - Web browsing: prefer Safari. Fall back to Firefox only if Safari cannot complete the task (e.g. a Firefox-specific extension is required). Never open Chrome unless the user explicitly asks for it.
+        - Text editing: prefer terminal editors (vim, nano) launched inside Terminal over GUI apps (TextEdit, VSCode, Cursor). Open a Terminal window, then `vim <path>` or `nano <path>`. Only use a GUI editor if the user names one.
+        - Presenting / viewing a file (not editing): use open_url with a file:// URI (e.g. `file:///Users/you/doc.pdf`) — macOS routes it to the default app for that type. Never open Finder and double-click when open_url can do it in one call.
 
         Plan-then-act: on turn 1, output one short sentence stating the goal and your first concrete action, THEN your spoken affirmation, THEN call the tool. Keep the spoken affirmation under 9 words — it will be read aloud (e.g. "Opening that now." or "On it."). After turn 1, do NOT write user-facing prose — your work product is tool calls, not commentary. A teammate auditing the trace later reads tool calls and outcomes, not your inner monologue.
 
