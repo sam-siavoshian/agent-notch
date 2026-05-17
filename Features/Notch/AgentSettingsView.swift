@@ -26,6 +26,7 @@ struct AgentSettingsView: View {
             reasoningEffortRow
             cursorColorRow
             preferencesRow
+            apiKeysSection
             advancedSection
             quitRow
             savedBadge
@@ -155,7 +156,6 @@ struct AgentSettingsView: View {
             if showAdvanced {
                 VStack(alignment: .leading, spacing: 7) {
                     systemPromptEditor
-                    apiKeysSection
                     diagnosticsRow
                     if !contextHealth.isEmpty {
                         Text(contextHealth)
@@ -205,15 +205,23 @@ struct AgentSettingsView: View {
     }
 
     private var apiKeysSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("API Keys")
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(SoftPill.Text.secondary)
-                .padding(.leading, 2)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("API Keys")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(SoftPill.Text.secondary)
+                Text("· stored in macOS Keychain")
+                    .font(.system(size: 9))
+                    .foregroundStyle(SoftPill.Text.muted)
+                Spacer()
+            }
+            .padding(.leading, 2)
+
             pillKeyField(
                 "OpenAI",
-                placeholder: openAIKeyIsSet ? "(configured)" : "sk-proj-…",
-                draft: $openAIKeyDraft
+                placeholder: "sk-proj-…",
+                draft: $openAIKeyDraft,
+                isSet: openAIKeyIsSet
             ) {
                 Secrets.setOpenAIAPIKey(openAIKeyDraft)
                 openAIKeyDraft = ""
@@ -222,8 +230,9 @@ struct AgentSettingsView: View {
             }
             pillKeyField(
                 "Gemini",
-                placeholder: geminiKeyIsSet ? "(configured)" : "AIzaSy…",
-                draft: $geminiKeyDraft
+                placeholder: "AIzaSy…",
+                draft: $geminiKeyDraft,
+                isSet: geminiKeyIsSet
             ) {
                 Secrets.setGeminiAPIKey(geminiKeyDraft)
                 geminiKeyDraft = ""
@@ -232,8 +241,9 @@ struct AgentSettingsView: View {
             }
             pillKeyField(
                 "Anthropic",
-                placeholder: anthropicKeyIsSet ? "(configured)" : "sk-ant-…",
-                draft: $anthropicKeyDraft
+                placeholder: "sk-ant-…",
+                draft: $anthropicKeyDraft,
+                isSet: anthropicKeyIsSet
             ) {
                 Secrets.setAnthropicAPIKey(anthropicKeyDraft)
                 anthropicKeyDraft = ""
@@ -248,17 +258,27 @@ struct AgentSettingsView: View {
         _ label: String,
         placeholder: String,
         draft: Binding<String>,
+        isSet: Bool,
         onSave: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 6) {
+        let trimmed = draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canSave = !trimmed.isEmpty
+
+        HStack(spacing: 8) {
+            StatusBadge(
+                color: isSet ? SoftPill.Status.green : SoftPill.Status.gray,
+                symbol: isSet ? "checkmark" : "key.fill",
+                size: 14
+            )
             Text(label)
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundStyle(SoftPill.Text.secondary)
-                .frame(width: 54, alignment: .trailing)
-            SecureField(placeholder, text: draft)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(SoftPill.Text.primary)
+                .frame(width: 56, alignment: .leading)
+            SecureField(isSet ? "configured · paste to replace" : placeholder, text: draft)
+                .textFieldStyle(.plain)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(SoftPill.Text.primary)
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .background(
                     PillBackground(
@@ -266,10 +286,8 @@ struct AgentSettingsView: View {
                         cornerRadius: 8
                     )
                 )
-                .onSubmit {
-                    guard !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    onSave()
-                }
+                .onSubmit { if canSave { onSave() } }
+            SaveKeyButton(enabled: canSave, action: onSave)
         }
     }
 
@@ -350,5 +368,51 @@ private struct SettingRow<Content: View>: View {
             Spacer(minLength: 6)
             content
         }
+    }
+}
+
+private struct SaveKeyButton: View {
+    let enabled: Bool
+    let action: () -> Void
+    @State private var hovered = false
+    @State private var pressed = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 8, weight: .bold))
+                Text("Save")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(enabled ? 1.0 : 0.45))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                ZStack {
+                    Capsule(style: .continuous)
+                        .fill(SoftPill.CTA.gradient)
+                        .opacity(enabled ? 1.0 : 0.35)
+                    Capsule(style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6)
+                }
+            )
+            .shadow(
+                color: SoftPill.CTA.from.opacity(enabled ? (hovered ? 0.55 : 0.30) : 0.0),
+                radius: hovered ? 10 : 6,
+                x: 0, y: hovered ? 4 : 2
+            )
+            .scaleEffect(pressed ? 0.96 : (hovered ? 1.03 : 1.0))
+            .animation(.easeOut(duration: 0.12), value: pressed)
+            .animation(.easeOut(duration: 0.18), value: hovered)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { hovered = $0 && enabled }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in if enabled { pressed = true } }
+                .onEnded { _ in pressed = false }
+        )
     }
 }
