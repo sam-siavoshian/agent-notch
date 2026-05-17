@@ -451,9 +451,9 @@ private struct DraggableAgentIcon: View {
             .animation(.spring(response: 0.25, dampingFraction: 0.75), value: hover)
             .onHover { h in hover = h }
             .onDrag {
-                let url = Bundle.main.bundleURL as NSURL
-                let provider = NSItemProvider(object: url)
-                provider.suggestedName = Bundle.main.bundleURL.lastPathComponent
+                let bundleURL = Bundle.main.bundleURL
+                let provider = NSItemProvider(object: bundleURL as NSURL)
+                provider.suggestedName = bundleURL.lastPathComponent
                 return provider
             } preview: {
                 icon.frame(width: 80, height: 80)
