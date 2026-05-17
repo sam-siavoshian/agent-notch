@@ -16,6 +16,14 @@ struct EvalRunnerCLI {
                 try await RunnerCommands.live()
             case "list":
                 try RunnerCommands.list()
+            case "mock-active-task":
+                try await PromptCategoryCommands.mockActiveTask()
+            case "live-active-task":
+                try await PromptCategoryCommands.liveActiveTask()
+            case "mock-recipe-naming":
+                try await PromptCategoryCommands.mockRecipeNaming()
+            case "live-recipe-naming":
+                try await PromptCategoryCommands.liveRecipeNaming()
             case "help", "--help", "-h":
                 printUsage()
             default:
@@ -34,9 +42,13 @@ struct EvalRunnerCLI {
         Usage: eval-runner <command>
 
         Commands:
-          mock       Run all selector fixtures through MockLLMClient (no network)
-          live       Run all selector fixtures through LiveMercuryClient (OpenRouter)
-          list       List discovered fixtures
+          mock                    Run selector fixtures through MockLLMClient (no network)
+          live                    Run selector fixtures through LiveMercuryClient (OpenRouter)
+          list                    List discovered selector fixtures
+          mock-active-task        Run active_task_updater fixtures through MockLLMClient
+          live-active-task        Run active_task_updater fixtures through OpenRouter
+          mock-recipe-naming      Run recipe_naming fixtures through MockLLMClient
+          live-recipe-naming      Run recipe_naming fixtures through OpenRouter
         """)
     }
 }
