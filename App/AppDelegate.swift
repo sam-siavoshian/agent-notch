@@ -44,6 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ClipboardWatcher.shared.start()
         DwellTimer.shared.start()
+        // Phase 3 — sequence inference + rolling active_task synthesis.
+        // AnchorRecorder is pure-local (no Mercury inside its tick), so it
+        // always runs. ActiveTaskUpdater calls OpenRouter each tick, so we
+        // gate it behind the mercuryEnabled setting to avoid surprise spend.
+        AnchorRecorder.shared.start()
+        if AgentSettingsStore.shared.mercuryEnabled {
+            ActiveTaskUpdater.shared.start()
+        } else {
+            log.info("ActiveTaskUpdater disabled by settings (mercuryEnabled=false)")
+        }
         // Keep polling TCC state after onboarding so the Notch UI can show a
         // banner the moment a permission is revoked / not yet granted.
         PermissionChecker.shared.startPolling()
