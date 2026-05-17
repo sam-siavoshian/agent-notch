@@ -162,10 +162,12 @@ public actor ToolDispatcher {
 
         case "scroll":
             let p = try requireCoordinate(input)
-            let dy = input.objectValue?["scroll_amount"]?.intValue ?? 3
+            let requested = input.objectValue?["scroll_amount"]?.intValue ?? 3
             let direction = input.objectValue?["scroll_direction"]?.stringValue ?? "down"
-            postScroll(at: p, direction: direction, amount: dy)
-            return ok(toolUseId, "scrolled \(direction) by \(dy)")
+            let clicks = max(1, requested)
+            postScroll(at: p, direction: direction, amount: clicks)
+            let pixels = clicks * Self.pixelsPerScrollClick
+            return ok(toolUseId, "scrolled \(direction) \(clicks) click(s) ≈ \(pixels)px. If you need to move further, use scroll_amount=5+ (each click ≈ 100px).")
 
         case "wait":
             let ms = input.objectValue?["duration"]?.intValue ?? 250
@@ -346,22 +348,45 @@ public actor ToolDispatcher {
         up?.post(tap: .cghidEventTap)
     }
 
+    /// Anthropic computer-use spec: `scroll_amount` is a count of wheel
+    /// "clicks" (notches), not pixels. Previous implementation multiplied by
+    /// 3 in `.pixel` units, so `amount=3` produced just 9px of travel — barely
+    /// visible, and the model would emit another tiny scroll and another,
+    /// getting stuck. macOS wheel notches translate to roughly 100px in most
+    /// apps (Safari, Chrome, native AppKit views), so use that as the multiplier
+    /// and chunk the emission so apps that throttle large single deltas still
+    /// see smooth, continuous scroll.
+    private static let pixelsPerScrollClick: Int = 100
+    private static let scrollChunkPixels: Int = 50
+
     private func postScroll(at p: CGPoint, direction: String, amount: Int) {
         CGWarpMouseCursorPosition(p)
-        let sign: Int32
-        switch direction {
-        case "up":    sign = 1
-        case "down":  sign = -1
-        case "left":  sign = 1
-        case "right": sign = -1
-        default:      sign = -1
-        }
+
+        let clicks = max(1, amount) // protect against amount=0 no-ops
+        let totalPixels = clicks * Self.pixelsPerScrollClick
         let isVertical = (direction == "up" || direction == "down")
-        let yWheel = isVertical ? sign * Int32(amount) * 3 : 0
-        let xWheel = isVertical ? 0 : sign * Int32(amount) * 3
-        if let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: yWheel, wheel2: xWheel, wheel3: 0) {
-            event.post(tap: .cghidEventTap)
+        // CGEvent vertical wheel sign: positive y moves the content view UP
+        // (i.e. scrolls up). Horizontal: positive x scrolls left.
+        let sign: Int32 = (direction == "up" || direction == "left") ? 1 : -1
+
+        var remaining = totalPixels
+        while remaining > 0 {
+            let chunk = min(Self.scrollChunkPixels, remaining)
+            let y: Int32 = isVertical ? sign * Int32(chunk) : 0
+            let x: Int32 = isVertical ? 0 : sign * Int32(chunk)
+            if let event = CGEvent(
+                scrollWheelEvent2Source: nil,
+                units: .pixel,
+                wheelCount: 2,
+                wheel1: y,
+                wheel2: x,
+                wheel3: 0
+            ) {
+                event.post(tap: .cghidEventTap)
+            }
+            remaining -= chunk
         }
+        log.info("scroll dir=\(direction) clicks=\(clicks) pixels=\(totalPixels) at=\(Int(p.x)),\(Int(p.y))")
     }
 
     /// Type text. For strings > 4 chars with only ASCII OR `viaPaste == true`,
