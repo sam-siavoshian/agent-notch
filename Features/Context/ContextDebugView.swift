@@ -194,10 +194,14 @@ enum ContextDebugFormat {
         return "\(Int(interval / 3600))h ago"
     }
 
-    static func absoluteTimestamp(_ date: Date) -> String {
+    private static let absoluteFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
-        return formatter.string(from: date)
+        return formatter
+    }()
+
+    static func absoluteTimestamp(_ date: Date) -> String {
+        return absoluteFormatter.string(from: date)
     }
 }
