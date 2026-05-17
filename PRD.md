@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.2 (hackathon scope)
 **Owner:** Wyatt (notch & UI), Sam (cursor + computer use), Ashan (long-press + context)
-**Model:** Claude Sonnet (agent), Gemini multimodal (context summarizer), OpenAI Whisper API / `whisper-1` (voice)
+**Model:** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`, computer-use), Mercury 2 via OpenRouter (context selector), Gemini Flash Lite (background screen observer), OpenAI Whisper `whisper-1` (voice), OpenAI TTS (speech output)
 
 ---
 
@@ -118,9 +118,11 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 ## 8. Tech Stack
 
 - **Native Swift / SwiftUI** — notch UI, cursor overlay, OS-level click hooks, screenshot capture.
-- **Claude Sonnet** — primary agent.
-- **Gemini multimodal** — screenshot batch summarizer.
-- **OpenAI Whisper API (`whisper-1`)** — voice transcription. Requires `OPENAI_API_KEY`.
+- **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`) — computer-use agent. Requires `ANTHROPIC_API_KEY`.
+- **Mercury 2** (`inception/mercury-2` via OpenRouter) — context selector; distills L2–L5 + Gemini memory into a ≤600-token brief before each agent turn. Requires `OPENROUTER_API_KEY`.
+- **Gemini Flash Lite** (`gemini-3.1-flash-lite`) — continuous background screen observer; builds `SurfaceMemoryStore` + `CaptureStoryLog`. Requires `GEMINI_API_KEY`.
+- **OpenAI Whisper API (`whisper-1`)** — voice transcription (`language=en`, vocabulary prompt). Requires `OPENAI_API_KEY`.
+- **OpenAI TTS** — streaming spoken affirmations from the agent. Requires `OPENAI_API_KEY`.
 
 ## 9. Team & Responsibilities
 

@@ -24,6 +24,27 @@ Requires macOS 14+ with a notch (M-series MacBook). Microphone, automation, and 
 
 ---
 
+## CLI Tools
+
+Prefer modern tools over POSIX fallbacks:
+
+| Task | Use | Instead of |
+|---|---|---|
+| Search text in files | `rg` (ripgrep) | `grep -r` |
+| Find files by name/path | `fd` | `find` |
+| Search by AST / code structure | `ast-grep` | `grep` for symbol patterns |
+| Interactive fuzzy selection | `fzf` | manual `grep` pipelines |
+| In-place text substitution | `sd` or the Edit tool | `sed` |
+
+```bash
+rg "AgentState" --type swift                        # search Swift files for a symbol
+fd -e swift ContextDebug                            # find files matching a name
+ast-grep --lang swift -p 'func $NAME($_$$)'         # structural pattern search
+fd -e swift | fzf                                   # interactive file picker
+```
+
+---
+
 ## API Keys
 
 No keys are hardcoded. Resolution order: environment variable → Keychain (per-account under service `com.agentnotch.app`) → nil. See `Core/Secrets.swift`.
