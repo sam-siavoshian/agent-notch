@@ -49,12 +49,8 @@ public enum LocalBriefRenderer {
             }
         }
         // Entities: pull any active_task entities the transcript also mentions.
-        var entities: [CIntent.Entity] = []
-        if let entries = activeTask?.entities {
-            for ent in entries where lower.contains(ent.label.lowercased()) {
-                entities.append(ent)
-            }
-        }
+        let entities: [CIntent.Entity] = activeTask?.entities?
+            .filter { lower.contains($0.label.lowercased()) } ?? []
         return CIntent(
             verb: verb,
             target: target,
