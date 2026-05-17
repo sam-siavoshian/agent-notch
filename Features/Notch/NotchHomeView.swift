@@ -89,17 +89,19 @@ struct NotchHomeView: View {
     }
 
     private var statusHero: some View {
-        HStack(spacing: 8) {
+        let activity = state.activity
+        let hue = SoftPill.activityHue(activity)
+        return HStack(spacing: 8) {
             StatusBadge(
-                color: SoftPill.activityHue(state.activity),
-                symbol: state.activity.symbol,
+                color: hue,
+                symbol: activity.symbol,
                 size: 20
             )
             VStack(alignment: .leading, spacing: 1) {
-                Text(state.activity.label)
+                Text(activity.label)
                     .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(SoftPill.activityHue(state.activity))
-                    .animation(nil, value: state.activity.label)
+                    .foregroundStyle(hue)
+                    .animation(nil, value: activity.label)
                 Group {
                     if !state.detail.isEmpty {
                         Text(state.detail).foregroundStyle(SoftPill.Text.secondary)
@@ -127,7 +129,7 @@ struct NotchHomeView: View {
         .background(
             PillBackground(
                 fill: AnyShapeStyle(SoftPill.Surface.base),
-                glow: SoftPill.activityHue(state.activity),
+                glow: hue,
                 cornerRadius: 11
             )
         )
