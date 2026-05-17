@@ -174,52 +174,109 @@ public actor ContextAIObservationLog {
 }
 
 public actor ContextGeminiObservationGate {
-    private let minimumAutomaticSpacingSeconds: TimeInterval
-    private var lastAutomaticQueueAt: Date?
-    private var inFlightCount = 0
+    public struct PendingObservation: Sendable {
+        public let snapshot: ContextSnapshot
+        public let imageData: Data
+        public let mimeType: String
+        public let previousSnapshot: ContextSnapshot?
+        public let attemptID: UUID
+        public let enqueuedAt: Date
 
-    public init(minimumAutomaticSpacingSeconds: TimeInterval = 8) {
-        self.minimumAutomaticSpacingSeconds = minimumAutomaticSpacingSeconds
+        public init(
+            snapshot: ContextSnapshot,
+            imageData: Data,
+            mimeType: String,
+            previousSnapshot: ContextSnapshot?,
+            attemptID: UUID = UUID(),
+            enqueuedAt: Date = Date()
+        ) {
+            self.snapshot = snapshot
+            self.imageData = imageData
+            self.mimeType = mimeType
+            self.previousSnapshot = previousSnapshot
+            self.attemptID = attemptID
+            self.enqueuedAt = enqueuedAt
+        }
     }
 
-    public func startDecision(
-        trigger: ContextCaptureTrigger,
-        isAPIKeyConfigured: Bool,
-        now: Date = Date()
-    ) -> ContextGeminiObservationDecision {
+    public enum GateAction: Sendable {
+        case run
+        case queued(replacedSameApp: Bool)
+        case skip(String)
+    }
+
+    public struct DrainResult: Sendable {
+        public let next: PendingObservation?
+        public let stale: [PendingObservation]
+    }
+
+    public let stalenessSeconds: TimeInterval
+    private var inFlightCount = 0
+    private var pendingByApp: [String: PendingObservation] = [:]
+    private var pendingOrder: [String] = []
+
+    public init(stalenessSeconds: TimeInterval = 12) {
+        self.stalenessSeconds = stalenessSeconds
+    }
+
+    public func enqueueOrRun(
+        _ observation: PendingObservation,
+        isAPIKeyConfigured: Bool
+    ) -> GateAction {
+        let trigger = observation.snapshot.trigger
+
         guard trigger != .activation else {
             return .skip("activation capture stays OCR-only to protect long-press latency")
         }
-
         guard isAPIKeyConfigured else {
             return .skip("GEMINI_API_KEY is not configured")
         }
 
+        if inFlightCount == 0 {
+            inFlightCount = 1
+            return .run
+        }
+
+        let appName = observation.snapshot.appName
+        let replaced = pendingByApp[appName] != nil
         let isManual = trigger == .manual
-        if inFlightCount > 0 && !isManual {
-            return .skip("another Gemini observation is already running")
-        }
 
-        if !isManual, let lastAutomaticQueueAt {
-            let elapsed = now.timeIntervalSince(lastAutomaticQueueAt)
-            if elapsed < minimumAutomaticSpacingSeconds {
-                return .skip("rate limited; last automatic Gemini call was \(Int(elapsed))s ago")
+        if !replaced {
+            if isManual {
+                pendingOrder.insert(appName, at: 0)
+            } else {
+                pendingOrder.append(appName)
             }
+        } else if isManual, let idx = pendingOrder.firstIndex(of: appName), idx != 0 {
+            pendingOrder.remove(at: idx)
+            pendingOrder.insert(appName, at: 0)
         }
-
-        inFlightCount += 1
-        if !isManual {
-            lastAutomaticQueueAt = now
-        }
-        return .run
+        pendingByApp[appName] = observation
+        return .queued(replacedSameApp: replaced)
     }
 
-    public func finish() {
+    public func finishAndDrainNext(now: Date = Date()) -> DrainResult {
         inFlightCount = max(0, inFlightCount - 1)
-    }
-}
 
-public enum ContextGeminiObservationDecision: Sendable {
-    case run
-    case skip(String)
+        var stale: [PendingObservation] = []
+        var next: PendingObservation? = nil
+
+        while !pendingOrder.isEmpty {
+            let appName = pendingOrder.removeFirst()
+            guard let entry = pendingByApp.removeValue(forKey: appName) else {
+                continue
+            }
+            if now.timeIntervalSince(entry.enqueuedAt) > stalenessSeconds {
+                stale.append(entry)
+                continue
+            }
+            next = entry
+            break
+        }
+
+        if next != nil {
+            inFlightCount = 1
+        }
+        return DrainResult(next: next, stale: stale)
+    }
 }

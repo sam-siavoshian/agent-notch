@@ -202,13 +202,75 @@ public final class ContextCoordinator: RecentActivityContext {
         mimeType: String,
         previousSnapshot: ContextSnapshot?
     ) {
+        let pending = ContextGeminiObservationGate.PendingObservation(
+            snapshot: snapshot,
+            imageData: imageData,
+            mimeType: mimeType,
+            previousSnapshot: previousSnapshot
+        )
+        let geminiGate = geminiGate
+        let aiObservationLog = aiObservationLog
+        let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
+        let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
+
+        Task(priority: .utility) { [pending] in
+            let action = await geminiGate.enqueueOrRun(
+                pending,
+                isAPIKeyConfigured: ContextGeminiObservationService.isAPIKeyConfigured
+            )
+
+            switch action {
+            case .run:
+                await ContextCoordinator.shared.runGeminiObservation(pending)
+            case .queued(let replacedSameApp):
+                let reason = replacedSameApp
+                    ? "coalesced with newer \(pending.snapshot.appName) snapshot"
+                    : "pending; awaiting in-flight observation to finish"
+                await aiObservationLog.record(ContextAIObservationEvent(
+                    status: .queued,
+                    trigger: pending.snapshot.trigger,
+                    appName: pending.snapshot.appName,
+                    windowTitle: pending.snapshot.windowTitle,
+                    reason: reason,
+                    attemptID: pending.attemptID,
+                    laneName: "modular",
+                    imageBytes: pending.imageData.count,
+                    requestMimeType: pending.mimeType,
+                    requestMediaResolution: mediaResolution,
+                    requestThinkingLevel: thinkingLevel,
+                    ocrCount: pending.snapshot.recognizedText.count
+                ))
+            case .skip(let reason):
+                await aiObservationLog.record(ContextAIObservationEvent(
+                    status: .skipped,
+                    trigger: pending.snapshot.trigger,
+                    appName: pending.snapshot.appName,
+                    windowTitle: pending.snapshot.windowTitle,
+                    reason: reason,
+                    attemptID: pending.attemptID,
+                    laneName: "modular",
+                    imageBytes: pending.imageData.count,
+                    requestMimeType: pending.mimeType,
+                    requestMediaResolution: mediaResolution,
+                    requestThinkingLevel: thinkingLevel,
+                    ocrCount: pending.snapshot.recognizedText.count
+                ))
+            }
+        }
+    }
+
+    private func runGeminiObservation(_ pending: ContextGeminiObservationGate.PendingObservation) async {
+        let snapshot = pending.snapshot
+        let imageData = pending.imageData
+        let mimeType = pending.mimeType
+        let previousSnapshot = pending.previousSnapshot
+        let attemptID = pending.attemptID
+
         let geminiObservationService = geminiObservationService
         let memoryStore = memoryStore
         let aiObservationLog = aiObservationLog
-        let geminiGate = geminiGate
         let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
         let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
-        let attemptID = UUID()
         let lanes = Self.geminiLanes(for: snapshot, previousSnapshot: previousSnapshot)
         let input = ContextGeminiObservationInput(
             imageData: imageData,
@@ -221,215 +283,216 @@ public final class ContextCoordinator: RecentActivityContext {
             metadata: Self.geminiMetadata(for: snapshot, previousSnapshot: previousSnapshot)
         )
 
-        Task(priority: .utility) { [snapshot, imageData, previousSnapshot, input, lanes] in
-            let decision = await geminiGate.startDecision(
-                trigger: snapshot.trigger,
-                isAPIKeyConfigured: ContextGeminiObservationService.isAPIKeyConfigured
-            )
+        let startedAt = Date()
+        await aiObservationLog.record(ContextAIObservationEvent(
+            status: .queued,
+            trigger: snapshot.trigger,
+            appName: snapshot.appName,
+            windowTitle: snapshot.windowTitle,
+            reason: "queued modular screen understanding with \(lanes.count) lanes",
+            attemptID: attemptID,
+            laneName: "modular",
+            imageBytes: imageData.count,
+            requestMimeType: mimeType,
+            requestMediaResolution: mediaResolution,
+            requestThinkingLevel: thinkingLevel,
+            ocrCount: snapshot.recognizedText.count
+        ))
 
-            switch decision {
-            case .skip(let reason):
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .skipped,
-                    trigger: snapshot.trigger,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    reason: reason,
-                    attemptID: attemptID,
-                    laneName: "modular",
-                    imageBytes: imageData.count,
-                    requestMimeType: mimeType,
-                    requestMediaResolution: mediaResolution,
-                    requestThinkingLevel: thinkingLevel,
-                    ocrCount: snapshot.recognizedText.count
-                ))
-                return
-            case .run:
-                break
-            }
+        let laneResults = await withTaskGroup(of: ContextGeminiLaneObservation?.self) { group in
+            for lane in lanes {
+                group.addTask {
+                    await aiObservationLog.record(ContextAIObservationEvent(
+                        status: .queued,
+                        trigger: snapshot.trigger,
+                        appName: snapshot.appName,
+                        windowTitle: snapshot.windowTitle,
+                        reason: "queued \(lane.label) lane for \(lane.shortGoal)",
+                        attemptID: attemptID,
+                        laneName: lane.rawValue,
+                        imageBytes: imageData.count,
+                        requestMimeType: mimeType,
+                        requestMediaResolution: mediaResolution,
+                        requestThinkingLevel: thinkingLevel,
+                        ocrCount: snapshot.recognizedText.count
+                    ))
 
-            let startedAt = Date()
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .queued,
-                trigger: snapshot.trigger,
-                appName: snapshot.appName,
-                windowTitle: snapshot.windowTitle,
-                reason: "queued modular screen understanding with \(lanes.count) lanes",
-                attemptID: attemptID,
-                laneName: "modular",
-                imageBytes: imageData.count,
-                requestMimeType: mimeType,
-                requestMediaResolution: mediaResolution,
-                requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count
-            ))
+                    let laneStartedAt = Date()
+                    let laneObservation = await geminiObservationService.observeLane(
+                        lane,
+                        input: input,
+                        previousSnapshot: previousSnapshot
+                    )
+                    let laneElapsedMilliseconds = Int(Date().timeIntervalSince(laneStartedAt) * 1000)
 
-            let laneResults = await withTaskGroup(of: ContextGeminiLaneObservation?.self) { group in
-                for lane in lanes {
-                    group.addTask {
+                    guard let laneObservation else {
                         await aiObservationLog.record(ContextAIObservationEvent(
-                            status: .queued,
+                            status: .failed,
                             trigger: snapshot.trigger,
                             appName: snapshot.appName,
                             windowTitle: snapshot.windowTitle,
-                            reason: "queued \(lane.label) lane for \(lane.shortGoal)",
+                            reason: "\(lane.label) lane returned no valid observation",
                             attemptID: attemptID,
                             laneName: lane.rawValue,
+                            latencyMilliseconds: laneElapsedMilliseconds,
                             imageBytes: imageData.count,
                             requestMimeType: mimeType,
                             requestMediaResolution: mediaResolution,
                             requestThinkingLevel: thinkingLevel,
                             ocrCount: snapshot.recognizedText.count
                         ))
-
-                        let laneStartedAt = Date()
-                        let laneObservation = await geminiObservationService.observeLane(
-                            lane,
-                            input: input,
-                            previousSnapshot: previousSnapshot
-                        )
-                        let laneElapsedMilliseconds = Int(Date().timeIntervalSince(laneStartedAt) * 1000)
-
-                        guard let laneObservation else {
-                            await aiObservationLog.record(ContextAIObservationEvent(
-                                status: .failed,
-                                trigger: snapshot.trigger,
-                                appName: snapshot.appName,
-                                windowTitle: snapshot.windowTitle,
-                                reason: "\(lane.label) lane returned no valid observation",
-                                attemptID: attemptID,
-                                laneName: lane.rawValue,
-                                latencyMilliseconds: laneElapsedMilliseconds,
-                                imageBytes: imageData.count,
-                                requestMimeType: mimeType,
-                                requestMediaResolution: mediaResolution,
-                                requestThinkingLevel: thinkingLevel,
-                                ocrCount: snapshot.recognizedText.count
-                            ))
-                            return nil
-                        }
-
-                        let controls = Self.controlDescriptions(laneObservation.controls)
-                        await aiObservationLog.record(ContextAIObservationEvent(
-                            status: .completed,
-                            trigger: snapshot.trigger,
-                            appName: snapshot.appName,
-                            windowTitle: snapshot.windowTitle,
-                            reason: "\(lane.label) lane recorded \(laneObservation.controls.count) controls, \(laneObservation.entities.count) entities, \(laneObservation.memoryCards.count) memory cards",
-                            attemptID: attemptID,
-                            laneName: lane.rawValue,
-                            source: laneObservation.source.rawValue,
-                            latencyMilliseconds: laneElapsedMilliseconds,
-                            confidence: laneObservation.confidence,
-                            surfaceLabel: laneObservation.surfaceLabel,
-                            summary: laneObservation.summary,
-                            screenType: laneObservation.screenType,
-                            primaryTask: laneObservation.primaryTask,
-                            contentSummary: laneObservation.contentSummary,
-                            controls: controls,
-                            landmarks: laneObservation.layoutRegions,
-                            entities: laneObservation.entities,
-                            affordances: controls,
-                            stateIndicators: laneObservation.stateIndicators,
-                            navigationPaths: laneObservation.navigation,
-                            dataRegions: laneObservation.layoutRegions,
-                            workflowHints: laneObservation.workflows,
-                            negativeCues: laneObservation.negativeCues,
-                            memoryCandidates: laneObservation.memoryCards,
-                            uncertainty: laneObservation.uncertainty,
-                            imageBytes: imageData.count,
-                            requestMimeType: mimeType,
-                            requestMediaResolution: mediaResolution,
-                            requestThinkingLevel: thinkingLevel,
-                            ocrCount: snapshot.recognizedText.count,
-                            controlsCount: laneObservation.controls.count,
-                            affordancesCount: laneObservation.workflows.count,
-                            entitiesCount: laneObservation.entities.count
-                        ))
-                        return laneObservation
+                        return nil
                     }
-                }
 
-                var observations: [ContextGeminiLaneObservation] = []
-                for await laneObservation in group {
-                    if let laneObservation {
-                        observations.append(laneObservation)
-                    }
+                    let controls = Self.controlDescriptions(laneObservation.controls)
+                    await aiObservationLog.record(ContextAIObservationEvent(
+                        status: .completed,
+                        trigger: snapshot.trigger,
+                        appName: snapshot.appName,
+                        windowTitle: snapshot.windowTitle,
+                        reason: "\(lane.label) lane recorded \(laneObservation.controls.count) controls, \(laneObservation.entities.count) entities, \(laneObservation.memoryCards.count) memory cards",
+                        attemptID: attemptID,
+                        laneName: lane.rawValue,
+                        source: laneObservation.source.rawValue,
+                        latencyMilliseconds: laneElapsedMilliseconds,
+                        confidence: laneObservation.confidence,
+                        surfaceLabel: laneObservation.surfaceLabel,
+                        summary: laneObservation.summary,
+                        screenType: laneObservation.screenType,
+                        primaryTask: laneObservation.primaryTask,
+                        contentSummary: laneObservation.contentSummary,
+                        controls: controls,
+                        landmarks: laneObservation.layoutRegions,
+                        entities: laneObservation.entities,
+                        affordances: controls,
+                        stateIndicators: laneObservation.stateIndicators,
+                        navigationPaths: laneObservation.navigation,
+                        dataRegions: laneObservation.layoutRegions,
+                        workflowHints: laneObservation.workflows,
+                        negativeCues: laneObservation.negativeCues,
+                        memoryCandidates: laneObservation.memoryCards,
+                        uncertainty: laneObservation.uncertainty,
+                        imageBytes: imageData.count,
+                        requestMimeType: mimeType,
+                        requestMediaResolution: mediaResolution,
+                        requestThinkingLevel: thinkingLevel,
+                        ocrCount: snapshot.recognizedText.count,
+                        controlsCount: laneObservation.controls.count,
+                        affordancesCount: laneObservation.workflows.count,
+                        entitiesCount: laneObservation.entities.count
+                    ))
+                    return laneObservation
                 }
-                return observations
             }
 
-            let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
-            await geminiGate.finish()
-
-            guard let observation = ContextGeminiObservationService.reduceLaneObservations(
-                laneResults,
-                input: input,
-                imageHash: Self.sha256Hex(imageData)
-            ) else {
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .failed,
-                    trigger: snapshot.trigger,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    reason: "No modular Gemini lanes returned valid observations",
-                    attemptID: attemptID,
-                    laneName: ContextGeminiObservationLane.reducer.rawValue,
-                    latencyMilliseconds: elapsedMilliseconds,
-                    imageBytes: imageData.count,
-                    requestMimeType: mimeType,
-                    requestMediaResolution: mediaResolution,
-                    requestThinkingLevel: thinkingLevel,
-                    ocrCount: snapshot.recognizedText.count
-                ))
-                return
+            var observations: [ContextGeminiLaneObservation] = []
+            for await laneObservation in group {
+                if let laneObservation {
+                    observations.append(laneObservation)
+                }
             }
+            return observations
+        }
 
-            await memoryStore.record(
-                observation,
-                appName: snapshot.appName,
-                windowTitle: snapshot.windowTitle,
-                capturedAt: snapshot.capturedAt
-            )
-            let controls = Self.controlDescriptions(observation.visibleControls)
+        let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
+        await finishGateAndDrainNext()
+
+        guard let observation = ContextGeminiObservationService.reduceLaneObservations(
+            laneResults,
+            input: input,
+            imageHash: Self.sha256Hex(imageData)
+        ) else {
             await aiObservationLog.record(ContextAIObservationEvent(
-                status: .completed,
+                status: .failed,
                 trigger: snapshot.trigger,
                 appName: snapshot.appName,
                 windowTitle: snapshot.windowTitle,
-                reason: "reduced \(laneResults.count) lanes into activation-ready memory",
+                reason: "No modular Gemini lanes returned valid observations",
                 attemptID: attemptID,
                 laneName: ContextGeminiObservationLane.reducer.rawValue,
-                source: observation.source.rawValue,
                 latencyMilliseconds: elapsedMilliseconds,
-                confidence: observation.confidence,
-                surfaceLabel: observation.surfaceLabel,
-                summary: observation.summary,
-                screenType: observation.screenType,
-                primaryTask: observation.primaryTask,
-                layoutSummary: observation.layoutSummary,
-                contentSummary: observation.contentSummary,
-                controls: controls,
-                landmarks: observation.landmarks,
-                entities: observation.entities,
-                affordances: observation.affordances,
-                stateIndicators: observation.stateIndicators,
-                navigationPaths: observation.navigationPaths,
-                dataRegions: observation.dataRegions,
-                workflowHints: observation.workflowHints,
-                negativeCues: observation.negativeCues,
-                memoryCandidates: observation.memoryCandidates,
-                uncertainty: observation.uncertainty,
                 imageBytes: imageData.count,
                 requestMimeType: mimeType,
                 requestMediaResolution: mediaResolution,
                 requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count,
-                controlsCount: observation.visibleControls.count,
-                affordancesCount: observation.affordances.count,
-                entitiesCount: observation.entities.count
+                ocrCount: snapshot.recognizedText.count
             ))
-            log.info("Gemini learned \(observation.appLabel)/\(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
+            return
+        }
+
+        await memoryStore.record(
+            observation,
+            appName: snapshot.appName,
+            windowTitle: snapshot.windowTitle,
+            capturedAt: snapshot.capturedAt
+        )
+        let controls = Self.controlDescriptions(observation.visibleControls)
+        await aiObservationLog.record(ContextAIObservationEvent(
+            status: .completed,
+            trigger: snapshot.trigger,
+            appName: snapshot.appName,
+            windowTitle: snapshot.windowTitle,
+            reason: "reduced \(laneResults.count) lanes into activation-ready memory",
+            attemptID: attemptID,
+            laneName: ContextGeminiObservationLane.reducer.rawValue,
+            source: observation.source.rawValue,
+            latencyMilliseconds: elapsedMilliseconds,
+            confidence: observation.confidence,
+            surfaceLabel: observation.surfaceLabel,
+            summary: observation.summary,
+            screenType: observation.screenType,
+            primaryTask: observation.primaryTask,
+            layoutSummary: observation.layoutSummary,
+            contentSummary: observation.contentSummary,
+            controls: controls,
+            landmarks: observation.landmarks,
+            entities: observation.entities,
+            affordances: observation.affordances,
+            stateIndicators: observation.stateIndicators,
+            navigationPaths: observation.navigationPaths,
+            dataRegions: observation.dataRegions,
+            workflowHints: observation.workflowHints,
+            negativeCues: observation.negativeCues,
+            memoryCandidates: observation.memoryCandidates,
+            uncertainty: observation.uncertainty,
+            imageBytes: imageData.count,
+            requestMimeType: mimeType,
+            requestMediaResolution: mediaResolution,
+            requestThinkingLevel: thinkingLevel,
+            ocrCount: snapshot.recognizedText.count,
+            controlsCount: observation.visibleControls.count,
+            affordancesCount: observation.affordances.count,
+            entitiesCount: observation.entities.count
+        ))
+        log.info("Gemini learned \(observation.appLabel)/\(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
+    }
+
+    private func finishGateAndDrainNext() async {
+        let drain = await geminiGate.finishAndDrainNext()
+        let aiObservationLog = aiObservationLog
+        let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
+        let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
+        for stale in drain.stale {
+            let age = Int(Date().timeIntervalSince(stale.enqueuedAt))
+            await aiObservationLog.record(ContextAIObservationEvent(
+                status: .skipped,
+                trigger: stale.snapshot.trigger,
+                appName: stale.snapshot.appName,
+                windowTitle: stale.snapshot.windowTitle,
+                reason: "dropped stale pending capture (\(age)s old > 12s)",
+                attemptID: stale.attemptID,
+                laneName: "modular",
+                imageBytes: stale.imageData.count,
+                requestMimeType: stale.mimeType,
+                requestMediaResolution: mediaResolution,
+                requestThinkingLevel: thinkingLevel,
+                ocrCount: stale.snapshot.recognizedText.count
+            ))
+        }
+        if let next = drain.next {
+            Task(priority: .utility) { [next] in
+                await ContextCoordinator.shared.runGeminiObservation(next)
+            }
         }
     }
 
