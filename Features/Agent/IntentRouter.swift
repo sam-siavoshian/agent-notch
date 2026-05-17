@@ -100,24 +100,24 @@ enum SpotifyIntent {
         let lower = transcript.lowercased()
         // Only act when Spotify is explicitly mentioned OR transport verbs are
         // unambiguous AND Spotify is the frontmost music app. Conservative.
-        let mentionsSpotify = lower.contains("spotify")
+        guard lower.contains("spotify") else { return .notMine }
 
-        if mentionsSpotify && (lower.contains("pause") || lower.contains("stop")) {
+        if lower.contains("pause") || lower.contains("stop") {
             return await tellSpotify(cmd: "pause", affirmation: "Pausing Spotify.")
         }
-        if mentionsSpotify && (lower.contains("resume") || lower == "play spotify" || lower.contains("play music")) {
+        if lower.contains("resume") || lower == "play spotify" || lower.contains("play music") {
             return await tellSpotify(cmd: "play", affirmation: "Playing Spotify.")
         }
-        if mentionsSpotify && (lower.contains("next") || lower.contains("skip")) {
+        if lower.contains("next") || lower.contains("skip") {
             return await tellSpotify(cmd: "next track", affirmation: "Next track.")
         }
-        if mentionsSpotify && lower.contains("previous") {
+        if lower.contains("previous") {
             return await tellSpotify(cmd: "previous track", affirmation: "Previous track.")
         }
         // Play a named song/artist on Spotify — search via spotify: URL.
         // "play <query> on spotify"
-        if mentionsSpotify, let q = extract(after: "play ", before: " on spotify", in: lower) ??
-                                  extract(after: "play ", before: " in spotify", in: lower) {
+        if let q = extract(after: "play ", before: " on spotify", in: lower) ??
+                   extract(after: "play ", before: " in spotify", in: lower) {
             let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
             if let url = URL(string: "spotify:search:\(encoded)") {
                 NSWorkspace.shared.open(url)
