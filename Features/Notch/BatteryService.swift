@@ -22,13 +22,13 @@ final class BatteryService: ObservableObject {
     }
 
     private func refresh() {
-        guard let rawInfo = IOPSCopyPowerSourcesInfo() else { hasBattery = false; return }
+        guard let rawInfo = IOPSCopyPowerSourcesInfo() else { setHasBattery(false); return }
         let info = rawInfo.takeRetainedValue()
 
         guard let rawList = IOPSCopyPowerSourcesList(info),
               let list = rawList.takeRetainedValue() as? [CFTypeRef],
               !list.isEmpty
-        else { hasBattery = false; return }
+        else { setHasBattery(false); return }
 
         for source in list {
             guard let rawDesc = IOPSGetPowerSourceDescription(info, source),
@@ -36,11 +36,18 @@ final class BatteryService: ObservableObject {
                   (desc[kIOPSTypeKey] as? String) == "InternalBattery"
             else { continue }
 
-            hasBattery  = true
-            percentage  = desc[kIOPSCurrentCapacityKey] as? Int  ?? percentage
-            isCharging  = desc[kIOPSIsChargingKey]      as? Bool ?? false
+            setHasBattery(true)
+            if let p = desc[kIOPSCurrentCapacityKey] as? Int, p != percentage {
+                percentage = p
+            }
+            let charging = desc[kIOPSIsChargingKey] as? Bool ?? false
+            if charging != isCharging { isCharging = charging }
             return
         }
-        hasBattery = false
+        setHasBattery(false)
+    }
+
+    private func setHasBattery(_ value: Bool) {
+        if hasBattery != value { hasBattery = value }
     }
 }

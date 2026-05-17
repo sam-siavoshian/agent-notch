@@ -189,52 +189,6 @@ struct SettingRow<Content: View>: View {
     }
 }
 
-private struct SaveKeyButton: View {
-    let enabled: Bool
-    let action: () -> Void
-    @State private var hovered = false
-    @State private var pressed = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 8, weight: .bold))
-                Text("Save")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(enabled ? 1.0 : 0.45))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                ZStack {
-                    Capsule(style: .continuous)
-                        .fill(SoftPill.CTA.gradient)
-                        .opacity(enabled ? 1.0 : 0.35)
-                    Capsule(style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6)
-                }
-            )
-            .shadow(
-                color: SoftPill.CTA.from.opacity(enabled ? (hovered ? 0.55 : 0.30) : 0.0),
-                radius: hovered ? 10 : 6,
-                x: 0, y: hovered ? 4 : 2
-            )
-            .scaleEffect(pressed ? 0.96 : (hovered ? 1.03 : 1.0))
-            .animation(.easeOut(duration: 0.12), value: pressed)
-            .animation(.easeOut(duration: 0.18), value: hovered)
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .onHover { hovered = $0 && enabled }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in if enabled { pressed = true } }
-                .onEnded { _ in pressed = false }
-        )
-    }
-}
-
 private struct ShortcutRecorderView: View {
     let shortcut: KillSwitchShortcut
     let onChange: (KillSwitchShortcut) -> Void

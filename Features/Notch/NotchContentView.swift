@@ -39,10 +39,12 @@ enum NotchTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /// SF Symbol shown in the tab toolbar. `.spotify` is rendered with the
+    /// branded `SpotifyTabButton`, so its glyph here is a fallback only.
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .spotify: return "music.note"   // unused for spotify — rendered as brand mark
+        case .spotify: return "music.note"
         case .calendar: return "calendar"
         case .settings: return "gearshape.fill"
         }
@@ -60,6 +62,10 @@ struct NotchContentView: View {
     private var selectedTabBinding: Binding<NotchTab> {
         Binding(get: { selectedTab }, set: { selectedTabRaw = $0.rawValue })
     }
+
+    private static let boxSpring = Animation.spring(
+        response: 0.32, dampingFraction: 0.86, blendDuration: 0
+    )
 
     private let closedWidth: CGFloat = 180
     private let closedHeight: CGFloat = 30
@@ -230,12 +236,9 @@ struct NotchContentView: View {
         // Single spring drives box size + content opacity + height changes.
         // High damping kills bounce so top edge can't punch into the real
         // hardware notch. Response ~0.32 feels organic without feeling slow.
-        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
-                   value: isOpen)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
-                   value: measuredOpenHeight)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
-                   value: liveActive)
+        .animation(Self.boxSpring, value: isOpen)
+        .animation(Self.boxSpring, value: measuredOpenHeight)
+        .animation(Self.boxSpring, value: liveActive)
         .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
             // Update even while closed so the first open animates to the
             // right size in a single motion (no two-step pop).
