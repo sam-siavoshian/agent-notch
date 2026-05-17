@@ -57,7 +57,12 @@ public enum Env {
     private static func locateEnvFile() -> URL? {
         var candidates: [URL] = []
 
-        if let bundled = Bundle.main.url(forResource: "agentnotch", withExtension: "env") {
+        if let resourceURL = Bundle.main.resourceURL {
+            candidates.append(resourceURL.appendingPathComponent(".env"))
+        }
+        if let bundled = Bundle.main.url(forResource: "agentnotch", withExtension: "env", subdirectory: "Config") {
+            candidates.append(bundled)
+        } else if let bundled = Bundle.main.url(forResource: "agentnotch", withExtension: "env") {
             candidates.append(bundled)
         }
 

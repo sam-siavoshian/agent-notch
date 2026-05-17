@@ -59,9 +59,6 @@ public struct ContextAIObservationEvent: Sendable {
     public let controlsCount: Int
     public let affordancesCount: Int
     public let entitiesCount: Int
-    public let dirtyClassification: String?
-    public let dirtyHammingDistance: Int?
-    public let dirtyChangedAreaFraction: Double?
 
     public init(
         id: UUID = UUID(),
@@ -103,10 +100,7 @@ public struct ContextAIObservationEvent: Sendable {
         ocrCount: Int? = nil,
         controlsCount: Int = 0,
         affordancesCount: Int = 0,
-        entitiesCount: Int = 0,
-        dirtyClassification: String? = nil,
-        dirtyHammingDistance: Int? = nil,
-        dirtyChangedAreaFraction: Double? = nil
+        entitiesCount: Int = 0
     ) {
         self.id = id
         self.attemptID = attemptID
@@ -148,9 +142,6 @@ public struct ContextAIObservationEvent: Sendable {
         self.controlsCount = controlsCount
         self.affordancesCount = affordancesCount
         self.entitiesCount = entitiesCount
-        self.dirtyClassification = dirtyClassification
-        self.dirtyHammingDistance = dirtyHammingDistance
-        self.dirtyChangedAreaFraction = dirtyChangedAreaFraction
     }
 }
 
@@ -183,78 +174,109 @@ public actor ContextAIObservationLog {
 }
 
 public actor ContextGeminiObservationGate {
-    /// Default minimum spacing when no classification is supplied. Used when
-    /// callers don't yet know whether the change is major or minor (e.g.,
-    /// pre-dirty-detector code paths).
-    private let minimumAutomaticSpacingSeconds: TimeInterval
-    /// Spacing for major changes — a meaningful UI change deserves a fresh
-    /// observation soon. The dirty detector already filters noise, so we
-    /// don't need the original 8s wall here.
-    private let majorChangeSpacingSeconds: TimeInterval
-    /// Spacing for minor changes — they go through the cheap update lane
-    /// (or the OCR-delta fast path with zero LLM), so a tight spacing is OK.
-    private let minorChangeSpacingSeconds: TimeInterval
-    private var lastAutomaticQueueAt: Date?
-    private var inFlightCount = 0
+    public struct PendingObservation: Sendable {
+        public let snapshot: ContextSnapshot
+        public let imageData: Data
+        public let mimeType: String
+        public let previousSnapshot: ContextSnapshot?
+        public let attemptID: UUID
+        public let enqueuedAt: Date
 
-    public init(
-        minimumAutomaticSpacingSeconds: TimeInterval = 8,
-        majorChangeSpacingSeconds: TimeInterval = 2,
-        minorChangeSpacingSeconds: TimeInterval = 4
-    ) {
-        self.minimumAutomaticSpacingSeconds = minimumAutomaticSpacingSeconds
-        self.majorChangeSpacingSeconds = majorChangeSpacingSeconds
-        self.minorChangeSpacingSeconds = minorChangeSpacingSeconds
+        public init(
+            snapshot: ContextSnapshot,
+            imageData: Data,
+            mimeType: String,
+            previousSnapshot: ContextSnapshot?,
+            attemptID: UUID = UUID(),
+            enqueuedAt: Date = Date()
+        ) {
+            self.snapshot = snapshot
+            self.imageData = imageData
+            self.mimeType = mimeType
+            self.previousSnapshot = previousSnapshot
+            self.attemptID = attemptID
+            self.enqueuedAt = enqueuedAt
+        }
     }
 
-    public func startDecision(
-        trigger: ContextCaptureTrigger,
-        isAPIKeyConfigured: Bool,
-        dirtyClassification: String? = nil,
-        now: Date = Date()
-    ) -> ContextGeminiObservationDecision {
+    public enum GateAction: Sendable {
+        case run
+        case queued(replacedSameApp: Bool)
+        case skip(String)
+    }
+
+    public struct DrainResult: Sendable {
+        public let next: PendingObservation?
+        public let stale: [PendingObservation]
+    }
+
+    public let stalenessSeconds: TimeInterval
+    private var inFlightCount = 0
+    private var pendingByApp: [String: PendingObservation] = [:]
+    private var pendingOrder: [String] = []
+
+    public init(stalenessSeconds: TimeInterval = 12) {
+        self.stalenessSeconds = stalenessSeconds
+    }
+
+    public func enqueueOrRun(
+        _ observation: PendingObservation,
+        isAPIKeyConfigured: Bool
+    ) -> GateAction {
+        let trigger = observation.snapshot.trigger
+
         guard trigger != .activation else {
             return .skip("activation capture stays OCR-only to protect long-press latency")
         }
-
         guard isAPIKeyConfigured else {
             return .skip("GEMINI_API_KEY is not configured")
         }
 
+        if inFlightCount == 0 {
+            inFlightCount = 1
+            return .run
+        }
+
+        let appName = observation.snapshot.appName
+        let replaced = pendingByApp[appName] != nil
         let isManual = trigger == .manual
-        if inFlightCount > 0 && !isManual {
-            return .skip("another Gemini observation is already running")
-        }
 
-        if !isManual, let lastAutomaticQueueAt {
-            let elapsed = now.timeIntervalSince(lastAutomaticQueueAt)
-            let requiredSpacing: TimeInterval
-            switch dirtyClassification {
-            case "major_change":
-                requiredSpacing = majorChangeSpacingSeconds
-            case "minor_change":
-                requiredSpacing = minorChangeSpacingSeconds
-            default:
-                requiredSpacing = minimumAutomaticSpacingSeconds
+        if !replaced {
+            if isManual {
+                pendingOrder.insert(appName, at: 0)
+            } else {
+                pendingOrder.append(appName)
             }
-            if elapsed < requiredSpacing {
-                return .skip("rate limited; last automatic Gemini call was \(Int(elapsed))s ago (need \(Int(requiredSpacing))s for \(dirtyClassification ?? "unclassified"))")
-            }
+        } else if isManual, let idx = pendingOrder.firstIndex(of: appName), idx != 0 {
+            pendingOrder.remove(at: idx)
+            pendingOrder.insert(appName, at: 0)
         }
-
-        inFlightCount += 1
-        if !isManual {
-            lastAutomaticQueueAt = now
-        }
-        return .run
+        pendingByApp[appName] = observation
+        return .queued(replacedSameApp: replaced)
     }
 
-    public func finish() {
+    public func finishAndDrainNext(now: Date = Date()) -> DrainResult {
         inFlightCount = max(0, inFlightCount - 1)
-    }
-}
 
-public enum ContextGeminiObservationDecision: Sendable {
-    case run
-    case skip(String)
+        var stale: [PendingObservation] = []
+        var next: PendingObservation? = nil
+
+        while !pendingOrder.isEmpty {
+            let appName = pendingOrder.removeFirst()
+            guard let entry = pendingByApp.removeValue(forKey: appName) else {
+                continue
+            }
+            if now.timeIntervalSince(entry.enqueuedAt) > stalenessSeconds {
+                stale.append(entry)
+                continue
+            }
+            next = entry
+            break
+        }
+
+        if next != nil {
+            inFlightCount = 1
+        }
+        return DrainResult(next: next, stale: stale)
+    }
 }

@@ -167,7 +167,7 @@ public actor ContextIntentResolver {
         let request = AnthropicMessageRequest(
             model: model,
             maxTokens: maxTokens,
-            system: systemPrompt,
+            system: [SystemBlock(text: systemPrompt)],
             messages: [Message(role: "user", content: [.text(userMessage)])],
             tools: [],
             toolChoice: nil

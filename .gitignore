@@ -23,6 +23,7 @@ Package.resolved
 .DS_Store
 
 # Local secrets — bundled at build time, never committed.
+.env
 Config/agentnotch.env
 
 # ArshanTesting sandbox

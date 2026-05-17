@@ -36,6 +36,9 @@ targets:
           - "AgentNotch.entitlements"
       - path: Core
       - path: Features
+      - path: .env
+        buildPhase: resources
+        optional: true
       - path: Config
         type: folder
         buildPhase: resources

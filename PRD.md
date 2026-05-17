@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.2 (hackathon scope)
 **Owner:** Wyatt (notch & UI), Sam (cursor + computer use), Ashan (long-press + context)
-**Model:** Claude Sonnet (agent), Gemini multimodal (context summarizer), Whisper (voice)
+**Model:** Claude Sonnet (agent), Gemini multimodal (context summarizer), OpenAI Whisper API (voice)
 
 ---
 
@@ -50,7 +50,7 @@ The user long-presses to talk to the agent. Whisper transcribes. The agent recei
 ## 5. Voice Input
 
 - User **long-presses** the cursor companion to activate.
-- Whisper transcribes locally / via API.
+- OpenAI Whisper API transcribes the recording.
 - Transcript is appended to the model's input on release.
 - This is the user's intent signal. The screenshot summary is the background context.
 
@@ -120,7 +120,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 - **Native Swift / SwiftUI** — notch UI, cursor overlay, OS-level click hooks, screenshot capture.
 - **Claude Sonnet** — primary agent.
 - **Gemini multimodal** — screenshot batch summarizer.
-- **Whisper** — voice transcription.
+- **OpenAI Whisper API** — voice transcription.
 
 ## 9. Team & Responsibilities
 
@@ -128,7 +128,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 |-------|--------|-------------|-------|
 | **Wyatt** | ✅ done | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. Music tab (Spotify now-playing + lyrics). | Settings persisted at `~/Library/Application Support/AgentNotch/agent_settings.json`. Read via `AgentSettingsStore.shared`. |
 | **Sam** | ✅ done | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Long-press listener, listening/thinking/idle visual states. Computer use integration: Sonnet-driven OS actions (click, type, scroll). | Exposes `setCursorColor(color)` via `AgentInterfaces.cursor`. Set `AgentInterfaces.cursor = self` on init. |
-| **Ashan** | ✅ done | Long-press detection → Whisper voice transcription (WhisperKit, on-device). Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, modular Gemini lane pipeline per snapshot, merge to `ContextActivationPacket`. Core Sonnet agent wiring — assembles transcript + packet + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
+| **Ashan** | ✅ done | Long-press detection → OpenAI Whisper API transcription. Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, modular Gemini lane pipeline per snapshot, merge to `ContextActivationPacket`. Core Sonnet agent wiring — assembles transcript + packet + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
 
 **Interfaces are the contract.**
 - Wyatt's settings panel calls `setCursorColor(color)` on Sam's cursor module.

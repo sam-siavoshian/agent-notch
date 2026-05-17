@@ -32,7 +32,7 @@ public struct AnthropicClient: Sendable {
         apiKey: String,
         session: URLSession = .shared,
         endpoint: URL = AnthropicClient.defaultEndpoint,
-        betaHeaders: [String] = ["computer-use-2025-11-24"]
+        betaHeaders: [String] = ["computer-use-2025-11-24", "prompt-caching-2024-07-31"]
     ) {
         self.apiKey = apiKey
         self.session = session
