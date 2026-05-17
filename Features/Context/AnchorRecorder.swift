@@ -57,8 +57,7 @@ public final class AnchorRecorder {
         guard !snapshot.isEmpty else { return }
         queue.sync {
             // Walk only events newer than what we've seen.
-            let fresh = snapshot.filter { $0.seq > lastSeenSeq }
-            for event in fresh {
+            for event in snapshot where event.seq > lastSeenSeq {
                 lastSeenSeq = max(lastSeenSeq, event.seq)
                 ingest(event)
             }
