@@ -124,8 +124,8 @@ struct ShiningText: View {
     var font: Font = .system(size: 11, weight: .medium, design: .monospaced)
     var duration: Double = 2.0
 
-    private let base = Color(red: 0x40 / 255, green: 0x40 / 255, blue: 0x40 / 255)
-    private let bright = Color.white
+    private static let base = Color(red: 0x40 / 255, green: 0x40 / 255, blue: 0x40 / 255)
+    private static let bright = Color.white
 
     var body: some View {
         TimelineView(.animation) { ctx in
@@ -154,11 +154,11 @@ struct ShiningText: View {
         let l2 = max(0, min(1, peak))
         let l3 = max(0, min(1, peak + band))
         return [
-            .init(color: base, location: 0),
-            .init(color: base, location: l1),
-            .init(color: bright, location: l2),
-            .init(color: base, location: l3),
-            .init(color: base, location: 1)
+            .init(color: Self.base, location: 0),
+            .init(color: Self.base, location: l1),
+            .init(color: Self.bright, location: l2),
+            .init(color: Self.base, location: l3),
+            .init(color: Self.base, location: 1)
         ]
     }
 }
