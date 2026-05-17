@@ -845,10 +845,14 @@ public final class ComputerUseHarness {
 
     /// Compact JSON representation of a tool input. Used for the Dev Tools
     /// per-turn drill-in — small enough to render inline, big enough to debug.
+    private static let compactJSONEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        return e
+    }()
+
     fileprivate static func compactJSON(_ value: JSON, limit: Int = 240) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        if let data = try? encoder.encode(value), let text = String(data: data, encoding: .utf8) {
+        if let data = try? compactJSONEncoder.encode(value), let text = String(data: data, encoding: .utf8) {
             if text.count <= limit { return text }
             let prefix = text.prefix(limit)
             return "\(prefix)…"
