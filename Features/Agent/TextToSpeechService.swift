@@ -26,10 +26,26 @@ final class TextToSpeechService {
     )!
     private var currentTask: Task<Void, Never>?
 
+    private var boundOutputUID: String?
+
     private init() {
         audioEngine.attach(playerNode)
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: pcmFormat)
+        applyOutputDeviceIfChanged()
         try? audioEngine.start()
+    }
+
+    /// Re-bind output AU to user-selected device if it changed since the
+    /// last call. Stops + restarts engine when the device flips because
+    /// `kAudioOutputUnitProperty_CurrentDevice` must be set while inactive.
+    private func applyOutputDeviceIfChanged() {
+        let target = AgentSettingsStore.shared.voiceOutputDeviceUID
+        if target == boundOutputUID { return }
+        let wasRunning = audioEngine.isRunning
+        if wasRunning { audioEngine.stop() }
+        AudioDeviceManager.setOutputDevice(uid: target, on: audioEngine)
+        boundOutputUID = target
+        if wasRunning { try? audioEngine.start() }
     }
 
     func speak(_ text: String) {
@@ -37,6 +53,7 @@ final class TextToSpeechService {
         guard !trimmed.isEmpty else { return }
         currentTask?.cancel()
         playerNode.stop()
+        applyOutputDeviceIfChanged()
         currentTask = Task { [weak self] in
             await self?.stream(trimmed)
         }

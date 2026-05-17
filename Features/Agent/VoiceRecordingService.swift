@@ -82,6 +82,9 @@ public final class VoiceRecordingService {
         recordingURL = url
 
         let inputNode = audioEngine.inputNode
+        // Bind to user-selected input device (nil = system default).
+        let uid = AgentSettingsStore.shared.voiceInputDeviceUID
+        AudioDeviceManager.setInputDevice(uid: uid, on: audioEngine)
         let format = inputNode.outputFormat(forBus: 0)
 
         let file: AVAudioFile
