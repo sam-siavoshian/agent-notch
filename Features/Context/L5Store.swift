@@ -97,8 +97,8 @@ public final class L5Store {
                 let url = Self.taskArchiveRoot.appendingPathComponent("\(day).jsonl")
                 if let data = try? String(contentsOf: url, encoding: .utf8) {
                     for line in data.split(separator: "\n") where !line.isEmpty {
-                        if let lineData = line.data(using: .utf8),
-                           let task = try? decoder.decode(CArchivedTask.self, from: lineData) {
+                        let lineData = Data(line.utf8)
+                        if let task = try? decoder.decode(CArchivedTask.self, from: lineData) {
                             out.append(task)
                         }
                     }
