@@ -122,7 +122,7 @@ public final class SurfaceMemoryStore {
     public func allApps() -> [String] {
         queue.sync {
             (try? FileManager.default.contentsOfDirectory(at: Self.storageRoot, includingPropertiesForKeys: nil))?
-                .map { $0.lastPathComponent } ?? []
+                .map(\.lastPathComponent) ?? []
         }
     }
 
