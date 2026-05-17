@@ -49,8 +49,4 @@ public final class ScreenObservationLog {
     public func tail(_ n: Int) -> [SurfaceObservation] {
         queue.sync { Array(buffer.suffix(n)) }
     }
-
-    public func snapshot() -> [SurfaceObservation] {
-        queue.sync { Array(buffer) }
-    }
 }

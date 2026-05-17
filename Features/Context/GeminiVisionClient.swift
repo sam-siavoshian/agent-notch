@@ -48,11 +48,8 @@ public final class GeminiVisionClient {
     }
 
     /// Send a multimodal request (text prompt + one PNG image) and return the assistant's text.
-    ///
-    /// The `systemPrompt` is the static instruction block (would be cached if
-    /// the API allowed); `userText` is the per-call tail (e.g. frontmost-app
-    /// hint) that varies between requests. They're concatenated into a single
-    /// text part for now since caching is disabled — see top-of-file note.
+    /// `systemPrompt` and `userText` are concatenated into a single text part
+    /// (caching disabled — see top-of-file note).
     public func generate(
         systemPrompt: String,
         userText: String,
@@ -61,15 +58,12 @@ public final class GeminiVisionClient {
         timeout: TimeInterval = 60.0
     ) async throws -> String {
         let startedAt = Date()
-        let combinedText: String = {
-            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? systemPrompt : systemPrompt + "\n" + trimmed
-        }()
+        let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let combinedText = trimmed.isEmpty ? systemPrompt : systemPrompt + "\n" + trimmed
 
         do {
             let result = try await performRequest(
-                systemPrompt: systemPrompt,
-                userText: userText,
+                combinedText: combinedText,
                 imagePNG: imagePNG,
                 model: model,
                 timeout: timeout
@@ -126,8 +120,7 @@ public final class GeminiVisionClient {
     /// Raw request — separated so the public `generate` wrapper can log both
     /// success and failure paths without duplicating HTTP/timeout logic.
     private func performRequest(
-        systemPrompt: String,
-        userText: String,
+        combinedText: String,
         imagePNG: Data,
         model: String,
         timeout: TimeInterval
@@ -141,11 +134,6 @@ public final class GeminiVisionClient {
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = timeout + 0.5
-
-        let combinedText: String = {
-            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? systemPrompt : systemPrompt + "\n" + trimmed
-        }()
 
         // Image-then-text part order: Google's single-image+text guidance.
         let body = RequestBody(
