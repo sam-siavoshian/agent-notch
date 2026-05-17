@@ -28,16 +28,17 @@ The app **is not** a fork of boring.notch. The boring.notch source is checked in
 
 ## API Keys
 
-No keys are hardcoded. Resolution order: environment variable → nil.
+No keys are hardcoded. Resolution order: environment variable → Keychain → nil.
 
 | Key | Used by |
 |---|---|
 | `ANTHROPIC_API_KEY` | `AnthropicClient` → Claude Sonnet agent |
 | `GEMINI_API_KEY` | `ContextGeminiObservationService` → screenshot analysis |
+| `OPENAI_API_KEY` | `VoiceRecordingService` → OpenAI Whisper API transcription |
 
-Set these in your Xcode scheme's environment or your shell before launching.
+Set these in your Xcode scheme's environment or your shell before launching. Alternatively, enter them via the in-app Settings UI — they are stored in the macOS Keychain under service `com.agentnotch.app` and persist across launches.
 
-**Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `VoiceRecordingService` will use it as the transcript when the model is still initializing or no mic input was captured.
+**Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `VoiceRecordingService` will use it as the transcript when no mic input was captured.
 
 ---
 
@@ -48,7 +49,7 @@ Set these in your Xcode scheme's environment or your shell before launching.
 - **Notch UI**: the agent's home, a fresh SwiftUI app. Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
-The agent (Claude Sonnet) receives: voice transcript (WhisperKit, on-device) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
+The agent (Claude Sonnet) receives: voice transcript (OpenAI Whisper API) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
 
 Full spec: `PRD.md`.
 
@@ -77,7 +78,11 @@ All features should use these — never duplicate them.
 | `AgentReasoningEffort.swift` | Enum: `.low` / `.medium` / `.high` |
 | `CursorColor.swift` | Enum: `.red` / `.green` / `.blue` / `.yellow` — has `.assetName` for PNG lookup |
 | `ScreenCapture.swift` | `ScreenCapture.shared` — shared screenshot utility |
-| `Secrets.swift` | `Secrets.anthropicAPIKey` — reads from env, never hardcoded |
+| `Secrets.swift` | `Secrets.anthropicAPIKey` / `.openAIAPIKey` / `.geminiAPIKey` — resolves env → Keychain; also exposes setters used by the in-app key entry UI |
+| `AppRelaunch.swift` | `AppRelaunch.relaunch()` — cold-restarts the app so macOS picks up fresh TCC grants |
+| `EnvLoader.swift` | `Env.load()` (called at boot) + `Env.value(_:)` — loads `Config/agentnotch.env` into the process environment |
+| `Keychain.swift` | Generic-password Keychain wrapper (service `com.agentnotch.app`); used by `Secrets` to persist UI-entered keys |
+| `Log.swift` | `Log(category:)` logger with `.info/.warning/.debug/.error`; errors go to stderr |
 
 ---
 
@@ -118,6 +123,9 @@ All features should use these — never duplicate them.
 | `ContextMemoryStore.swift` | Learned UI memory persistence |
 | `ContextOCRService.swift` | Native OCR via Vision framework |
 | `ContextGeminiObservationService.swift` | Gemini multimodal analysis per screenshot |
+| `ContextGeminiObservationService+Parsing.swift` | Extension: response parsing logic |
+| `ContextGeminiObservationService+Payloads.swift` | Extension: request payload construction |
+| `ContextGeminiObservationService+Prompts.swift` | Extension: prompt templates for the four analysis lanes |
 | `ContextGeminiObservationModels.swift` | Input/output types for Gemini calls |
 | `ContextActivationBuilder.swift` | Converts screenshot buffer → compact `ContextActivationPacket` (recentTimeline, observedTransitions, learnedUIMemory, firstActionGuidance) |
 | `ContextMemoryRenderer.swift` | Renders learned UI memory to text |
@@ -125,22 +133,19 @@ All features should use these — never duplicate them.
 | `ContextWindowMetadataReader.swift` | Reads active app name + window title |
 | `ContextTextSignalFilter.swift` | Cleans OCR output |
 | `ContextAIObservationLog.swift` | In-memory log of Gemini observation events; includes `ContextGeminiObservationGate` (rate limiter) |
-| `ContextDebugArtifactStore.swift` | Persists debug artifacts (images, prompts, responses) for Dev Tools inspection |
-| `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
-| `ContextDebugView.swift` | Dev Tools console — pause/resume gathering, overview, injected packet, captures/OCR, Gemini I/O, learned memory, metrics |
-| `ContextPerformanceReporter.swift` | Reads stored artifacts and summarizes diagnostics |
 
 ### Features/Agent/ (Ashan)
 
 | File | What it is |
 |---|---|
-| `VoiceRecordingService.swift` | Records mic on longPressBegan; runs WhisperKit on longPressEnded; posts `.transcriptReady` |
+| `VoiceRecordingService.swift` | Records mic on longPressBegan; transcribes via OpenAI Whisper API on longPressEnded; posts `.transcriptReady` |
 | `AgentSession.swift` | Subscribes to `.transcriptReady`; fires one harness turn |
 | `ComputerUseHarness.swift` | Multi-turn Claude computer-use loop (model: `claude-sonnet-4-6`) |
 | `ComputerUseModels.swift` | Codable types for the Anthropic computer-use API |
 | `AnthropicClient.swift` | Raw API client (URLSession + async/await) |
 | `ToolDispatcher.swift` | Maps computer-use tool calls to CGEvent actions |
 | `AgentRunMetrics.swift` | Records per-run metrics to `AgentMetricsStore` |
+| `TextToSpeechService.swift` | `AVSpeechSynthesizer` wrapper; `TextToSpeechService.shared.speak(_:)` / `.stop()` |
 
 ### Features/Onboarding/
 
@@ -181,12 +186,14 @@ Settings (reasoning effort, preferences text, system prompt, cursor color) are p
 
 ```
 AppDelegate.applicationDidFinishLaunching
+  → Env.load()                                  // loads Config/agentnotch.env
   → NotchWindowController.shared.install()      // notch panel appears
   → OnboardingWindowController.presentIfNeeded  // first-launch permissions
       → bootAgent()
           → CursorCompanion.shared.start()          // registers AgentInterfaces.cursor
           → ContextCoordinator.shared.start()       // registers AgentInterfaces.context
-          → ContextDevToolsWindowController.install() // optional telemetry window
-          → VoiceRecordingService.shared.start()    // mic recording + WhisperKit init
+          → VoiceRecordingService.shared.start()    // mic recording pipeline
           → AgentSession.shared.start()             // subscribes to .transcriptReady
+          → PermissionChecker.shared.startPolling() // live TCC status for Notch UI
+          → SpotifyController.shared.startIfPreviouslyConnected() // Spotify opt-in
 ```

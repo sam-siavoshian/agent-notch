@@ -17,7 +17,7 @@ xcodegen generate
 open AgentNotch.xcodeproj
 ```
 
-Set `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` in the Xcode scheme env. Build, run, grant the three permissions, long-press the cursor.
+Set `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `OPENAI_API_KEY` in the Xcode scheme env. Build, run, grant the three permissions, long-press the cursor.
 
 ---
 
@@ -27,9 +27,10 @@ Set `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` in the Xcode scheme env. Build, run
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude Sonnet agent |
 | `GEMINI_API_KEY` | Screen context observer |
+| `OPENAI_API_KEY` | Voice transcription (OpenAI Whisper API) |
 | `ANTHROPIC_NOTCH_DEMO_PROMPT` | Optional. Hardcoded transcript for mic-less demos. |
 
-Never committed. Scheme env only. OpenAI Whisper key lives in the macOS Keychain (`com.agentnotch.app`).
+Never committed. Set via Xcode scheme env or enter in the in-app Settings UI — keys are stored in the macOS Keychain (`com.agentnotch.app`). Env var wins over Keychain if both are set.
 
 ---
 
@@ -80,6 +81,6 @@ Details in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md). Product spec i
 
 ## Stack
 
-Swift, SwiftUI, Claude Sonnet 4.6 (computer-use), Gemini, WhisperKit, Vision OCR, CGEvent, ScreenCaptureKit, XcodeGen.
+Swift, SwiftUI, Claude Sonnet 4.6 (computer-use), Gemini, OpenAI Whisper API, Vision OCR, CGEvent, ScreenCaptureKit, XcodeGen.
 
 Built at TritonHacks 2026.
