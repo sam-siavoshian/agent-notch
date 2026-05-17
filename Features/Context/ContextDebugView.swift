@@ -9,12 +9,13 @@
 import SwiftUI
 
 public enum ContextDebugMode: String, CaseIterable, Identifiable {
-    case overview, packet, captures, memory, ai, intent, dirty, cache, report, harness
+    case newSystem, overview, packet, captures, memory, ai, intent, dirty, cache, report, harness
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
+        case .newSystem: return "New System"
         case .overview: return "Overview"
         case .packet:   return "Activation Packet"
         case .captures: return "Captures"
@@ -30,6 +31,7 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
 
     public var systemImage: String {
         switch self {
+        case .newSystem: return "sparkles.square.filled.on.square"
         case .overview: return "square.grid.2x2"
         case .packet:   return "text.badge.checkmark"
         case .captures: return "camera.viewfinder"
@@ -45,7 +47,7 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
 }
 
 public struct ContextDebugView: View {
-    @State var mode: ContextDebugMode = .overview
+    @State var mode: ContextDebugMode = .newSystem
     @State var snapshots: [ContextSnapshot] = []
     @State var activationPreview: String = ""
     @State var diagnostics: ContextDiagnostics?
@@ -147,6 +149,7 @@ public struct ContextDebugView: View {
     @ViewBuilder
     private var content: some View {
         switch mode {
+        case .newSystem: ContextDebugNewSystemView()
         case .overview: overviewPane
         case .packet:   packetPane
         case .captures: capturesPane
