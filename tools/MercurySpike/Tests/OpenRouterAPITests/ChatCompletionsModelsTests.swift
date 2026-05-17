@@ -31,7 +31,7 @@ final class ChatCompletionsModelsTests: XCTestCase {
     }
 
     func testResponseDecodesOpenRouterShape() throws {
-        let json = """
+        let json = Data("""
         {
           "id": "gen-123",
           "model": "inception/mercury-coder",
@@ -42,7 +42,7 @@ final class ChatCompletionsModelsTests: XCTestCase {
           ],
           "usage": { "prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16 }
         }
-        """.data(using: .utf8)!
+        """.utf8)
         let resp = try JSONDecoder().decode(ChatCompletion.self, from: json)
         XCTAssertEqual(resp.id, "gen-123")
         XCTAssertEqual(resp.choices.first?.message.content, "hi back")
