@@ -165,12 +165,13 @@ final class LongPressDetector {
         }
         let dx = location.x - start.x
         let dy = location.y - start.y
-        let distance = (dx * dx + dy * dy).squareRoot()
-        if distance > movementThreshold {
+        let distanceSquared = dx * dx + dy * dy
+        let thresholdSquared = movementThreshold * movementThreshold
+        if distanceSquared > thresholdSquared {
             timer.cancel()
             state = .cancelled
             os_unfair_lock_unlock(&lock)
-            log.debug("long-press cancelled by movement distance=\(distance)pt")
+            log.debug("long-press cancelled by movement distance=\(distanceSquared.squareRoot())pt")
             return
         }
         os_unfair_lock_unlock(&lock)
