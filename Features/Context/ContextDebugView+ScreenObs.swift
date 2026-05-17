@@ -46,12 +46,16 @@ public struct ContextDebugScreenObsView: View {
         }
     }
 
-    private var timeString: String {
-        guard lastRefreshed > .distantPast else { return "—" }
+    private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
-        return formatter.string(from: lastRefreshed)
+        return formatter
+    }()
+
+    private var timeString: String {
+        guard lastRefreshed > .distantPast else { return "—" }
+        return Self.timeFormatter.string(from: lastRefreshed)
     }
 
     private func row(_ obs: SurfaceObservation) -> some View {
