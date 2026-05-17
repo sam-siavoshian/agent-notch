@@ -1,19 +1,8 @@
 //
 //  AXFastPath.swift
-//  Agent in the Notch
 //
-//  Minimal AXUIElement wrapper for the agent. Lets the model name a button,
-//  link, or text field by role + label/title substring and act on it without
-//  taking a screenshot or moving the mouse.
-//
-//  Why this exists: vision + click is the slow path. AX press is ~10ms,
-//  doesn't steal focus, doesn't depend on coordinate accuracy, and survives
-//  scaled displays. We use it preferentially and keep CGEvent click as the
-//  universal fallback.
-//
-//  We deliberately do NOT pull in AXorcist (SPM) — small surface, easy to
-//  reason about, no dependency cost. Patterns borrowed from steipete/AXorcist
-//  and Geisterhand-io/macos.
+//  Minimal AXUIElement wrapper. Lets the model address a button/link/field by
+//  role + label substring and act on it without screenshot or mouse movement.
 //
 
 import Foundation
@@ -64,30 +53,24 @@ public actor AXFastPath {
         registry.removeAll(keepingCapacity: true)
     }
 
-    public static func isTrusted() -> Bool {
-        return AXIsProcessTrusted()
+    private func frontmostPID() throws -> pid_t {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            throw AXFastPathError.noFrontmostApp
+        }
+        return app.processIdentifier
     }
 
     // MARK: - Public API
 
-    public func frontmostApp() throws -> (pid: pid_t, bundleID: String?, name: String?) {
-        guard let app = NSWorkspace.shared.frontmostApplication else {
-            throw AXFastPathError.noFrontmostApp
-        }
-        return (app.processIdentifier, app.bundleIdentifier, app.localizedName)
-    }
-
     /// Find elements in the frontmost app matching role / label substrings.
-    /// Returns up to `limit` matches.
     public func query(
         role: String? = nil,
         labelContains: String? = nil,
         valueContains: String? = nil,
         limit: Int = 8
     ) throws -> [AXMatch] {
-        guard Self.isTrusted() else { throw AXFastPathError.permissionDenied }
-        let (pid, _, _) = try frontmostApp()
-        let app = AXUIElementCreateApplication(pid)
+        guard AXIsProcessTrusted() else { throw AXFastPathError.permissionDenied }
+        let app = AXUIElementCreateApplication(try frontmostPID())
 
         var results: [AXMatch] = []
         var visited = 0
@@ -119,13 +102,11 @@ public actor AXFastPath {
         if err != .success { throw AXFastPathError.axError(err) }
     }
 
-    /// Walk the menu bar of the frontmost app and return the keyboard
-    /// shortcut for a menu item whose title contains `title` (case-insensitive
-    /// substring). Returns (CGKeyCode, CGEventFlags) when found.
+    /// Walk the menu bar of the frontmost app; return the keystroke for the
+    /// first menu item whose title contains `title` (case-insensitive).
     public func menuBarShortcut(forTitle title: String) throws -> (keyCode: CGKeyCode, flags: CGEventFlags)? {
-        guard Self.isTrusted() else { throw AXFastPathError.permissionDenied }
-        let (pid, _, _) = try frontmostApp()
-        let app = AXUIElementCreateApplication(pid)
+        guard AXIsProcessTrusted() else { throw AXFastPathError.permissionDenied }
+        let app = AXUIElementCreateApplication(try frontmostPID())
 
         var menuBarRef: CFTypeRef?
         let err = AXUIElementCopyAttributeValue(app, kAXMenuBarAttribute as CFString, &menuBarRef)

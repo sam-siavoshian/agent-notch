@@ -1,11 +1,7 @@
 //
 //  AgentSession.swift
-//  Agent in the Notch
 //
-//  Glue between voice transcription and the agent loop. Subscribes to
-//  .transcriptReady — posted by VoiceRecordingService after Whisper finishes.
-//  Reads the transcript from AgentState, pulls activity context, and fires
-//  one ComputerUseHarness turn.
+//  Glue: .transcriptReady → IntentRouter fast-path → Selector → harness.
 //
 
 import Foundation
@@ -110,19 +106,8 @@ public final class AgentSession {
         currentRunTask = nil
     }
 
-    // MARK: - Disk dump (debug/observability)
+    // MARK: - Disk dump (gated on AGENTNOTCH_DUMP_DIR; writes per-turn .md + .jsonl)
 
-    /// Drop per-turn artifacts onto disk so an outside reader (a tail in
-    /// another terminal, a teammate, a future me) can see exactly what the
-    /// harness saw without opening the in-app Dev Tools window. Gated on
-    /// `AGENTNOTCH_DUMP_DIR` so production builds without the env var do
-    /// nothing. Two artifacts per turn:
-    ///   - `agentnotch-last-turn.md` (overwritten) — the brief Claude actually
-    ///      sees this turn, prefixed with transcript + selector stats.
-    ///   - `agentnotch-turns.jsonl` (appended) — one line per turn with the
-    ///      full structured payload (transcript, intent, L2 summary, brief
-    ///      markdown, structured brief if Mercury succeeded). Easy to grep
-    ///      or pipe through jq for analysis.
     private static func dumpTurnToDisk(transcript: String, result: ContextSelector.Result) {
         guard let root = ProcessInfo.processInfo.environment["AGENTNOTCH_DUMP_DIR"], !root.isEmpty else { return }
         let lastBrief = URL(fileURLWithPath: "\(root)/agentnotch-last-turn.md")

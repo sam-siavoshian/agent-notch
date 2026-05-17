@@ -1,23 +1,12 @@
 //
 //  ToolDispatcher.swift
-//  Agent in the Notch
 //
-//  Maps Anthropic computer-use tool calls + our custom fast-path tools to
-//  CGEvent / AXUIElement / NSWorkspace / AppleScript actions.
-//
-//  Tool order taught to the model (system prompt enforces preference):
-//    open_url, applescript, run_shortcut, ax_query+ax_press, menu_shortcut,
-//    then computer (vision+click) as the universal fallback.
-//
-//  Coordinate system for `computer`: Anthropic uses top-left pixels.
-//  CGWarpMouseCursor / CGEventCreateMouseEvent also top-left for primary
-//  display, so 1:1 on a single monitor.
-//
-//  Reference: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
+//  Maps Anthropic computer-use tool calls + custom fast-path tools to CGEvent /
+//  AXUIElement / NSWorkspace / AppleScript actions. `computer` coordinates use
+//  top-left pixels, matching CGEvent on a single primary display.
 //
 
 import Foundation
-import CoreGraphics
 import AppKit
 import Carbon.HIToolbox
 
@@ -30,21 +19,14 @@ public struct DispatchedToolResult: Sendable {
 }
 
 public actor ToolDispatcher {
-    /// Coordinate space the MODEL sees: matches the screenshot dimensions we
-    /// send back AND the `display_width_px/display_height_px` we advertise in
-    /// the computer tool registration. Anthropic computer-use models are
-    /// trained on roughly-XGA-sized inputs and degrade past ~1280px wide —
-    /// keep this small for accurate clicks.
+    /// What the MODEL sees: screenshot dimensions + the display_width/height_px
+    /// we advertise. Capped at ~1280 long-edge per Anthropic's accuracy guidance.
     public let agentDisplaySize: CGSize
-    /// Real macOS logical-point space — what `CGEvent.mouseCursorPosition`
-    /// and `NSEvent.mouseLocation` operate in. On a 14" MBP this is
-    /// 1512×982-ish, NOT the 3024×1964 backing-store pixel count and NOT the
-    /// 1280×~ agent target. Coordinates from the model are scaled from
-    /// agentDisplaySize → this space before being posted as CGEvents.
+    /// macOS logical-point space (NSEvent.mouseLocation / CGEvent). Model
+    /// coordinates are scaled from agentDisplaySize → this before posting.
     public let logicalDisplaySize: CGSize
-    /// Long-edge cap for screenshots returned via `computer.screenshot`.
-    /// Matches `agentDisplaySize.longEdge` so the image the model receives
-    /// and the coordinate space it emits clicks in are 1:1.
+    /// Long-edge cap for `computer.screenshot`, matched to agentDisplaySize so
+    /// the image and the click coordinate space stay 1:1.
     public let screenshotLongEdge: Int
     private let capture: ScreenCapture
 
@@ -64,24 +46,15 @@ public actor ToolDispatcher {
         log.info("dispatcher.dispatch tool=\(name)")
         do {
             switch name {
-            case "computer":
-                return try await dispatchComputer(toolUseId: toolUseId, input: input)
-            case "open_url":
-                return try await dispatchOpenURL(toolUseId: toolUseId, input: input)
-            case "open_app":
-                return try await dispatchOpenApp(toolUseId: toolUseId, input: input)
-            case "applescript":
-                return try await dispatchAppleScript(toolUseId: toolUseId, input: input)
-            case "run_shortcut":
-                return try await dispatchShortcut(toolUseId: toolUseId, input: input)
-            case "ax_query":
-                return try await dispatchAXQuery(toolUseId: toolUseId, input: input)
-            case "ax_press":
-                return try await dispatchAXPress(toolUseId: toolUseId, input: input)
-            case "ax_set_value":
-                return try await dispatchAXSetValue(toolUseId: toolUseId, input: input)
-            case "menu_shortcut":
-                return try await dispatchMenuShortcut(toolUseId: toolUseId, input: input)
+            case "computer":      return try await dispatchComputer(toolUseId: toolUseId, input: input)
+            case "open_url":      return try await dispatchOpenURL(toolUseId: toolUseId, input: input)
+            case "open_app":      return try await dispatchOpenApp(toolUseId: toolUseId, input: input)
+            case "applescript":   return try await dispatchAppleScript(toolUseId: toolUseId, input: input)
+            case "run_shortcut":  return try await dispatchShortcut(toolUseId: toolUseId, input: input)
+            case "ax_query":      return try await dispatchAXQuery(toolUseId: toolUseId, input: input)
+            case "ax_press":      return try await dispatchAXPress(toolUseId: toolUseId, input: input)
+            case "ax_set_value":  return try await dispatchAXSetValue(toolUseId: toolUseId, input: input)
+            case "menu_shortcut": return try await dispatchMenuShortcut(toolUseId: toolUseId, input: input)
             default:
                 log.error("dispatcher.unsupported_tool tool=\(name)")
                 return errorResult(toolUseId, "Unsupported tool: \(name)")
@@ -201,13 +174,9 @@ public actor ToolDispatcher {
         return ok(toolUseId, "opened \(urlString)")
     }
 
-    /// Launch a desktop app by NAME using exact-path resolution. Bypasses
-    /// `open_url <scheme>://`, which goes through macOS Launch Services'
-    /// default-handler resolution — when both Discord.app and Discord
-    /// Canary.app register the `discord:` scheme, Launch Services picks
-    /// the more-recently-registered one (Canary, in practice), giving the
-    /// user the wrong variant. Path-based lookup pins us to the exact
-    /// `/Applications/<Name>.app` bundle.
+    /// Launch a desktop app by name via exact-path resolution. Pins to
+    /// `/Applications/<Name>.app`, bypassing Launch Services' scheme handler
+    /// which can resolve `discord://` to Discord Canary on machines with both.
     private func dispatchOpenApp(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
         guard let name = input.objectValue?["name"]?.stringValue, !name.isEmpty else {
             throw DispatchError("Missing 'name'")
@@ -322,12 +291,9 @@ public actor ToolDispatcher {
 
     private struct DispatchError: Swift.Error { let message: String; init(_ m: String) { self.message = m } }
 
-    /// Decode the `coordinate` array the model emitted (in agentDisplaySize
-    /// space) and scale it into macOS logical points so the resulting CGPoint
-    /// can be handed directly to `CGEvent.mouseCursorPosition` /
-    /// `CGWarpMouseCursorPosition`. Without this scaling, clicks land
-    /// (logical/agent) ratio off-target — a 2x mismatch on Retina means
-    /// every click lands at twice the intended offset.
+    /// Decode the model-emitted `coordinate` (agentDisplaySize space) and
+    /// scale into macOS logical points for CGEvent posting. Without scaling,
+    /// Retina mismatches double every click offset.
     private func requireCoordinate(_ input: JSON) throws -> CGPoint {
         guard let coord = input.objectValue?["coordinate"]?.arrayValue,
               coord.count >= 2,
@@ -370,54 +336,33 @@ public actor ToolDispatcher {
     }
 
     private func postDrag(from: CGPoint, to: CGPoint) {
-        let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
-        if down == nil { log.error("CGEvent alloc failed for leftMouseDown") }
-        down?.post(tap: .cghidEventTap)
-        let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left)
-        if drag == nil { log.error("CGEvent alloc failed for leftMouseDragged") }
-        drag?.post(tap: .cghidEventTap)
-        let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
-        if up == nil { log.error("CGEvent alloc failed for leftMouseUp") }
-        up?.post(tap: .cghidEventTap)
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)?.post(tap: .cghidEventTap)
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left)?.post(tap: .cghidEventTap)
+        CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
 
-    /// Anthropic computer-use spec: `scroll_amount` is a count of wheel
-    /// "clicks" (notches), not pixels. Previous implementation multiplied by
-    /// 3 in `.pixel` units, so `amount=3` produced just 9px of travel — barely
-    /// visible, and the model would emit another tiny scroll and another,
-    /// getting stuck. macOS wheel notches translate to roughly 100px in most
-    /// apps (Safari, Chrome, native AppKit views), so use that as the multiplier
-    /// and chunk the emission so apps that throttle large single deltas still
-    /// see smooth, continuous scroll.
-    private static let pixelsPerScrollClick: Int = 100
-    private static let scrollChunkPixels: Int = 50
+    /// `scroll_amount` per Anthropic spec is wheel "clicks" (notches), not pixels.
+    /// macOS wheel notches translate to ~100px in most apps; chunk emissions so
+    /// throttling apps still see smooth scroll.
+    private static let pixelsPerScrollClick = 100
+    private static let scrollChunkPixels = 50
 
     private func postScroll(at p: CGPoint, direction: String, amount: Int) {
         CGWarpMouseCursorPosition(p)
-
-        let clicks = max(1, amount) // protect against amount=0 no-ops
+        let clicks = max(1, amount)
         let totalPixels = clicks * Self.pixelsPerScrollClick
         let isVertical = (direction == "up" || direction == "down")
-        // CGEvent vertical wheel sign: positive y moves the content view UP
-        // (i.e. scrolls up). Horizontal: positive x scrolls left.
+        // CGEvent wheel sign: +y scrolls up, +x scrolls left.
         let sign: Int32 = (direction == "up" || direction == "left") ? 1 : -1
 
         var remaining = totalPixels
         while remaining > 0 {
-            let chunk = min(Self.scrollChunkPixels, remaining)
-            let y: Int32 = isVertical ? sign * Int32(chunk) : 0
-            let x: Int32 = isVertical ? 0 : sign * Int32(chunk)
-            if let event = CGEvent(
-                scrollWheelEvent2Source: nil,
-                units: .pixel,
-                wheelCount: 2,
-                wheel1: y,
-                wheel2: x,
-                wheel3: 0
-            ) {
-                event.post(tap: .cghidEventTap)
-            }
-            remaining -= chunk
+            let chunk = Int32(min(Self.scrollChunkPixels, remaining))
+            let y: Int32 = isVertical ? sign * chunk : 0
+            let x: Int32 = isVertical ? 0 : sign * chunk
+            CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: y, wheel2: x, wheel3: 0)?
+                .post(tap: .cghidEventTap)
+            remaining -= Int(chunk)
         }
         log.info("scroll dir=\(direction) clicks=\(clicks) pixels=\(totalPixels) at=\(Int(p.x)),\(Int(p.y))")
     }
@@ -485,27 +430,28 @@ public actor ToolDispatcher {
         }
     }
 
-    private func postKeyCombo(_ combo: String) throws {
-        let parts = combo.split(separator: "+").map { String($0).lowercased().trimmingCharacters(in: .whitespaces) }
+    /// Parse a "cmd+shift+v"-style combo into modifier flags + the final keycode.
+    private func parseCombo(_ combo: String) throws -> (CGKeyCode, CGEventFlags) {
         var flags: CGEventFlags = []
         var keyCode: CGKeyCode?
-        for part in parts {
-            switch part {
+        for raw in combo.split(separator: "+") {
+            switch String(raw).lowercased().trimmingCharacters(in: .whitespaces) {
             case "cmd", "command", "super": flags.insert(.maskCommand)
-            case "shift": flags.insert(.maskShift)
+            case "shift":                   flags.insert(.maskShift)
             case "alt", "option", "opt":    flags.insert(.maskAlternate)
             case "ctrl", "control":         flags.insert(.maskControl)
             case "fn":                      flags.insert(.maskSecondaryFn)
-            default:
-                guard let kc = keyCodeForName(part) else {
-                    throw DispatchError("Unknown key: \(part)")
-                }
+            case let part:
+                guard let kc = keyCodeForName(part) else { throw DispatchError("Unknown key: \(part)") }
                 keyCode = kc
             }
         }
-        guard let kc = keyCode else {
-            throw DispatchError("No key code in combo: \(combo)")
-        }
+        guard let kc = keyCode else { throw DispatchError("No key code in combo: \(combo)") }
+        return (kc, flags)
+    }
+
+    private func postKeyCombo(_ combo: String) throws {
+        let (kc, flags) = try parseCombo(combo)
         postKeyCode(kc, flags: flags)
     }
 
@@ -521,23 +467,7 @@ public actor ToolDispatcher {
     }
 
     private func postHoldKey(_ combo: String, durationMs: Int) async throws {
-        let parts = combo.split(separator: "+").map { String($0).lowercased() }
-        var flags: CGEventFlags = []
-        var keyCode: CGKeyCode?
-        for part in parts {
-            switch part {
-            case "cmd", "command": flags.insert(.maskCommand)
-            case "shift":          flags.insert(.maskShift)
-            case "alt", "option":  flags.insert(.maskAlternate)
-            case "ctrl", "control": flags.insert(.maskControl)
-            default:
-                guard let kc = keyCodeForName(part) else {
-                    throw DispatchError("Unknown key: \(part)")
-                }
-                keyCode = kc
-            }
-        }
-        guard let kc = keyCode else { throw DispatchError("No key in hold combo: \(combo)") }
+        let (kc, flags) = try parseCombo(combo)
         if let down = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: true) {
             down.flags = flags
             down.post(tap: .cghidEventTap)

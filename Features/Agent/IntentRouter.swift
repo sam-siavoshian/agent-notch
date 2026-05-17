@@ -1,16 +1,8 @@
 //
 //  IntentRouter.swift
-//  Agent in the Notch
 //
-//  Pre-flight pattern matcher that runs BEFORE the model loop. If a user
-//  transcript matches a known deterministic intent (open URL, control
-//  Spotify, add a reminder), we execute it directly and skip the whole
-//  vision+click loop. Result: ~0 turn latency for the most common voice
-//  commands.
-//
-//  Conservative on purpose: misclassifying "delete my files" as a fast path
-//  would be catastrophic, so we only match very obvious patterns. Anything
-//  ambiguous falls through to the model.
+//  Deterministic fast-paths that run before the model loop. Conservative on
+//  purpose — only obvious patterns; anything ambiguous defers to the model.
 //
 
 import Foundation
@@ -18,29 +10,31 @@ import AppKit
 
 public enum IntentResult: Sendable {
     case handled(summary: String, affirmation: String)
-    case deferred(hint: String)
     case notMine
 }
 
 public enum IntentRouter {
-    /// Try each handler in order. First non-`.notMine` wins.
+    private static let dangerousVerbs = [
+        "delete", "erase", "format", "wipe", "remove", "uninstall",
+        "shut down", "shutdown", "restart", "log out",
+        "purchase", "buy", "pay", "send money"
+    ]
+
+    /// Try each handler in order. First `.handled` wins.
     public static func tryHandle(transcript raw: String) async -> IntentResult {
         let transcript = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "  ", with: " ")
         guard !transcript.isEmpty else { return .notMine }
 
-        // Safety: never fast-path anything that mentions destructive verbs.
-        let dangerous = ["delete", "erase", "format", "wipe", "remove", "uninstall", "shut down", "shutdown", "restart", "log out", "purchase", "buy", "pay", "send money"]
         let lower = transcript.lowercased()
-        if dangerous.contains(where: { lower.contains($0) }) {
-            return .notMine
-        }
+        if dangerousVerbs.contains(where: { lower.contains($0) }) { return .notMine }
 
-        if case .handled(let s, let a) = OpenURLIntent.handle(transcript) { return .handled(summary: s, affirmation: a) }
-        if case .handled(let s, let a) = await SpotifyIntent.handle(transcript) { return .handled(summary: s, affirmation: a) }
-        if case .handled(let s, let a) = await ReminderIntent.handle(transcript) { return .handled(summary: s, affirmation: a) }
-        return .notMine
+        let openURL = OpenURLIntent.handle(transcript)
+        if case .handled = openURL { return openURL }
+        let spotify = await SpotifyIntent.handle(transcript)
+        if case .handled = spotify { return spotify }
+        return await ReminderIntent.handle(transcript)
     }
 }
 

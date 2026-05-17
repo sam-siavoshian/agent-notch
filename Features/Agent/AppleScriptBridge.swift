@@ -1,15 +1,9 @@
 //
 //  AppleScriptBridge.swift
-//  Agent in the Notch
 //
-//  Centralized NSAppleScript runner with an explicit allowlist of `tell
-//  application` targets. The agent + IntentRouter both route through this
-//  so we control the apps any AI-driven script can talk to.
-//
-//  NSAppleScript runs in-process (faster than spawning `osascript`) but
-//  still needs Apple Events permission for each target app the first time.
-//  We rely on the existing Accessibility / Automation grants the user
-//  already onboarded.
+//  In-process NSAppleScript runner with an allowlist of `tell application`
+//  targets. `System Events` is excluded on purpose: arbitrary-input synthesis
+//  belongs in the `computer` tool path with safer dispatch.
 //
 
 import Foundation
@@ -29,31 +23,15 @@ public enum AppleScriptBridgeError: Error, CustomStringConvertible {
 }
 
 public enum AppleScriptBridge {
-    /// Apps the agent is allowed to drive via AppleScript. Add here
-    /// deliberately — anything outside the list is rejected. `System Events`
-    /// is intentionally excluded: it can synthesize arbitrary input, which
-    /// is what `computer` tool is for (with safer dispatch).
     public static let allowedTargets: Set<String> = [
-        "Safari",
-        "Google Chrome",
-        "Arc",
-        "Brave Browser",
-        "Spotify",
-        "Music",
-        "Messages",
-        "Mail",
-        "Notes",
-        "Reminders",
-        "Calendar",
-        "Finder",
-        "Xcode",
-        "Terminal",
-        "iTerm",
-        "iTerm2"
+        "Safari", "Google Chrome", "Arc", "Brave Browser",
+        "Spotify", "Music", "Messages", "Mail", "Notes",
+        "Reminders", "Calendar", "Finder", "Xcode",
+        "Terminal", "iTerm", "iTerm2"
     ]
 
-    /// Run a script. Caller must ensure the script's tell-application targets
-    /// are in `allowedTargets`. Returns the string form of the result, or "".
+    /// Run a script. Throws if any `tell application "X"` target isn't in
+    /// `allowedTargets`. Returns the result's string form (or "").
     @discardableResult
     public static func run(_ script: String) async throws -> String {
         try assertAllowed(script)
@@ -75,29 +53,20 @@ public enum AppleScriptBridge {
         }
     }
 
-    /// Reject scripts that target apps outside the allowlist. Conservative
-    /// parse: scans every `tell application "..."` and `application "..."`
-    /// literal and confirms each name is allowlisted. Misses obfuscated
-    /// indirection (e.g. `set x to "Finder" \n tell application x`), which is
-    /// fine — anything the model writes will be in the obvious form.
     // swiftlint:disable:next force_try — pattern is a compile-time literal
     private static let targetRegex: NSRegularExpression = try! NSRegularExpression(
         pattern: #"application\s+"([^"]+)""#,
         options: [.caseInsensitive]
     )
 
+    /// Conservative parse: any literal `application "X"` must be in the
+    /// allowlist. Misses obfuscated indirection — model output never uses it.
     private static func assertAllowed(_ script: String) throws {
         let range = NSRange(script.startIndex..., in: script)
-        let matches = targetRegex.matches(in: script, options: [], range: range)
-        for m in matches where m.numberOfRanges >= 2 {
+        for m in targetRegex.matches(in: script, options: [], range: range) where m.numberOfRanges >= 2 {
             guard let r = Range(m.range(at: 1), in: script) else { continue }
             let target = String(script[r])
-            if !allowedTargets.contains(target) {
-                throw AppleScriptBridgeError.disallowedTarget(target)
-            }
+            if !allowedTargets.contains(target) { throw AppleScriptBridgeError.disallowedTarget(target) }
         }
-        // No `tell application` at all = utility script (e.g. `return "x"`).
-        // Allow these; they cannot drive other apps.
     }
 }
-

@@ -1,25 +1,3 @@
-//
-//  ComputerUseHarness.swift
-//  Agent in the Notch
-//
-//  One agent turn: assemble inputs → call Anthropic → execute tool calls →
-//  feed results back → loop until stop_reason != "tool_use". Updates
-//  AgentState as it goes so the notch UI reflects what's happening.
-//
-//  Optimizations layered on top of the basic loop:
-//  - Static system prompt cached server-side via cache_control. Dynamic
-//    context (activation packet, prefs, custom prompt) lives after the
-//    cache breakpoint.
-//  - Tools list also cached (one cache breakpoint on the last tool).
-//  - Rolling cache_control on the most recent tool_result so every
-//    subsequent turn reads the prior turns' state from cache instead of
-//    re-tokenizing the whole history.
-//  - max_tokens bumped to 4096 so the model can plan + describe + act
-//    without truncation.
-//  - The model is taught (in system prompt) a strict tool preference order
-//    so it picks fast paths (URL, AppleScript, AX) before vision+click.
-//
-
 import Foundation
 import AppKit
 
@@ -29,17 +7,16 @@ private let log = Log(category: "harness")
 public final class ComputerUseHarness {
     public static let shared = ComputerUseHarness()
 
-    public var modelID: String = AnthropicModel.haiku45
-    public var fallbackModelID: String = AnthropicModel.haiku45
-    public var maxTurns: Int = 100
-    public var maxOutputTokens: Int = 4096
     /// Long-edge ceiling for what the agent sees + clicks in. Anthropic's
     /// computer-use models are most accurate at XGA/WXGA scale and degrade
-    /// noticeably past ~1280px; keep this small unless we change models.
-    public var agentScreenshotLongEdge: Int = 1280
+    /// past ~1280px.
+    private let agentScreenshotLongEdge = 1280
+    private let fallbackModelID = AnthropicModel.haiku45
+    private let maxTurns = 100
+    private let maxOutputTokens = 4096
 
-    public private(set) var isRunning: Bool = false
-    private var stopRequested: Bool = false
+    private var isRunning = false
+    private var stopRequested = false
 
     private init() {}
 
@@ -83,7 +60,8 @@ public final class ComputerUseHarness {
         let startedAt = Date()
         let transcriptLength = input.transcript.count
         let contextLength = input.contextSummary.count
-        log.info("harness.start run_id=\(runID.uuidString) model=\(self.modelID) transcript_len=\(transcriptLength) context_len=\(contextLength)")
+        let initialModelID = AgentSettingsStore.shared.agentModel.modelID
+        log.info("harness.start run_id=\(runID.uuidString) model=\(initialModelID) transcript_len=\(transcriptLength) context_len=\(contextLength)")
         var toolCallCount = 0
         var screenshotToolCallCount = 0
         var actionCounts: [String: Int] = [:]
@@ -136,14 +114,9 @@ public final class ComputerUseHarness {
             return
         }
 
-        // Three distinct coordinate spaces collide here — keep them straight:
-        //   * logicalSize: macOS logical points (NSScreen.frame). What
-        //     CGEvent / CGWarpMouseCursorPosition operate in.
-        //   * backingSize: backing-store pixels (logical × backingScaleFactor).
-        //     Useful for almost nothing except SCKit raw captures.
-        //   * agentTargetSize: what the model SEES — screenshot dimensions +
-        //     coordinate space we advertise to Anthropic. Capped at 1280 long
-        //     edge per Anthropic's computer-use accuracy guidance.
+        // logicalSize = macOS points (CGEvent / mouse positioning space).
+        // agentTargetSize = what the model SEES + the coordinate space we
+        // advertise to Anthropic. Capped at agentScreenshotLongEdge.
         let logicalSize = primaryLogicalDisplaySize()
         let agentTargetSize = computeAgentTargetSize(logicalSize: logicalSize, maxLongEdge: agentScreenshotLongEdge)
         let dispatcher = ToolDispatcher(
@@ -152,16 +125,10 @@ public final class ComputerUseHarness {
             screenshotLongEdge: agentScreenshotLongEdge
         )
 
-        // Per-run model resolution. `currentAgentModel` is the typed selection
-        // — we derive the computer-use tool TYPE and beta HEADER from it,
-        // since those must match (e.g. Sonnet 4.6 requires computer_20251124
-        // + computer-use-2025-11-24; Haiku 4.5 requires computer_20250124 +
-        // computer-use-2025-01-24). Falls back to .haiku if the settings
-        // store is unreachable.
+        // The computer-use tool TYPE and the beta HEADER both depend on the
+        // active model family (Haiku → 20250124, Sonnet 4.6 → 20251124); they
+        // must match. On a 400/404 fallback we swap both atomically below.
         var currentAgentModel = AgentSettingsStore.shared.agentModel
-        // var, not let — `AnthropicClient` is a struct and we mutate its
-        // `betaHeaders` on the fallback path (the computer-use beta has to
-        // switch with the model family).
         var client = AnthropicClient(
             apiKey: apiKey,
             betaHeaders: Self.betaHeaders(for: currentAgentModel)
@@ -187,33 +154,24 @@ public final class ComputerUseHarness {
             resolvedIntentVerb: input.intentVerb
         ))
 
-        // First user message: transcript + (optionally) the long-press
-        // screenshot as an image block. Including the screenshot here saves
-        // a full round-trip — Claude no longer needs to take a
-        // `computer.screenshot` tool call on turn 1 just to see the screen.
+        // Attach the long-press screenshot as the first user-message image so
+        // Claude doesn't burn a turn-1 computer.screenshot. Selector hands us a
+        // 1568-long-edge JPEG (sized for OCR); resize to agentScreenshotLongEdge
+        // so the image and the advertised display dimensions agree.
         let firstUserContent: [ContentBlock]
         if let jpeg = input.initiationScreenshot, !jpeg.isEmpty {
-            // Selector hands us a 1568-long-edge JPEG (sized for OCR). The
-            // agent's coordinate space is `agentTargetSize` (≤1280 long edge),
-            // so resize the initiation image to match — otherwise the model
-            // sees one resolution but is told the display is another, and
-            // every turn-1 click lands off-target.
             let resizedJPEG = Self.resizeJPEG(jpeg, maxLongEdge: agentScreenshotLongEdge) ?? jpeg
-            let base64 = resizedJPEG.base64EncodedString()
             firstUserContent = [
                 .text(input.transcript),
-                .image(mediaType: "image/jpeg", base64: base64, cache: false)
+                .image(mediaType: "image/jpeg", base64: resizedJPEG.base64EncodedString(), cache: false)
             ]
             log.info("harness.first_user has_image=true image_bytes=\(resizedJPEG.count) original_bytes=\(jpeg.count)")
         } else {
             firstUserContent = [.text(input.transcript)]
         }
-        var messages: [Message] = [
-            Message(role: "user", content: firstUserContent)
-        ]
+        var messages: [Message] = [Message(role: "user", content: firstUserContent)]
 
-        var currentModel = currentAgentModel.modelID
-        if currentModel.isEmpty { currentModel = modelID }
+        var currentModel = currentAgentModel.modelID.isEmpty ? fallbackModelID : currentAgentModel.modelID
         var triedFallback = false
         var turn = 0
 
@@ -229,7 +187,7 @@ public final class ComputerUseHarness {
                 startedAt: startedAt,
                 endedAt: endedAt,
                 durationMs: milliseconds(from: startedAt, to: endedAt),
-                modelID: modelID,
+                modelID: currentModel,
                 fallbackModelID: fallbackModelID,
                 usedFallback: usedFallback,
                 transcriptLength: transcriptLength,
@@ -278,44 +236,34 @@ public final class ComputerUseHarness {
             let turnStartedAt = Date()
             let userPreviewForTurn = latestUserPreview()
 
-            // Move the cache breakpoint to the most recent tool_result so the
-            // next request reads everything before it from cache. Older
-            // breakpoints get stripped to stay within Anthropic's 4-marker cap.
+            // Rolling cache breakpoint on the most recent tool_result so each
+            // turn reads prior history from cache; Anthropic caps active markers at 4.
             applyRollingCacheMarker(to: &messages)
 
             let effort = AgentSettingsStore.shared.reasoningEffort
             let thinkingConfig: ThinkingConfig? = effort.thinkingBudgetTokens.map { ThinkingConfig(budgetTokens: $0) }
-            // max_tokens must exceed budget_tokens; leave headroom for the actual
-            // tool-call output that follows reasoning.
-            let effectiveMaxTokens: Int = {
-                guard let budget = effort.thinkingBudgetTokens else { return maxOutputTokens }
-                return max(maxOutputTokens, budget + 2048)
-            }()
+            // max_tokens must exceed budget_tokens; leave headroom for tool-call output.
+            let effectiveMaxTokens = effort.thinkingBudgetTokens.map { max(maxOutputTokens, $0 + 2048) } ?? maxOutputTokens
             let request = AnthropicMessageRequest(
                 model: currentModel,
                 maxTokens: effectiveMaxTokens,
                 system: system,
                 messages: messages,
                 tools: tools,
-                toolChoice: nil,
                 thinking: thinkingConfig
             )
 
-            let requestedAt = Date()
             let response: AnthropicMessageResponse
             do {
                 response = try await client.send(request)
             } catch let err as AnthropicClient.Error {
                 if !triedFallback, shouldFallback(err) {
+                    // Fallback model is a different computer-use family; tools array
+                    // AND beta header must swap together, else the retry repeats the 400.
                     log.warning("harness.fallback run_id=\(runID.uuidString) from=\(currentModel) to=\(self.fallbackModelID) status=\(err.status ?? -1)")
                     triedFallback = true
                     usedFallback = true
                     currentModel = fallbackModelID
-                    // The fallback model lives in a different computer-use
-                    // family than the original (Sonnet/Opus → Haiku), so the
-                    // tools array AND the beta header have to switch with it,
-                    // or the next request fails with the same 400 we're
-                    // recovering from.
                     currentAgentModel = .haiku
                     tools = buildTools(displaySize: agentTargetSize, toolType: currentAgentModel.computerUseToolType)
                     client.betaHeaders = Self.betaHeaders(for: currentAgentModel)
@@ -335,7 +283,6 @@ public final class ComputerUseHarness {
                 await recordMetrics(status: "network_error", errorMessage: "\(error)")
                 return
             }
-            let respondedAt = Date()
 
             if let usage = response.usage {
                 NSLog("[Harness] usage turn=\(turn) in=\(usage.inputTokens ?? -1) out=\(usage.outputTokens ?? -1) cache_create=\(usage.cacheCreationInputTokens ?? -1) cache_read=\(usage.cacheReadInputTokens ?? -1)")
@@ -351,19 +298,28 @@ public final class ComputerUseHarness {
 
             log.info("harness.response run_id=\(runID.uuidString) turn=\(turn) stop_reason=\(response.stopReason ?? "nil") tool_uses=\(toolUses.count)")
 
-            if toolUses.isEmpty {
-                var textParts: [String] = []
-                for case .text(let t) in response.content { textParts.append(t) }
-                let text = textParts.joined(separator: " ")
+            let assistantText = Self.joinedText(in: response.content)
 
-                // Pre-stop verification — catch the "opened Spotify, said done,
-                // never played Taylor Swift" failure mode. Verifier diffs the
-                // user's original transcript against the model's final claim
-                // and rejects stop if any explicit sub-goal is unfulfilled.
+            func makeTurnRecord(toolCalls: [HarnessTurnRecord.ToolCallRecord]) -> HarnessTurnRecord {
+                HarnessTurnRecord(
+                    turnIndex: turn,
+                    model: response.model,
+                    stopReason: response.stopReason,
+                    inputTokens: response.usage?.inputTokens,
+                    outputTokens: response.usage?.outputTokens,
+                    cacheReadInputTokens: response.usage?.cacheReadInputTokens,
+                    cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
+                    toolCalls: toolCalls
+                )
+            }
+
+            if toolUses.isEmpty {
+                // Pre-stop verifier: catches "opened Spotify, said done, never played
+                // Taylor Swift" — rejects stop if any explicit sub-goal is unfulfilled.
                 if verifierRetries < maxVerifierRetries {
                     let verdict = await verifyCompletion(
                         transcript: input.transcript,
-                        finalText: text,
+                        finalText: assistantText,
                         client: client
                     )
                     if !verdict.complete {
@@ -381,22 +337,8 @@ public final class ComputerUseHarness {
                 }
 
                 log.info("harness.done run_id=\(runID.uuidString) status=completed_without_tool turns=\(turn) verifier_retries=\(verifierRetries)")
-                TextToSpeechService.shared.speak(capped(text))
-                await HarnessRunDetailStore.shared.appendTurn(
-                    runID: runID,
-                    turn: HarnessTurnRecord(
-                        turnIndex: turn,
-                        model: response.model,
-                        requestedAt: requestedAt,
-                        respondedAt: respondedAt,
-                        stopReason: response.stopReason,
-                        inputTokens: response.usage?.inputTokens,
-                        outputTokens: response.usage?.outputTokens,
-                        cacheReadInputTokens: response.usage?.cacheReadInputTokens,
-                        cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
-                        toolCalls: []
-                    )
-                )
+                TextToSpeechService.shared.speak(capped(assistantText))
+                await HarnessRunDetailStore.shared.appendTurn(runID: runID, turn: makeTurnRecord(toolCalls: []))
                 AgentObservabilityLog.shared.record(.harnessTurn(
                     id: UUID(),
                     t: turnStartedAt,
@@ -404,21 +346,19 @@ public final class ComputerUseHarness {
                     modelID: response.model,
                     systemBlocksPreview: systemBlocksPreview,
                     userContentPreview: userPreviewForTurn,
-                    assistantPreview: String(text.prefix(200)),
+                    assistantPreview: String(assistantText.prefix(200)),
                     toolCalls: [],
                     inputTokens: response.usage?.inputTokens,
                     outputTokens: response.usage?.outputTokens,
                     latencyS: Date().timeIntervalSince(turnStartedAt)
                 ))
-                AgentState.shared.set(.idle, detail: text)
+                AgentState.shared.set(.idle, detail: assistantText)
                 await recordMetrics(status: "completed_without_tool")
                 return
             }
 
             if turn == 1 {
-                var affirmationParts: [String] = []
-                for case .text(let t) in response.content { affirmationParts.append(t) }
-                let affirmation = affirmationParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                let affirmation = assistantText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !affirmation.isEmpty {
                     TextToSpeechService.shared.speak(capped(affirmation))
                 }
@@ -429,38 +369,18 @@ public final class ComputerUseHarness {
             var observabilityToolCalls: [AgentObservabilityLog.ToolCallSummary] = []
             for use in toolUses {
                 if stopRequested {
-                    await HarnessRunDetailStore.shared.appendTurn(
-                        runID: runID,
-                        turn: HarnessTurnRecord(
-                            turnIndex: turn,
-                            model: response.model,
-                            requestedAt: requestedAt,
-                            respondedAt: respondedAt,
-                            stopReason: response.stopReason,
-                            inputTokens: response.usage?.inputTokens,
-                            outputTokens: response.usage?.outputTokens,
-                            cacheReadInputTokens: response.usage?.cacheReadInputTokens,
-                            cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
-                            toolCalls: toolRecords
-                        )
-                    )
+                    await HarnessRunDetailStore.shared.appendTurn(runID: runID, turn: makeTurnRecord(toolCalls: toolRecords))
                     AgentState.shared.set(.idle, detail: "Stopped")
                     await recordMetrics(status: "stopped_by_user")
                     return
                 }
                 let action = actionLabel(use)
                 let now = Date()
-                if firstToolCallAt == nil {
-                    firstToolCallAt = now
-                }
-                if action != "screenshot", firstNonScreenshotActionAt == nil {
-                    firstNonScreenshotActionAt = now
-                }
+                if firstToolCallAt == nil { firstToolCallAt = now }
+                if action != "screenshot", firstNonScreenshotActionAt == nil { firstNonScreenshotActionAt = now }
                 toolCallCount += 1
                 actionCounts[action, default: 0] += 1
-                if action == "screenshot" {
-                    screenshotToolCallCount += 1
-                }
+                if action == "screenshot" { screenshotToolCallCount += 1 }
 
                 log.info("harness.tool run_id=\(runID.uuidString) turn=\(turn) action=\(action) tool_id=\(use.id)")
                 AgentState.shared.set(.toolCall(name: use.name), detail: action)
@@ -488,28 +408,8 @@ public final class ComputerUseHarness {
             }
             messages.append(Message(role: "user", content: resultBlocks))
 
-            await HarnessRunDetailStore.shared.appendTurn(
-                runID: runID,
-                turn: HarnessTurnRecord(
-                    turnIndex: turn,
-                    model: response.model,
-                    requestedAt: requestedAt,
-                    respondedAt: respondedAt,
-                    stopReason: response.stopReason,
-                    inputTokens: response.usage?.inputTokens,
-                    outputTokens: response.usage?.outputTokens,
-                    cacheReadInputTokens: response.usage?.cacheReadInputTokens,
-                    cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
-                    toolCalls: toolRecords
-                )
-            )
+            await HarnessRunDetailStore.shared.appendTurn(runID: runID, turn: makeTurnRecord(toolCalls: toolRecords))
 
-            let assistantPreviewForTurn: String = {
-                let text = response.content.compactMap { block -> String? in
-                    if case .text(let t) = block { return t } else { return nil }
-                }.joined(separator: " ")
-                return String(text.prefix(200))
-            }()
             AgentObservabilityLog.shared.record(.harnessTurn(
                 id: UUID(),
                 t: turnStartedAt,
@@ -517,7 +417,7 @@ public final class ComputerUseHarness {
                 modelID: response.model,
                 systemBlocksPreview: systemBlocksPreview,
                 userContentPreview: userPreviewForTurn,
-                assistantPreview: assistantPreviewForTurn,
+                assistantPreview: String(assistantText.prefix(200)),
                 toolCalls: observabilityToolCalls,
                 inputTokens: response.usage?.inputTokens,
                 outputTokens: response.usage?.outputTokens,
@@ -643,11 +543,8 @@ public final class ComputerUseHarness {
         return [openApp, openURL, applescript, runShortcut, axQuery, axPress, axSetValue, menuShortcut, computer]
     }
 
-    /// Beta headers for a given user-selected model. The computer-use header
-    /// is model-family-specific (see `AgentModel.computerUseBetaHeader`);
-    /// the others (prompt-caching, interleaved-thinking) are constant.
     private static func betaHeaders(for model: AgentModel) -> [String] {
-        return [
+        [
             model.computerUseBetaHeader,
             "prompt-caching-2024-07-31",
             "interleaved-thinking-2025-05-14"
@@ -701,20 +598,11 @@ public final class ComputerUseHarness {
 
         var blocks: [SystemBlock] = [SystemBlock(text: staticText, cache: true)]
 
+        // contextSummary is the Mercury/local-renderer brief, already structured.
         var dynamicParts: [String] = []
-        if !contextSummary.isEmpty {
-            // The contextSummary is the Mercury/local-renderer brief itself — already
-            // structured ("## What the user wants" / "## You are here" / ...). Phase 4
-            // moved authority from raw "activation context" prose into the selector's brief,
-            // so we emit it as-is without wrapper text.
-            dynamicParts.append(contextSummary)
-        }
-        if !settings.preferences.isEmpty {
-            dynamicParts.append("User preferences:\n\(settings.preferences)")
-        }
-        if !settings.systemPrompt.isEmpty {
-            dynamicParts.append(settings.systemPrompt)
-        }
+        if !contextSummary.isEmpty { dynamicParts.append(contextSummary) }
+        if !settings.preferences.isEmpty { dynamicParts.append("User preferences:\n\(settings.preferences)") }
+        if !settings.systemPrompt.isEmpty { dynamicParts.append(settings.systemPrompt) }
         dynamicParts.append("Reasoning effort: \(settings.reasoningEffort.rawValue).")
 
         if !dynamicParts.isEmpty {
@@ -726,18 +614,11 @@ public final class ComputerUseHarness {
     // MARK: - Cache marker management
 
     private func applyRollingCacheMarker(to messages: inout [Message]) {
-        var latestIdx: Int?
-        for i in stride(from: messages.count - 1, through: 0, by: -1) {
-            if messages[i].role == "user",
-               messages[i].content.contains(where: { if case .toolResult = $0 { return true } else { return false } }) {
-                latestIdx = i
-                break
-            }
+        let latestIdx = messages.lastIndex {
+            $0.role == "user" && $0.content.contains { if case .toolResult = $0 { true } else { false } }
         }
         guard let latestIdx else { return }
-
-        for i in messages.indices {
-            guard messages[i].role == "user" else { continue }
+        for i in messages.indices where messages[i].role == "user" {
             let shouldMark = (i == latestIdx)
             messages[i].content = messages[i].content.map { block in
                 if case .toolResult = block { return block.withCache(shouldMark) }
@@ -753,11 +634,9 @@ public final class ComputerUseHarness {
         let missing: String
     }
 
-    /// Single fast Haiku call that grades whether the agent's final claim
-    /// actually satisfies every explicit sub-goal in the user's voice
-    /// transcript. Returns `complete=true` on any parse failure so the verifier
-    /// fails open — we don't want to trap the harness in a verification loop
-    /// because the grader misbehaved. The harness caps total retries above.
+    /// Grades whether the agent's final claim satisfies every sub-goal in the
+    /// transcript. Fails open on parse errors so a misbehaving grader can't
+    /// trap the harness; total retries are capped in `run(_:)`.
     private func verifyCompletion(
         transcript: String,
         finalText: String,
@@ -798,7 +677,7 @@ public final class ComputerUseHarness {
             let jsonSlice = String(raw[start...end])
             struct Parsed: Decodable { let complete: Bool; let missing: String? }
             guard let data = jsonSlice.data(using: .utf8),
-                  let parsed = try? Self.verifierDecoder.decode(Parsed.self, from: data) else {
+                  let parsed = try? JSONDecoder().decode(Parsed.self, from: data) else {
                 log.warning("harness.verifier_decode_fail json=\(jsonSlice.prefix(200))")
                 return CompletionVerdict(complete: true, missing: "")
             }
@@ -837,22 +716,15 @@ public final class ComputerUseHarness {
         max(0, Int(end.timeIntervalSince(start) * 1000))
     }
 
-    private func primaryDisplayPixelSize() -> CGSize {
-        guard let screen = NSScreen.main else { return CGSize(width: 2560, height: 1664) }
-        let scale = screen.backingScaleFactor
-        let size = screen.frame.size
-        return CGSize(width: size.width * scale, height: size.height * scale)
-    }
-
     /// macOS logical points (NSScreen.frame). The coordinate space CGEvent
-    /// uses for mouse positioning. NOT backing-store pixels.
+    /// uses for mouse positioning.
     private func primaryLogicalDisplaySize() -> CGSize {
         NSScreen.main?.frame.size ?? CGSize(width: 1440, height: 900)
     }
 
     /// Resize a JPEG so its longest edge is ≤ `maxLongEdge`. Returns nil on
     /// any decode/encode failure so the caller can fall back to the original.
-    static func resizeJPEG(_ data: Data, maxLongEdge: Int) -> Data? {
+    private static func resizeJPEG(_ data: Data, maxLongEdge: Int) -> Data? {
         guard let src = NSBitmapImageRep(data: data) else { return nil }
         let w = src.pixelsWide
         let h = src.pixelsHigh
@@ -878,10 +750,8 @@ public final class ComputerUseHarness {
         return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
     }
 
-    /// Scale the logical display down so the longest edge equals `maxLongEdge`,
-    /// preserving aspect ratio. Used to derive the agent's coordinate space —
-    /// also matches what `ScreenCapture.snapshot(maxLongEdge:)` will produce
-    /// when we ask it for screenshots at the same cap.
+    /// Scale `logicalSize` so its longest edge equals `maxLongEdge`, preserving
+    /// aspect ratio. Matches `ScreenCapture.snapshot(maxLongEdge:)` output.
     private func computeAgentTargetSize(logicalSize: CGSize, maxLongEdge: Int) -> CGSize {
         let longest = max(logicalSize.width, logicalSize.height)
         guard longest > CGFloat(maxLongEdge), longest > 0 else { return logicalSize }
@@ -892,28 +762,21 @@ public final class ComputerUseHarness {
         )
     }
 
-    /// Compact JSON representation of a tool input. Used for the Dev Tools
-    /// per-turn drill-in — small enough to render inline, big enough to debug.
-    private static let verifierDecoder = JSONDecoder()
-
     private static let compactJSONEncoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = [.sortedKeys]
         return e
     }()
 
+    /// Compact JSON for the Dev Tools per-turn drill-in.
     fileprivate static func compactJSON(_ value: JSON, limit: Int = 240) -> String {
-        if let data = try? compactJSONEncoder.encode(value), let text = String(data: data, encoding: .utf8) {
-            if text.count <= limit { return text }
-            let prefix = text.prefix(limit)
-            return "\(prefix)…"
-        }
-        return "<unencodable>"
+        guard let data = try? compactJSONEncoder.encode(value),
+              let text = String(data: data, encoding: .utf8) else { return "<unencodable>" }
+        return text.count <= limit ? text : "\(text.prefix(limit))…"
     }
 
-    /// Condensed multi-block preview for the observability log. Unlike
-    /// `previewText`, this surfaces image dimensions and error markers because
-    /// the timeline viewer treats screenshots as load-bearing data.
+    /// Multi-block preview that surfaces image dimensions + error markers for
+    /// the observability log (screenshots are load-bearing in the timeline).
     fileprivate static func toolResultPreview(content: [ContentBlock], isError: Bool) -> String {
         var pieces: [String] = []
         if isError { pieces.append("ERROR") }
@@ -921,61 +784,52 @@ public final class ComputerUseHarness {
             switch block {
             case .text(let t):
                 let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    pieces.append(String(trimmed.prefix(180)))
-                }
+                if !trimmed.isEmpty { pieces.append(String(trimmed.prefix(180))) }
             case .image(_, let base64, _):
-                if let data = Data(base64Encoded: base64),
-                   let img = NSImage(data: data) {
-                    let w = Int(img.size.width)
-                    let h = Int(img.size.height)
-                    pieces.append("screenshot \(w)x\(h)")
+                if let data = Data(base64Encoded: base64), let img = NSImage(data: data) {
+                    pieces.append("screenshot \(Int(img.size.width))x\(Int(img.size.height))")
                 } else {
                     pieces.append("screenshot")
                 }
-            case .toolUse:
-                pieces.append("<tool_use>")
-            case .toolResult:
-                pieces.append("<tool_result>")
+            case .toolUse: pieces.append("<tool_use>")
+            case .toolResult: pieces.append("<tool_result>")
             case .thinking(let t, _):
                 let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    pieces.append("thinking: \(String(trimmed.prefix(120)))")
-                }
-            case .redactedThinking:
-                pieces.append("<redacted_thinking>")
+                if !trimmed.isEmpty { pieces.append("thinking: \(String(trimmed.prefix(120)))") }
+            case .redactedThinking: pieces.append("<redacted_thinking>")
             }
             if pieces.joined(separator: " · ").count > 200 { break }
         }
         let joined = pieces.joined(separator: " · ")
-        if joined.count > 200 { return String(joined.prefix(200)) + "…" }
-        return joined.isEmpty ? "<empty>" : joined
+        if joined.isEmpty { return "<empty>" }
+        return joined.count > 200 ? String(joined.prefix(200)) + "…" : joined
     }
 
-    /// Joined preview of the harness's system blocks (cached + dynamic) for
-    /// the observability timeline. First 240 chars per block, capped at 400 total.
+    /// First 240 chars per system block, joined and capped at 400 total.
     fileprivate static func systemBlocksPreview(_ blocks: [SystemBlock]) -> String {
         let joined = blocks.map { String($0.text.prefix(240)) }.joined(separator: "\n---\n")
-        if joined.count > 400 { return String(joined.prefix(400)) + "…" }
-        return joined
+        return joined.count > 400 ? String(joined.prefix(400)) + "…" : joined
     }
 
-    /// Pulls the first text block out of a tool result's content array and
-    /// truncates it. Image results render as `<image>`.
+    /// First text block in a tool result, truncated. Image-only results render as `<image>`.
     fileprivate static func previewText(of content: [ContentBlock], limit: Int) -> String {
         for block in content {
             switch block {
             case .text(let t):
                 let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty { continue }
-                if trimmed.count <= limit { return trimmed }
-                return "\(trimmed.prefix(limit))…"
-            case .image:
-                return "<image>"
-            default:
-                continue
+                return trimmed.count <= limit ? trimmed : "\(trimmed.prefix(limit))…"
+            case .image: return "<image>"
+            default: continue
             }
         }
         return ""
+    }
+
+    /// Joined text-block contents from an assistant response.
+    fileprivate static func joinedText(in content: [ContentBlock]) -> String {
+        var parts: [String] = []
+        for case .text(let t) in content { parts.append(t) }
+        return parts.joined(separator: " ")
     }
 }

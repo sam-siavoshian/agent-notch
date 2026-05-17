@@ -1,13 +1,8 @@
 //
 //  TextToSpeechService.swift
-//  Agent in the Notch
 //
-//  Streams raw PCM16 from OpenAI TTS via chunked HTTP transfer, feeding
-//  AVAudioPlayerNode as bytes arrive. First audio plays in ~100ms instead
-//  of waiting for the full file to download.
-//
-//  Endpoint: POST /v1/audio/speech with response_format=pcm
-//  Output:   24 kHz · mono · PCM16 little-endian → converted to Float32 for AVAudioEngine.
+//  Streams raw PCM16 (24 kHz mono LE) from OpenAI TTS into AVAudioPlayerNode as
+//  bytes arrive. First audio plays in ~100ms.
 //
 
 import AVFoundation
