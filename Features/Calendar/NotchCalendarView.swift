@@ -461,9 +461,13 @@ private struct EventCard: View {
 
     // MARK: text
 
+    private static let shortTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.timeStyle = .short; return f
+    }()
+
     private var timeText: String {
         if event.isAllDay { return "All day" }
-        let f = DateFormatter(); f.timeStyle = .short
+        let f = Self.shortTimeFormatter
         let start = f.string(from: event.startDate)
         let end = f.string(from: event.endDate)
         return "\(start) – \(end)"
