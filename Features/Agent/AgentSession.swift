@@ -17,8 +17,16 @@ public final class AgentSession {
     public static let shared = AgentSession()
 
     private var readyObserver: NSObjectProtocol?
+    private var currentRunTask: Task<Void, Never>?
 
     private init() {}
+
+    /// Cancel any in-flight harness run. Triggered by the kill-switch
+    /// soft-stop path; safe to call when no run is active.
+    public func cancelCurrentRun() {
+        currentRunTask?.cancel()
+        currentRunTask = nil
+    }
 
     public func start() {
         guard readyObserver == nil else { return }
@@ -47,23 +55,25 @@ public final class AgentSession {
         }
         log.info("session.fire transcript=\(transcript)")
 
-        // Mark the start of a new agent run in the observability timeline. The
-        // `currentRunEvents()` slice depends on this being the first event of
-        // the run.
         AgentObservabilityLog.shared.record(.longPressTranscript(
             id: UUID(), t: Date(), transcript: transcript
         ))
 
-        // Phase 4 Mercury path: a single Selector call returns BOTH the resolved
-        // intent and the markdown brief (formerly two passes — Haiku resolver +
-        // ContextActivationBuilder, both deleted in Phase 5b). Brief is handed
-        // to the harness verbatim as `contextSummary`; intent is mapped to the
-        // transport `ContextResolvedIntent` shape until the harness Input is
-        // retyped to take `CIntent` directly.
+        // Fast-path: run before Mercury so obvious commands (open URL, Spotify,
+        // Reminders) complete in ~0ms without paying the ~600ms Mercury round-trip.
+        let routed = await IntentRouter.tryHandle(transcript: transcript)
+        if case .handled(let summary, let affirmation) = routed {
+            log.info("session.fast_path summary=\(summary)")
+            TextToSpeechService.shared.speak(affirmation)
+            AgentState.shared.set(.idle, detail: summary)
+            return
+        }
+
+        // Mercury path: Selector assembles L2+L3+L4+L5+story and returns a brief
+        // + structured intent in ~600ms.
         let result = await ContextSelector.shared.select(transcript: transcript)
         log.info("session.selector latency=\(String(format: "%.2f", result.latencyS))s degraded=\(result.degraded) model=\(result.modelUsed ?? "<local>") brief_len=\(result.brief.count)")
 
-        // Record L2 + selector result for the timeline.
         AgentObservabilityLog.shared.record(.l2Snapshot(
             id: UUID(),
             t: result.l2.capturedAt,
@@ -84,44 +94,18 @@ public final class AgentSession {
             briefLength: result.brief.count
         ))
 
-        let legacyIntent = Self.mapToLegacyIntent(result.intent, degraded: result.degraded, latencyS: result.latencyS)
-
         let input = ComputerUseHarness.Input(
             transcript: transcript,
             contextSummary: result.brief,
-            resolvedIntent: legacyIntent,
+            intentVerb: result.intent.verb,
             initiationScreenshot: result.initiationScreenshot
         )
-        await ComputerUseHarness.shared.run(input)
-    }
-
-    /// Maps the Phase 4 `CIntent` (Selector output) into the
-    /// `ContextResolvedIntent` shape still consumed by `ComputerUseHarness.Input`.
-    /// Phase 5b deleted the old Haiku resolver but kept the typed payload as a
-    /// transport shim; a follow-up commit will retype the harness Input to
-    /// take `CIntent` directly and drop this helper.
-    private static func mapToLegacyIntent(_ intent: CIntent, degraded: Bool, latencyS: Double) -> ContextResolvedIntent {
-        // CIntent.Entity (label, kind, resolvedTo) -> ContextEntityResolution
-        // (userPhrase, entityID, entityLabel, entityType, confidence, evidence)
-        let entities: [ContextEntityResolution] = intent.entities.map { e in
-            ContextEntityResolution(
-                userPhrase: e.label,
-                entityID: e.resolvedTo,
-                entityLabel: e.resolvedTo ?? e.label,
-                entityType: e.kind,
-                confidence: intent.confidence,
-                evidence: "selector"
-            )
+        currentRunTask?.cancel()
+        let t = Task { @MainActor in
+            await ComputerUseHarness.shared.run(input)
         }
-        return ContextResolvedIntent(
-            verb: intent.verb,
-            target: intent.target,
-            resolvedEntities: entities,
-            candidateRecipes: [],            // recipes are already inlined in the brief
-            inferredGoal: intent.resolvedTarget ?? intent.target ?? "",
-            confidence: intent.confidence,
-            resolverLatencyMs: Int(latencyS * 1000.0),
-            usedFallback: degraded
-        )
+        currentRunTask = t
+        await t.value
+        currentRunTask = nil
     }
 }

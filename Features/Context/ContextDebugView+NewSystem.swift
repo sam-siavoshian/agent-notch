@@ -1,9 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Phase 1-3 context-system inspector. Replaces (visually, not in code) the
-/// legacy debug views once Phase 5b cuts land. For now it sits alongside them.
-///
+/// Phase 1-3 context-system inspector.
 /// Polls `EventLog.shared` / `L5Store.shared` / `PrivacyGate.shared` /
 /// `AnchorRecorder.shared` every 1s and renders the latest state.
 public struct ContextDebugNewSystemView: View {

@@ -15,6 +15,7 @@ struct AgentSettingsView: View {
             reasoningEffortRow
             cursorColorRow
             ttsVoiceRow
+            killSwitchRow
             quitRow
             savedBadge
         }
@@ -107,6 +108,15 @@ struct AgentSettingsView: View {
         }
     }
 
+    private var killSwitchRow: some View {
+        SettingRow(title: "Kill Switch") {
+            ShortcutRecorderView(
+                shortcut: store.killSwitchShortcut,
+                onChange: { store.killSwitchShortcut = $0 }
+            )
+        }
+    }
+
     private var quitRow: some View {
         HStack {
             Spacer()
@@ -185,5 +195,59 @@ private struct SaveKeyButton: View {
                 .onChanged { _ in if enabled { pressed = true } }
                 .onEnded { _ in pressed = false }
         )
+    }
+}
+
+private struct ShortcutRecorderView: View {
+    let shortcut: KillSwitchShortcut
+    let onChange: (KillSwitchShortcut) -> Void
+
+    @State private var recording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        Button {
+            if recording { stopRecording() } else { startRecording() }
+        } label: {
+            GhostPill(tint: recording ? SoftPill.Status.amber : SoftPill.Text.secondary) {
+                HStack(spacing: 4) {
+                    Image(systemName: recording ? "record.circle" : "keyboard")
+                        .font(.system(size: 9, weight: .bold))
+                    Text(recording ? "Press keys…" : shortcut.displayString)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Click to record a new kill-switch shortcut. Press a chord with at least one modifier; Escape cancels.")
+        .onDisappear { stopRecording() }
+    }
+
+    private func startRecording() {
+        guard monitor == nil else { return }
+        recording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Escape cancels without saving.
+            if event.keyCode == 0x35 {
+                stopRecording()
+                return nil
+            }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // Require at least one modifier so plain letters don't bind.
+            guard !mods.isEmpty else { return nil }
+            let label = (event.charactersIgnoringModifiers ?? "?").uppercased()
+            onChange(KillSwitchShortcut(
+                keyCode: event.keyCode,
+                keyLabel: label,
+                modifiers: mods.rawValue
+            ))
+            stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+        recording = false
     }
 }

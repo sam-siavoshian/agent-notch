@@ -30,9 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CursorCompanion.shared.start()
         ContextCoordinator.shared.start()
         ContextDevToolsWindowController.shared.install()
-        ContextDevToolsWindowController.shared.present()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
+        KillSwitch.shared.start()
         // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
         AdapterRegistry.shared.register(BrowserAdapter())
         AdapterRegistry.shared.register(TerminalAdapter())

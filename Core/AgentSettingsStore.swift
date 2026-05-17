@@ -7,13 +7,45 @@
 //  Agent wiring (for inference inputs).
 //
 
-import Foundation
+import AppKit
 import Combine
+import Foundation
 
 public enum TTSVoice: String, Codable, CaseIterable, Identifiable, Sendable {
     case alloy, echo, fable, nova, onyx, shimmer
     public var id: String { rawValue }
     public var displayName: String { rawValue.capitalized }
+}
+
+public struct KillSwitchShortcut: Codable, Equatable, Sendable {
+    /// `NSEvent.keyCode` of the trigger key — used for matching.
+    public var keyCode: UInt16
+    /// Glyph captured at record time (e.g. "K", "ESC") — display only.
+    public var keyLabel: String
+    /// `NSEvent.ModifierFlags.deviceIndependentFlagsMask` intersection, raw value.
+    public var modifiers: UInt
+
+    public init(keyCode: UInt16, keyLabel: String, modifiers: UInt) {
+        self.keyCode = keyCode
+        self.keyLabel = keyLabel
+        self.modifiers = modifiers
+    }
+
+    public static let `default` = KillSwitchShortcut(
+        keyCode: 0x28,                                              // kVK_ANSI_K
+        keyLabel: "K",
+        modifiers: NSEvent.ModifierFlags([.command, .shift]).rawValue
+    )
+
+    public var displayString: String {
+        let mods = NSEvent.ModifierFlags(rawValue: modifiers)
+        var s = ""
+        if mods.contains(.control) { s += "⌃" }
+        if mods.contains(.option)  { s += "⌥" }
+        if mods.contains(.shift)   { s += "⇧" }
+        if mods.contains(.command) { s += "⌘" }
+        return s + keyLabel.uppercased()
+    }
 }
 
 public struct AgentSettings: Equatable, Sendable {
@@ -29,6 +61,9 @@ public struct AgentSettings: Equatable, Sendable {
     /// screen after major-change captures and accumulates per-surface UI/UX
     /// memory. Defaults on; no-ops without `GEMINI_API_KEY`.
     public var geminiObserverEnabled: Bool
+    /// Global panic-button shortcut. First press soft-stops the harness;
+    /// a second press within 2s SIGKILLs the app.
+    public var killSwitchShortcut: KillSwitchShortcut
 
     public static let defaultNeverLogApps: [String] = [
         "com.1password.1password7",
@@ -47,7 +82,8 @@ public struct AgentSettings: Equatable, Sendable {
         collectionPaused: false,
         neverLogApps: AgentSettings.defaultNeverLogApps,
         mercuryEnabled: true,
-        geminiObserverEnabled: true
+        geminiObserverEnabled: true,
+        killSwitchShortcut: .default
     )
 }
 
@@ -57,6 +93,7 @@ extension AgentSettings: Codable {
         case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
         case collectionPaused, neverLogApps, mercuryEnabled
         case geminiObserverEnabled
+        case killSwitchShortcut
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,6 +107,7 @@ extension AgentSettings: Codable {
         neverLogApps         = (try? c.decode([String].self,             forKey: .neverLogApps))         ?? AgentSettings.defaultNeverLogApps
         mercuryEnabled       = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))       ?? true
         geminiObserverEnabled = (try? c.decode(Bool.self,                forKey: .geminiObserverEnabled)) ?? true
+        killSwitchShortcut   = (try? c.decode(KillSwitchShortcut.self,   forKey: .killSwitchShortcut))   ?? .default
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -83,6 +121,7 @@ extension AgentSettings: Codable {
         try c.encode(neverLogApps,         forKey: .neverLogApps)
         try c.encode(mercuryEnabled,       forKey: .mercuryEnabled)
         try c.encode(geminiObserverEnabled, forKey: .geminiObserverEnabled)
+        try c.encode(killSwitchShortcut,   forKey: .killSwitchShortcut)
     }
 }
 
@@ -166,6 +205,11 @@ public final class AgentSettingsStore: ObservableObject {
     public var geminiObserverEnabled: Bool {
         get { settings.geminiObserverEnabled }
         set { update { $0.geminiObserverEnabled = newValue } }
+    }
+
+    public var killSwitchShortcut: KillSwitchShortcut {
+        get { settings.killSwitchShortcut }
+        set { update { $0.killSwitchShortcut = newValue } }
     }
 
     public func update(_ mutate: (inout AgentSettings) -> Void) {

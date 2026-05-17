@@ -5,10 +5,6 @@
 //  Native context feature entry point. Owns click-triggered captures and
 //  exposes a compact text packet to AgentSession through AgentInterfaces.
 //
-//  Phase 5b: the legacy Gemini multi-lane observation fan-out and update lane
-//  were removed. Surface understanding now comes from the Phase 1-3 monitors
-//  (clicks, app switches, dirty detector) feeding the memory store directly.
-//
 
 import Foundation
 import CoreGraphics
@@ -134,10 +130,7 @@ public final class ContextCoordinator: RecentActivityContext {
     }
 
     /// Returns the brief from the most recent Selector run, or an empty string
-    /// if no run has happened yet. The Dev Tools poll this for the live header
-    /// preview. The legacy `ContextActivationBuilder` prose was removed in
-    /// Phase 5b — Selector + LocalBriefRenderer is now the single source of
-    /// activation context.
+    /// if no run has happened yet. The Dev Tools poll this for the live header preview.
     public func currentActivationPreview() async -> String {
         ContextSelector.shared.lastRun?.brief ?? ""
     }
@@ -224,10 +217,8 @@ public final class ContextCoordinator: RecentActivityContext {
                 ResourceIndex.shared.record(resource)
             }
 
-            // Dirty-region classification still drives memory hygiene and the
-            // Dev Tools dirty pane. Phase 5b removed the Gemini fan-out that
-            // used to fire on minor/major change; classification is now a
-            // pure local signal.
+            // Dirty-region classification drives memory hygiene and the
+            // Dev Tools dirty pane; classification is a pure local signal.
             let signature = ContextDirtyDetector.signature(
                 from: snapshot.jpegData,
                 screenWidth: snapshot.width,

@@ -50,7 +50,7 @@ Set these in your Xcode scheme's environment or your shell before launching.
 - **Notch UI**: the agent's home, a fresh SwiftUI app. Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
-The agent (Claude Haiku 4.5) receives: voice transcript (OpenAI Whisper API, `whisper-1`) + a Mercury 2-rendered context brief (assembled from L2 live snapshot, L3 per-app recipes, L4 prefs, L5 active_task, and `learned_surfaces` from the background `SurfaceMemoryStore`) + an initiation screenshot attached as the first user-message image. It then drives computer-use actions via CGEvent.
+Voice transcripts first hit `IntentRouter` — a zero-model fast-path that handles open-URL, Spotify controls, and Reminders without any API call. Non-trivial commands continue to Mercury 2 for context assembly and then to Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for the computer-use loop. The agent receives: voice transcript + a Mercury 2-rendered context brief (assembled from L2 live snapshot, L3 per-app recipes, L4 prefs, L5 active_task, `learned_surfaces`, and `recent_story` from `CaptureStoryLog`) + an initiation screenshot attached as the first user-message image. It then drives computer-use actions via CGEvent and speaks responses via `TextToSpeechService` (OpenAI TTS streaming).
 
 Full spec: `PRD.md`.
 
@@ -61,6 +61,7 @@ Full spec: `PRD.md`.
 ```
 Features/Notch/       — notch UI, settings panel (Wyatt)               ✅ done
 Features/Cursor/      — PNG overlay, long-press, click hooks            ✅ done
+Features/Calendar/    — EventKit calendar tab in notch (Wyatt)          ✅ done
 Features/Context/     — L1-L5 monitors, Gemini observer, Mercury selector ✅ done
 Features/Agent/       — Claude Haiku 4.5 wiring, computer-use harness   ✅ done
 Features/Onboarding/  — permission prompts at first launch              ✅ done
@@ -70,7 +71,7 @@ Core/                 — shared types, settings store, secrets           ✅ do
 The Context system runs **two parallel paths**:
 
 1. **Continuous background observer (Gemini-driven).** `ContextCoordinator.capture(...)` fires on click + app-switch + startup. If `ContextDirtyDetector` classifies the frame as a major change, a detached task calls `GeminiObserver.observe(...)` (throttled ≥8s between calls, `gemini-3.1-flash-lite`). The structured `SurfaceObservation` is appended to `ScreenObservationLog` (live stream) AND merged into `SurfaceMemoryStore` — a persistent per-(app, surface) JSON tree at `~/Library/Application Support/AgentNotch/ContextMemory/surfaces/<app>/<surface>.json`. Over many observations the agent builds a UI map of every app the user touches.
-2. **Long-press foreground (Mercury-driven, fast).** Long-press → `VoiceRecordingService` → Whisper → `AgentSession.fireAgentTurn(transcript:)` → `ContextSelector.select(transcript:)`. The selector assembles an L2 snapshot (AX walk + OCR + selection + clipboard + adapters, 0.4s deadline) + L3 recipes for the active app + L4 user prefs + L5 active_task + `learned_surfaces` (top 6 surfaces × 12 controls from `SurfaceMemoryStore.memories(for: app)`). One Mercury 2 call returns `{intent, brief}` in ~600ms p50. The brief is handed verbatim to `ComputerUseHarness` as `contextSummary`, AND the initiation screenshot JPEG is attached as the first user-message `image` block to Claude Haiku 4.5.
+2. **Long-press foreground (fast-path + Mercury-driven).** Long-press → `VoiceRecordingService` → Whisper → `AgentSession.fireAgentTurn(transcript:)`. First, `IntentRouter.tryHandle()` runs synchronously — if it matches (open URL, Spotify, Reminder), it executes and returns immediately without any Mercury call. Otherwise, `ContextSelector.select(transcript:)` assembles an L2 snapshot (AX walk + OCR + selection + clipboard + adapters, 0.4s deadline) + L3 recipes for the active app + L4 user prefs + L5 active_task + `learned_surfaces` (top 6 surfaces × 12 controls from `SurfaceMemoryStore`) + `recent_story` (last 20 entries from `CaptureStoryLog`, capped at 5 minutes). One Mercury 2 call returns `{intent, brief}` in ~600ms p50. The brief is handed verbatim to `ComputerUseHarness` as `contextSummary`, AND the initiation screenshot JPEG is attached as the first user-message `image` block to Claude Haiku 4.5.
 
 Long-press does **not** call Gemini — the 0.4s L2 deadline keeps the foreground path sub-second. Gemini's value at long-press time is indirect: it pre-built `SurfaceMemoryStore` during prior background observations.
 
@@ -82,11 +83,15 @@ All features should use these — never duplicate them.
 |---|---|
 | `AgentInterfaces.swift` | Protocol stubs + static DI slots (`AgentInterfaces.cursor`, `.context`) |
 | `AgentState.swift` | `AgentState.shared` — live status the Notch UI reads; call `.set()` to update |
-| `AgentSettingsStore.swift` | `AgentSettingsStore.shared` — persisted user settings |
+| `AgentSettingsStore.swift` | `AgentSettingsStore.shared` — persisted user settings (includes `TTSVoice`, `ttsVoice`) |
 | `AgentReasoningEffort.swift` | Enum: `.low` / `.medium` / `.high` |
 | `CursorColor.swift` | Enum: `.red` / `.green` / `.blue` / `.yellow` — has `.assetName` for PNG lookup |
 | `ScreenCapture.swift` | `ScreenCapture.shared` — shared screenshot utility |
-| `Secrets.swift` | `Secrets.anthropicAPIKey` — reads from env, never hardcoded |
+| `Secrets.swift` | Key resolution — env → Keychain; exposes `anthropicAPIKey`, `openAIAPIKey`, `openRouterAPIKey`, `geminiAPIKey` |
+| `AppRelaunch.swift` | `AppRelaunch.relaunch()` — relaunches the app process (used by Settings) |
+| `EnvLoader.swift` | `Env.load()` / `Env.value(_:)` — hydrates process environment from `.env` file at launch |
+| `Keychain.swift` | `Keychain.get(_:)` / `Keychain.set(_:account:)` — per-account Keychain storage under service `com.agentnotch.app` |
+| `Log.swift` | `Log(category:)` — os_log wrapper; use instead of `print` or `NSLog` |
 
 ---
 
@@ -96,12 +101,14 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `NotchContentView.swift` | Root view — open/closed (420×280), Home/Settings/Spotify tabs, Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
-| `NotchHomeView.swift` | Home tab — agent orb, last transcript, activity feed |
-| `AgentSettingsView.swift` | Settings tab — 4 knobs + Advanced section (system prompt, context diagnostics) |
-| `ClosedNotchView.swift` | Resting dot/waveform in the closed notch |
+| `NotchContentView.swift` | Root view — open/closed (420×280), Home/Settings/Spotify/Calendar tabs, Cmd+D + swipe gestures, tab persisted via `@AppStorage` |
+| `NotchHomeView.swift` | Home tab — agent orb, last transcript, activity feed, battery row |
+| `AgentSettingsView.swift` | Settings tab — knobs including TTS voice picker + Advanced section (system prompt, context diagnostics) |
+| `ClosedNotchView.swift` | Resting dot/waveform in the closed notch; shows battery level via `BatteryService` |
 | `NotchShape.swift` | Custom `Shape` for the notch geometry |
+| `NotchLiveActivityView.swift` | Compact live-activity bar shown in the closed notch when agent is active |
 | `AgentStateView.swift` | Standalone status row (available but not used in current tab layout) |
+| `BatteryService.swift` | `BatteryService.shared` — IOKit battery level + charging state; `@ObservedObject` by Notch views |
 | `SoftPill.swift` | Reusable pill-style UI component used across Notch views |
 
 ### Features/Cursor/ (Sam)
@@ -118,7 +125,7 @@ All features should use these — never duplicate them.
 
 ### Features/Context/ (Ashan)
 
-**Coordination + legacy capture pipeline**
+**Coordination + capture pipeline**
 
 | File | What it is |
 |---|---|
@@ -126,14 +133,10 @@ All features should use these — never duplicate them.
 | `ContextClickMonitor.swift` | Debounced click hook via Accessibility API (drives `capture(...)`) |
 | `ContextAppSwitchMonitor.swift` | Capture trigger on `NSWorkspace.didActivateApplicationNotification` |
 | `ContextSnapshotStore.swift` | Rolling buffer of screenshots (max 20) |
-| `ContextMemoryStore.swift` | Legacy learned-UI persistence (Phase 5b shim; new system uses `SurfaceMemoryStore`) |
-| `ContextMemoryRenderer.swift` | Renders learned UI memory to text (legacy renderer kept for fallbacks) |
 | `ContextOCRService.swift` | Native OCR via Vision framework |
 | `ContextWindowMetadataReader.swift` | Reads active app name + window title |
 | `ContextTextSignalFilter.swift` | Cleans OCR output (drops chrome/junk strings) |
 | `ContextDirtyDetector.swift` | dHash + downscaled pixel-diff classifier; gates whether a frame is `.majorChange` and warrants a Gemini call |
-| `ContextActivationBuilder.swift` | Legacy: screenshot buffer → compact text packet (kept for the legacy `RecentActivityContext` path) |
-| `ContextIntentResolver.swift` | Legacy pre-resolver — cheap Haiku pass producing `ContextResolvedIntent` (kept for fallback wiring) |
 | `ContextModels.swift` | Data types: `ContextSnapshot`, `ContextDiagnostics`, etc. |
 | `ContextSchema.swift` | New-system event schema (`CEvent` envelope + variants, L2/L3/L4/L5 types, recipes, resources, active_task) |
 | `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
@@ -144,9 +147,10 @@ All features should use these — never duplicate them.
 |---|---|
 | `GeminiObserver.swift` | Continuous, throttled observer — single `gemini-3.1-flash-lite` call per major-change capture, ≥8s between calls; gated by `AgentSettingsStore.geminiObserverEnabled` + `GEMINI_API_KEY` |
 | `GeminiVisionClient.swift` | Single-call multimodal client for the observer; PNG + system prompt + per-call user text; 60s timeout (context-caching attempted but Flash Lite enforces ~1024 input-token minimum, so disabled for now) |
-| `SurfaceObservation.swift` | Structured `Codable` observation: frontmost_app, all_visible_apps, screen_layout, current_surface, observable_controls[], cross_app_correlations[], user_visible_state, model_latency_s |
+| `SurfaceObservation.swift` | Structured `Codable` observation: frontmost_app, surface, controls, layout + user-layer fields (narrative, current_goal_guess, continuity_link, content_type, artifact) |
 | `ScreenObservationLog.swift` | In-memory ring (100) + per-line JSONL on disk (`ContextMemory/screen_observations.jsonl`); the Dev Tools "Screen Obs" tab tails this |
 | `SurfaceMemoryStore.swift` | Persistent per-(app, surface) UI knowledge with seen_count + last_seen per control; opportunistic prune; consumed by the Selector as `learned_surfaces` |
+| `CaptureStoryLog.swift` | Append-only chronological story of `SurfaceObservation`s; daily-rotated JSONL + in-memory tail; Selector reads `tail(20)` at long-press time to give Mercury narrative continuity via `recent_story` |
 
 **Path 2: long-press foreground (Mercury 2 + L2-L5)**
 
@@ -194,6 +198,7 @@ All features should use these — never duplicate them.
 | `ContextDebugView+ScreenObs.swift` | Tail of `ScreenObservationLog` — Gemini observer stream |
 | `ContextDebugView+Memory.swift` | Browser of `SurfaceMemoryStore` per-app/per-surface |
 | `ContextDebugView+Mercury.swift` | Per-call Mercury request/response inspector |
+| `ContextDebugView+ModelCalls.swift` | Unified view over every Mercury + Gemini model call; filterable by provider |
 | `ContextDebugView+Intent.swift` | History of selector intents + briefs |
 | `ContextDebugView+AgentRun.swift` | Per-run harness rollup (turns, tokens, latencies) |
 | `ContextDebugView+Harness.swift` | Live harness turn-by-turn trace |
@@ -208,12 +213,16 @@ All features should use these — never duplicate them.
 | File | What it is |
 |---|---|
 | `VoiceRecordingService.swift` | Records mic on longPressBegan; uploads audio to OpenAI Whisper API (`whisper-1`) on longPressEnded; posts `.transcriptReady` |
-| `AgentSession.swift` | Subscribes to `.transcriptReady`; fires one harness turn |
-| `ComputerUseHarness.swift` | Multi-turn Claude computer-use loop (model: `claude-sonnet-4-6`) |
+| `AgentSession.swift` | Subscribes to `.transcriptReady`; runs `IntentRouter` fast-path first, then Selector → harness |
+| `IntentRouter.swift` | Pre-model fast-path: handles open-URL, Spotify controls, and Reminders via pattern matching — no API call needed |
+| `ComputerUseHarness.swift` | Multi-turn Claude computer-use loop (model: `claude-haiku-4-5-20251001`) |
 | `ComputerUseModels.swift` | Codable types for the Anthropic computer-use API |
 | `AnthropicClient.swift` | Raw API client (URLSession + async/await) |
-| `ToolDispatcher.swift` | Maps computer-use tool calls to CGEvent actions |
-| `AgentRunMetrics.swift` | Records per-run metrics to `AgentMetricsStore` |
+| `ToolDispatcher.swift` | Maps computer-use tool calls to CGEvent / AX / AppleScript actions |
+| `AXFastPath.swift` | AX element cache and fast-path helpers used by `ToolDispatcher` for `ax_query` / `ax_press` / `ax_set_value` |
+| `AppleScriptBridge.swift` | Async AppleScript execution wrapper; used by `ToolDispatcher` and `IntentRouter` |
+| `TextToSpeechService.swift` | Streams raw PCM16 from OpenAI TTS in ~100ms; plays via `AVAudioPlayerNode`; called by harness on affirmation text |
+| `AgentRunMetrics.swift` | Per-run metrics (`AgentRunMetricsRecord`) + `HarnessRunDetailStore` for the DevTools harness pane |
 
 ### Features/Onboarding/
 
@@ -223,6 +232,13 @@ All features should use these — never duplicate them.
 | `OnboardingWindowController.swift` | Presents onboarding at first launch; calls `bootAgent()` on dismiss |
 | `PermissionChecker.swift` | Polls permission statuses live |
 | `LucideIcons.swift` | Lucide icon name constants used by onboarding cards |
+
+### Features/Calendar/ (Wyatt)
+
+| File | What it is |
+|---|---|
+| `CalendarService.swift` | `CalendarService.shared` — reads EventKit events for today + tomorrow; `@ObservedObject` by the Calendar tab |
+| `NotchCalendarView.swift` | Calendar tab in the notch — upcoming events list with time + title |
 
 ### Features/Music/ (Wyatt)
 
@@ -263,9 +279,9 @@ AppDelegate.applicationDidFinishLaunching
       → bootAgent()
           → CursorCompanion.shared.start()                // AgentInterfaces.cursor
           → ContextCoordinator.shared.start()             // AgentInterfaces.context (drives GeminiObserver on major-change captures)
-          → ContextDevToolsWindowController.install/present
+          → ContextDevToolsWindowController.shared.install()  // Cmd+Option+D toggle only; window does NOT open automatically
           → VoiceRecordingService.shared.start()          // mic; flushes to OpenAI Whisper
-          → AgentSession.shared.start()                   // subscribes to .transcriptReady; calls Selector → harness
+          → AgentSession.shared.start()                   // subscribes to .transcriptReady; IntentRouter → Selector → harness
           → AdapterRegistry.register(BrowserAdapter / TerminalAdapter / IDEAdapter)
           → AXObserverManager.shared.start()              // must precede KeystrokeMonitor (provides focused-element provider)
           → KeystrokeMonitor.shared.start()               // degrades if Input Monitoring TCC denied
