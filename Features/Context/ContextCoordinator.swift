@@ -227,7 +227,17 @@ public final class ContextCoordinator: RecentActivityContext {
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.35)
-            let recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
+            // OCR on the FULL-RESOLUTION raw CGImage, not the downsampled JPEG.
+            // The 1568px downsample + JPEG-35 compression makes small UI text
+            // unreadable (gives "•O <APII" instead of "API Keys"). Vision .accurate
+            // + the raw image gives clean OCR. Falls back to the JPEG path only
+            // if rawImage is nil (rare — capture failure edge case).
+            let recognizedText: [ContextRecognizedText]
+            if let rawImage = snapshot.rawImage {
+                recognizedText = await ocrService.recognizeText(in: rawImage)
+            } else {
+                recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
+            }
             let previousSnapshot = await store.recentSnapshots().last
             let previousSignature = await store.lastSignature()
             let contextSnapshot = ContextSnapshot(

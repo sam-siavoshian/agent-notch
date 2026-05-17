@@ -27,6 +27,20 @@ public actor ScreenCapture {
         public let height: Int
         public let scale: CGFloat
         public let capturedAt: Date
+        /// Full-resolution CGImage BEFORE the downsample-for-Gemini step.
+        /// Used for OCR so small UI text stays readable. Nil only if the
+        /// raw capture is unavailable. Holds a Core Graphics reference —
+        /// don't retain past the immediate capture turn.
+        public let rawImage: CGImage?
+
+        public init(jpegData: Data, width: Int, height: Int, scale: CGFloat, capturedAt: Date, rawImage: CGImage? = nil) {
+            self.jpegData = jpegData
+            self.width = width
+            self.height = height
+            self.scale = scale
+            self.capturedAt = capturedAt
+            self.rawImage = rawImage
+        }
     }
 
     public init() {}
@@ -71,7 +85,8 @@ public actor ScreenCapture {
             width: image.width,
             height: image.height,
             scale: display.pointPixelScale(),
-            capturedAt: Date()
+            capturedAt: Date(),
+            rawImage: raw
         )
     }
 

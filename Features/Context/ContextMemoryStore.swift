@@ -153,17 +153,27 @@ public actor ContextMemoryStore {
         promoteStableStateFacts(memory: &memory)
 
         let taskSummary = clean(observation.primaryTask) ?? clean(observation.summary) ?? ""
-        memory.current = ContextCurrentWorkMemory(
-            updatedAt: capturedAt,
-            app: appName,
-            surfaceID: resolvedSurfaceID,
-            surfaceTitle: surfaceTitle,
-            task: taskSummary,
-            topEntities: Array(memory.entities
-                .sorted { $0.mentionCount > $1.mentionCount }
-                .prefix(3)
-                .map(\.label))
-        )
+        // Only overwrite memory.current if this observation is more recent than
+        // whatever we already have. Otherwise late-arriving observations from
+        // earlier captures (Gemini latency 10-20s) clobber the current task
+        // with stale narrative from a surface the user has already left.
+        let shouldUpdateCurrent: Bool = {
+            guard let existing = memory.current else { return true }
+            return capturedAt > existing.updatedAt
+        }()
+        if shouldUpdateCurrent {
+            memory.current = ContextCurrentWorkMemory(
+                updatedAt: capturedAt,
+                app: appName,
+                surfaceID: resolvedSurfaceID,
+                surfaceTitle: surfaceTitle,
+                task: taskSummary,
+                topEntities: Array(memory.entities
+                    .sorted { $0.mentionCount > $1.mentionCount }
+                    .prefix(3)
+                    .map(\.label))
+            )
+        }
         let recentSummary: String
         if !taskSummary.isEmpty {
             recentSummary = taskSummary
@@ -1496,39 +1506,83 @@ public actor ContextMemoryStore {
     private static func guessEntityType(_ text: String) -> String {
         let lower = text.lowercased()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // URLs
-        if lower.hasPrefix("http://") || lower.hasPrefix("https://") { return "url" }
+
+        // 1. File paths and known extensions — check FIRST so .swift/.ts beat CamelCase rules.
+        let fileExts: Set<String> = [
+            "swift", "ts", "tsx", "js", "jsx", "py", "rs", "go", "java", "kt",
+            "c", "cpp", "h", "hpp", "m", "mm", "md", "json", "yml", "yaml", "toml",
+            "html", "css", "scss", "sh", "bash", "zsh", "txt", "pdf", "csv", "log",
+            "xml", "plist", "lock", "env", "ini", "conf", "rb", "php", "sql", "tf",
+            "dockerfile", "makefile", "lua"
+        ]
+        if trimmed.hasPrefix("./") || trimmed.hasPrefix("/") || (trimmed.contains("/") && !trimmed.contains(" ")) {
+            // Path-like
+            return "file"
+        }
+        if let dotIdx = trimmed.lastIndex(of: "."),
+           let extToken = trimmed[trimmed.index(after: dotIdx)...].split(separator: " ").first.map(String.init)?.lowercased(),
+           fileExts.contains(extToken) {
+            return "file"
+        }
+
+        // 2. URLs
+        if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("www.") { return "url" }
         if lower.contains(".com/") || lower.contains(".io/") || lower.contains(".dev/") || lower.contains(".app/") || lower.contains(".org/") {
             return "url"
         }
-        // Email-shaped tokens
-        if lower.contains("@"), lower.contains(".") { return "account" }
-        // Ticket-shaped (LETTERS-NUMBERS)
-        if trimmed.range(of: "^[A-Z]{2,}-[0-9]+$", options: .regularExpression) != nil { return "ticket" }
-        // File paths and known extensions
-        let fileExts = ["swift", "ts", "tsx", "js", "py", "rs", "go", "java", "kt", "c", "cpp", "h", "md", "json", "yml", "yaml", "toml", "html", "css", "sh", "txt", "pdf", "csv", "log"]
-        if trimmed.contains("/") || trimmed.hasPrefix(".") {
-            if let dotIdx = trimmed.lastIndex(of: "."),
-               let ext = trimmed[trimmed.index(after: dotIdx)...].split(separator: " ").first.map(String.init)?.lowercased(),
-               fileExts.contains(ext) {
-                return "file"
-            }
-            if trimmed.contains("/"), trimmed.hasSuffix(".sh") || trimmed.hasPrefix("./") { return "file" }
-            if trimmed.contains("/") { return "file" }
+
+        // 3. Email-shaped tokens
+        if lower.contains("@"), lower.contains("."), !lower.contains(" ") { return "account" }
+
+        // 4. ENV-var / secret pattern (ALL_CAPS_WITH_UNDERSCORES, often *_KEY/_TOKEN/_SECRET)
+        if trimmed.range(of: "^[A-Z][A-Z0-9_]{4,}$", options: .regularExpression) != nil {
+            return "env_var"
         }
-        // Error-shaped (CamelCase ending in "Error" / "Exception")
-        if trimmed.hasSuffix("Error") || trimmed.hasSuffix("Exception") { return "error" }
-        // Project / folder hints
-        if lower.hasSuffix(" project") || lower.contains(" project ") { return "project" }
-        if lower.contains("folder") { return "folder" }
-        // Command-line hints
-        if trimmed.hasPrefix("./") || lower.hasPrefix("$ ") || lower.hasPrefix("npm ") || lower.hasPrefix("git ") {
+
+        // 5. Ticket-shaped (LETTERS-NUMBERS) like AUTH-412.
+        if trimmed.range(of: "^[A-Z]{2,}-[0-9]+$", options: .regularExpression) != nil { return "ticket" }
+
+        // 6. Command-line hints — before CamelCase service detection.
+        if trimmed.hasPrefix("./") || lower.hasPrefix("$ ") || lower.hasPrefix("npm ") || lower.hasPrefix("git ") ||
+           lower.hasPrefix("brew ") || lower.hasPrefix("pip ") || lower.hasPrefix("cargo ") {
             return "command"
         }
-        // Person heuristic — two capitalized words
+
+        // 7. Swift/JS/Java identifiers (CamelCase, no spaces). Classify by suffix.
+        let isIdentifierShape = trimmed.range(of: "^[A-Z][A-Za-z0-9_]+$", options: .regularExpression) != nil
+            && !trimmed.contains(" ")
+        if isIdentifierShape {
+            // Order matters: more specific suffixes first.
+            if trimmed.hasSuffix("Error") || trimmed.hasSuffix("Exception") { return "error" }
+            if trimmed.hasSuffix("Service") || trimmed.hasSuffix("Manager") ||
+               trimmed.hasSuffix("Coordinator") || trimmed.hasSuffix("Controller") ||
+               trimmed.hasSuffix("Store") || trimmed.hasSuffix("Repository") ||
+               trimmed.hasSuffix("Factory") || trimmed.hasSuffix("Provider") {
+                return "service"
+            }
+            if trimmed.hasSuffix("View") || trimmed.hasSuffix("ViewModel") ||
+               trimmed.hasSuffix("Pane") || trimmed.hasSuffix("Cell") {
+                return "ui_component"
+            }
+            if trimmed.hasSuffix("Memory") || trimmed.hasSuffix("Record") ||
+               trimmed.hasSuffix("Snapshot") || trimmed.hasSuffix("Observation") {
+                return "record"
+            }
+            // Default identifier classification.
+            return "symbol"
+        }
+
+        // 8. Project / folder hints
+        if lower.hasSuffix(" project") || lower.contains(" project ") { return "project" }
+        if lower.contains("folder") || lower.hasSuffix("/") { return "folder" }
+
+        // 9. Person heuristic — two-to-three capitalized words separated by spaces only.
         if trimmed.range(of: "^[A-Z][a-z]+( [A-Z][a-z]+){1,2}$", options: .regularExpression) != nil {
             return "person"
         }
+
+        // 10. App name shape — 1-3 capitalized words, no special chars.
+        // Reserved for cases where origin labelled it as an "app".
         return "other"
     }
 

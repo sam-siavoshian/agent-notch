@@ -554,23 +554,55 @@ enum ContextMemoryRenderer {
     }
 
     private static func recentActivityBullets(_ memory: ContextAppMemory) -> [String] {
-        let ordered = Array(memory.recent.suffix(12).reversed())
+        let ordered = Array(memory.recent.suffix(20).reversed())
         var bullets: [String] = []
-        var seenLines = Set<String>()
-        var lastKey: String?
+        var seenKeys = Set<String>()
+        var lastNormalized: String?
         for entry in ordered {
-            let key = "\(relativeAge(entry.timestamp))|\(entry.summary)"
-            // Skip if identical to immediately previous (time, summary) pair.
-            if key == lastKey { continue }
-            let line = "- \(relativeAge(entry.timestamp)): \(entry.summary) on \(entry.surfaceTitle)"
-            // Skip if byte-for-byte identical to any line already kept in window.
-            if seenLines.contains(line) { continue }
-            seenLines.insert(line)
-            bullets.append(line)
-            lastKey = key
+            // Normalize so spinner-glyph variants of the same title (⠂ vs ⠐ vs ✳)
+            // and trivial trigger/summary differences collapse to one entry.
+            let normTitle = Self.normalizeTitleForDedup(entry.surfaceTitle)
+            let trimmedSummary = Self.truncateSummary(entry.summary)
+            let dedupKey = "\(normTitle)|\(trimmedSummary)|\(entry.trigger.rawValue)"
+            if dedupKey == lastNormalized { continue }
+            if seenKeys.contains(dedupKey) { continue }
+            seenKeys.insert(dedupKey)
+            lastNormalized = dedupKey
+
+            // Suppress "captures" that are just the trigger name with no real
+            // narrative — they read as noise to the agent.
+            let isJustTriggerNoise = entry.summary == "\(entry.trigger.rawValue) capture"
+            let displaySummary = isJustTriggerNoise
+                ? "\(entry.trigger.rawValue) on \(entry.surfaceTitle)"
+                : "\(trimmedSummary) on \(entry.surfaceTitle)"
+
+            bullets.append("- \(relativeAge(entry.timestamp)): \(displaySummary)")
             if bullets.count >= 6 { break }
         }
         return bullets
+    }
+
+    /// Strip leading Unicode spinner/decoration glyphs so the same iTerm2 tab
+    /// rendered with ⠂ / ⠐ / ⠠ / ✳ animation frames dedupes as one entity.
+    private static func normalizeTitleForDedup(_ title: String) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop leading punctuation/symbol/spinner chars
+        let cleaned = trimmed.drop { ch in
+            ch.unicodeScalars.allSatisfy { CharacterSet.punctuationCharacters.contains($0) || CharacterSet.symbols.contains($0) || $0.value == 0x2800 || (0x2800...0x28FF).contains($0.value) || $0.properties.generalCategory == .otherSymbol }
+        }
+        return String(cleaned).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Recent Activity is a quick-scan layer. Cap at one sentence or 100 chars.
+    /// Verbose Gemini task descriptions get sent to per-surface memory instead.
+    private static func truncateSummary(_ summary: String) -> String {
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count <= 100 { return trimmed }
+        // Prefer the first sentence boundary.
+        if let dot = trimmed.firstIndex(of: "."), trimmed.distance(from: trimmed.startIndex, to: dot) < 140 {
+            return String(trimmed[..<dot]) + "."
+        }
+        return String(trimmed.prefix(100)) + "…"
     }
 
     private static func entityBullets(_ memory: ContextAppMemory) -> [String] {
@@ -667,15 +699,11 @@ enum ContextMemoryRenderer {
                 lines.append("    - \(text) _(\(fact.category))_")
             }
         }
-        if !surface.textHighlights.isEmpty {
-            let values = cleanValues(surface.textHighlights).prefix(6)
-            if !values.isEmpty {
-                lines.append("  - OCR fallback highlights:")
-                for value in values {
-                    lines.append("    - \(value)")
-                }
-            }
-        }
+        // textHighlights deliberately not rendered to the agent: they're raw
+        // OCR fragments (mostly noise even after the new .accurate OCR layer)
+        // and the structured semanticHighlights + Gemini-derived facts above
+        // already carry the same info in cleaner form. Kept on the surface
+        // for offline inspection in Dev Tools / Memory tab.
         if !surface.uncertaintyHighlights.isEmpty {
             let values = cleanValues(surface.uncertaintyHighlights).prefix(4)
             if !values.isEmpty {
