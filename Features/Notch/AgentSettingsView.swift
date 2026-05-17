@@ -283,7 +283,7 @@ private struct ShortcutRecorderView: View {
     }
 
     private func stopRecording() {
-        if let m = monitor { NSEvent.removeMonitor(m) }
+        if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         recording = false
     }
