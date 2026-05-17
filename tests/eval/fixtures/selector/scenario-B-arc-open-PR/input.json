@@ -1,0 +1,70 @@
+{
+  "transcript": "open the PR",
+  "current_screen": {
+    "app": "Arc",
+    "bundle_id": "company.thebrowser.Browser",
+    "pid": 8120,
+    "window_title": "GitHub — github.com",
+    "window_id": 301,
+    "display_id": 1,
+    "display_bounds": [0, 0, 1728, 1117],
+    "captured_at": "2026-05-16T20:11:03Z",
+    "ocr_lines": ["Pull requests", "Issues", "Marketplace", "Explore"],
+    "ax_elements": [
+      {"role": "AXTextField", "label": "Search", "ax_path": "AXWindow/AXGroup/AXTextField[Search]", "focused": false}
+    ],
+    "cursor": [800, 200],
+    "selection": null,
+    "clipboard": null,
+    "app_specific": {
+      "active_url": "https://github.com/co/repo",
+      "active_title": "co / repo",
+      "tabs": [
+        {"title": "co / repo", "url": "https://github.com/co/repo", "active": true},
+        {"title": "PR #1342 · Add streaming TTS", "url": "https://github.com/co/repo/pull/1342", "active": false}
+      ],
+      "profile": "Work"
+    }
+  },
+  "user_prefs": "I use Arc for browsing.",
+  "active_task": {
+    "id": "t_2026-05-16_20",
+    "started_at": "2026-05-16T19:50:00Z",
+    "label": "Review PR #1342 for streaming TTS",
+    "kind": "code_review",
+    "narrative": "User merged PR #1342 'Add streaming TTS' 30 min ago and has been periodically checking GitHub for follow-up comments.",
+    "actions_taken": [
+      {"t": "2026-05-16T19:50:00Z", "what": "opened PR #1342 in Arc"},
+      {"t": "2026-05-16T19:55:00Z", "what": "merged PR #1342"}
+    ],
+    "resources": [
+      "https://github.com/co/repo/pull/1342"
+    ],
+    "entities": [
+      {"label": "PR #1342", "kind": "url", "uri": "https://github.com/co/repo/pull/1342"}
+    ],
+    "blocked_on": null,
+    "likely_next_steps": ["check for review comments", "merge follow-up PR"]
+  },
+  "recent_events": [
+    {"t": "2026-05-16T20:05:00Z", "kind": "app_switch", "from_bundle": "com.todesktop.230313mzl4w4u92", "to_bundle": "company.thebrowser.Browser"},
+    {"t": "2026-05-16T20:10:00Z", "kind": "screen", "app": "Arc", "surface": "github.com home"}
+  ],
+  "recent_resources": [
+    {"kind": "url", "uri": "https://github.com/co/repo/pull/1342", "label": "PR #1342", "app": "GitHub", "last_seen": "2026-05-16T19:55:00Z"},
+    {"kind": "url", "uri": "https://github.com/co/repo", "label": "co/repo", "app": "GitHub", "last_seen": "2026-05-16T20:11:03Z"}
+  ],
+  "recipes_for_active_app": [
+    {
+      "name": "switch to existing tab",
+      "trigger_pattern": "go to tab | switch to tab | open tab",
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+t"},
+        {"kind": "type", "value": "<query>"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "seen_count": 5,
+      "confidence": 0.85
+    }
+  ]
+}

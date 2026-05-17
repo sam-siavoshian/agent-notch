@@ -1,0 +1,13 @@
+{
+  "intent": {
+    "verb": "open",
+    "target": "the PR",
+    "resolved_target_contains": "https://github.com/co/repo/pull/1342",
+    "entities": [
+      {"label": "PR #1342", "kind": "url"}
+    ]
+  },
+  "brief_must_contain": ["https://github.com/co/repo/pull/1342"],
+  "brief_must_not_contain": ["\\b\\d{3}\\s*,\\s*\\d{3}\\b"],
+  "brief_token_budget": 600
+}
