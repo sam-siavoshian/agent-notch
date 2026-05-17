@@ -91,12 +91,14 @@ public actor AXFastPath {
 
         var results: [AXMatch] = []
         var visited = 0
+        let labelNeedle = labelContains?.lowercased()
+        let valueNeedle = valueContains?.lowercased()
         walk(app, depth: 0, visited: &visited) { element in
             guard let match = matchIfRelevant(
                 element: element,
                 role: role,
-                labelContains: labelContains,
-                valueContains: valueContains
+                labelContains: labelNeedle,
+                valueContains: valueNeedle
             ) else { return }
             results.append(match)
         }
@@ -177,10 +179,10 @@ public actor AXFastPath {
             .compactMap { $0 }
             .joined(separator: " ")
         if let labelContains, !labelContains.isEmpty {
-            if !label.lowercased().contains(labelContains.lowercased()) { return nil }
+            if !label.lowercased().contains(labelContains) { return nil }
         }
         if let valueContains, !valueContains.isEmpty {
-            if !(value?.lowercased().contains(valueContains.lowercased()) ?? false) { return nil }
+            if !(value?.lowercased().contains(valueContains) ?? false) { return nil }
         }
         if labelContains == nil && valueContains == nil && role == nil { return nil }
         let id = UUID().uuidString.prefix(8).description
