@@ -262,14 +262,19 @@ public final class ContextCoordinator: RecentActivityContext {
             // Only fires when the screen has genuinely changed (DirtyDetector
             // said major), and is throttled internally to >=8s between calls.
             // Detached so we never block the capture path.
-            if classification.classification == .majorChange {
-                let jpeg = snapshot.jpegData
+            //
+            // Gemini observer wants PNG (sharper UI text edges than the JPEG-35
+            // we keep for OCR/dirty/Claude). Re-encode from the raw CGImage
+            // when available; skip the observer for this turn if PNG encode
+            // fails or the raw image is missing.
+            if classification.classification == .majorChange, let rawImage = snapshot.rawImage,
+               let png = ScreenCapture.shared.pngEncode(rawImage) {
                 Task.detached(priority: .utility) {
                     let hint = await MainActor.run {
                         NSWorkspace.shared.frontmostApplication?.localizedName
                     }
                     await GeminiObserver.shared.observe(
-                        screenshotJPEG: jpeg,
+                        screenshotPNG: png,
                         frontmostHint: hint
                     )
                 }

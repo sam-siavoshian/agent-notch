@@ -22,7 +22,7 @@ public final class GeminiObserver {
 
     /// Try to observe this screen. Throttled. Returns silently if too soon,
     /// disabled by settings, or no Gemini key is set.
-    public func observe(screenshotJPEG: Data, frontmostHint: String? = nil) async {
+    public func observe(screenshotPNG: Data, frontmostHint: String? = nil) async {
         let now = Date()
         let shouldRun: Bool = queue.sync {
             guard now.timeIntervalSince(lastObservedAt) >= Self.minIntervalBetweenObservations else { return false }
@@ -36,10 +36,14 @@ public final class GeminiObserver {
         guard Secrets.geminiAPIKey != nil else { return }    // no key -> skip silently
 
         let started = Date()
-        let prompt = Self.prompt(frontmostHint: frontmostHint)
+        let systemPrompt = Self.systemPrompt
+        let userText = Self.userText(frontmostHint: frontmostHint)
 
         guard let raw = try? await GeminiVisionClient.shared.generate(
-            prompt: prompt, imageJPEG: screenshotJPEG, timeout: 2.0
+            systemPrompt: systemPrompt,
+            userText: userText,
+            imagePNG: screenshotPNG,
+            timeout: 60.0
         ),
         let data = raw.data(using: .utf8),
         let parsed = try? JSONDecoder().decode(ObservationDTO.self, from: data)
@@ -71,37 +75,43 @@ public final class GeminiObserver {
 
     // MARK: - Prompt
 
-    private static func prompt(frontmostHint: String?) -> String {
-        let hint = frontmostHint.map { "\nCurrently frontmost app: \($0)" } ?? ""
-        return """
-        You are watching a user's macOS screen passively. Look at this screenshot and
-        produce a STRUCTURED JSON observation that teaches an agent the UI/UX of what's
-        visible. Future agent runs will reuse what you observe.
+    /// Static, cacheable system prompt. Keep this stable across calls — anything
+    /// that varies per call belongs in `userText(frontmostHint:)`.
+    private static let systemPrompt: String = """
+    You are watching a user's macOS screen passively. Look at this screenshot and
+    produce a STRUCTURED JSON observation that teaches an agent the UI/UX of what's
+    visible. Future agent runs will reuse what you observe.
 
-        Return strictly one JSON object matching this schema (snake_case keys):
+    Return strictly one JSON object matching this schema (snake_case keys):
 
-        {
-          "frontmost_app":           "the app whose window is in focus",
-          "all_visible_apps":        ["list", "of", "all", "apps", "with", "visible", "windows"],
-          "screen_layout":           "one sentence describing the spatial layout of windows",
-          "current_surface":         "specific surface within the frontmost app (e.g. 'Slack #design composer', 'Figma Onboarding-v3 / Step 2')",
-          "observable_controls":     [{"label": string, "purpose": string, "location": string, "icon_hint": string|null}],
-          "cross_app_correlations":  ["sentences about how visible apps relate to each other"],
-          "user_visible_state":      "what the user appears to be doing right now"
-        }
+    {
+      "frontmost_app":           "the app whose window is in focus",
+      "all_visible_apps":        ["list", "of", "all", "apps", "with", "visible", "windows"],
+      "screen_layout":           "one sentence describing the spatial layout of windows",
+      "current_surface":         "specific surface within the frontmost app (e.g. 'Slack #design composer', 'Figma Onboarding-v3 / Step 2')",
+      "observable_controls":     [{"label": string, "purpose": string, "location": string, "icon_hint": string|null}],
+      "cross_app_correlations":  ["sentences about how visible apps relate to each other"],
+      "user_visible_state":      "what the user appears to be doing right now"
+    }
 
-        Rules:
-        - Focus on ACTIONABLE controls — buttons, links, menu items, input fields,
-          tabs. Skip decoration.
-        - For each control: label = visible text OR what an agent would call it;
-          purpose = what it does; location = "top-right of toolbar" / "bottom-left
-          of composer" etc; icon_hint = "paper plane" / "paperclip" / null.
-        - Up to 12 observable_controls, prioritized by likely relevance.
-        - cross_app_correlations: 0-3 sentences. Only include real correlations
-          (e.g., "Slack message references the Figma file visible on the right").
-          Don't invent.
-        - Strict JSON. No backticks. No prose outside the JSON.\(hint)
-        """
+    Rules:
+    - Focus on ACTIONABLE controls — buttons, links, menu items, input fields,
+      tabs. Skip decoration.
+    - For each control: label = visible text OR what an agent would call it;
+      purpose = what it does; location = "top-right of toolbar" / "bottom-left
+      of composer" etc; icon_hint = "paper plane" / "paperclip" / null.
+    - Up to 12 observable_controls, prioritized by likely relevance.
+    - cross_app_correlations: 0-3 sentences. Only include real correlations
+      (e.g., "Slack message references the Figma file visible on the right").
+      Don't invent.
+    - Strict JSON. No backticks. No prose outside the JSON.
+    """
+
+    /// Per-call tail — varies between requests so must not be folded into the
+    /// (future) cached prefix.
+    private static func userText(frontmostHint: String?) -> String {
+        guard let hint = frontmostHint else { return "" }
+        return "Currently frontmost app: \(hint)"
     }
 
     // MARK: - Parse DTO (snake_case wire shape)

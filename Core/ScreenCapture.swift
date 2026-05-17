@@ -118,6 +118,15 @@ public actor ScreenCapture {
         let rep = NSBitmapImageRep(cgImage: image)
         return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
     }
+
+    /// Lossless PNG encode of a CGImage. Used only by the Gemini observer path
+    /// (PNG ensures the model gets crisp UI text edges that JPEG would smear).
+    /// JPEG remains the default for OCR, dirty-detection, and the agent's
+    /// initiation screenshot — do not switch those to PNG.
+    public nonisolated func pngEncode(_ image: CGImage) -> Data? {
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .png, properties: [:])
+    }
 }
 
 private extension SCDisplay {

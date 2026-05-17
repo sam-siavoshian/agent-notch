@@ -40,6 +40,7 @@ public final class SurfaceMemoryStore {
     /// controls, adds new ones, updates last_seen.
     public func accumulate(_ obs: SurfaceObservation) {
         guard let app = obs.frontmostApp, let surface = obs.currentSurface, !surface.isEmpty else { return }
+        var shouldSchedulePrune = false
         queue.sync {
             var memory = loadMemory(app: app, surface: surface)
                 ?? SurfaceMemory(app: app, surface: surface, controls: [], lastSeen: obs.t, observationCount: 0)
@@ -67,6 +68,16 @@ public final class SurfaceMemoryStore {
                 }
             }
             try? saveMemory(memory)
+
+            accumulateCounter &+= 1
+            if accumulateCounter % Self.pruneIntervalAccumulations == 0 {
+                shouldSchedulePrune = true
+            }
+        }
+        if shouldSchedulePrune {
+            Self.pruneScheduler.async { [weak self] in
+                self?.prune()
+            }
         }
     }
 

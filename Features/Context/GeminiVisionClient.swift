@@ -9,6 +9,12 @@ import Foundation
 /// One call, one screenshot, structured JSON out. Used by `GeminiObserver`
 /// as the only vision path — long-press never calls into Gemini directly;
 /// it reads the accumulated `SurfaceMemoryStore` instead.
+///
+/// Note on context caching: we attempted to cache the static system prompt
+/// via the `cachedContents` API, but `gemini-3.1-flash-lite` enforces a
+/// minimum cache size of ~1,024 input tokens, and our system prompt is
+/// ~400 tokens. The create-cache call would 400 on us. Skipping caching
+/// until the prompt grows or the minimum drops.
 public final class GeminiVisionClient {
 
     public static let shared = GeminiVisionClient()
@@ -38,12 +44,18 @@ public final class GeminiVisionClient {
         }
     }
 
-    /// Send a multimodal request (text prompt + one JPEG image) and return the assistant's text.
+    /// Send a multimodal request (text prompt + one PNG image) and return the assistant's text.
+    ///
+    /// The `systemPrompt` is the static instruction block (would be cached if
+    /// the API allowed); `userText` is the per-call tail (e.g. frontmost-app
+    /// hint) that varies between requests. They're concatenated into a single
+    /// text part for now since caching is disabled — see top-of-file note.
     public func generate(
-        prompt: String,
-        imageJPEG: Data,
+        systemPrompt: String,
+        userText: String,
+        imagePNG: Data,
         model: String = GeminiVisionClient.defaultModel,
-        timeout: TimeInterval = 1.5
+        timeout: TimeInterval = 60.0
     ) async throws -> String {
         guard let apiKey = Secrets.geminiAPIKey, !apiKey.isEmpty else {
             throw ClientError.missingAPIKey
@@ -55,14 +67,25 @@ public final class GeminiVisionClient {
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = timeout + 0.5
 
+        let combinedText: String = {
+            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? systemPrompt : systemPrompt + "\n" + trimmed
+        }()
+
+        // Image-then-text part order: Google's single-image+text guidance.
         let body = RequestBody(
             contents: [
                 Content(parts: [
-                    .text(prompt),
-                    .inlineData(InlineData(mimeType: "image/jpeg", data: imageJPEG.base64EncodedString()))
+                    .inlineData(InlineData(mimeType: "image/png", data: imagePNG.base64EncodedString())),
+                    .text(combinedText)
                 ])
             ],
-            generationConfig: GenerationConfig(responseMimeType: "application/json", maxOutputTokens: 800)
+            generationConfig: GenerationConfig(
+                responseMimeType: "application/json",
+                maxOutputTokens: 4000,
+                mediaResolution: "MEDIA_RESOLUTION_HIGH"
+            ),
+            thinkingConfig: ThinkingConfig(thinkingBudget: 0)
         )
         req.httpBody = try JSONEncoder().encode(body)
 
@@ -89,6 +112,7 @@ public final class GeminiVisionClient {
                 return env.candidates.first?.content.parts.first?.text ?? ""
             }
             group.addTask {
+                // 60s * 1e9 = 6e10, well under UInt64.max (~1.8e19). Safe.
                 try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 throw ClientError.timeout
             }
@@ -105,6 +129,12 @@ public final class GeminiVisionClient {
     private struct RequestBody: Encodable {
         let contents: [Content]
         let generationConfig: GenerationConfig
+        let thinkingConfig: ThinkingConfig
+        enum CodingKeys: String, CodingKey {
+            case contents
+            case generationConfig = "generation_config"
+            case thinkingConfig = "thinking_config"
+        }
     }
     private struct Content: Encodable {
         let parts: [Part]
@@ -129,6 +159,15 @@ public final class GeminiVisionClient {
     private struct GenerationConfig: Encodable {
         let responseMimeType: String
         let maxOutputTokens: Int
-        enum CodingKeys: String, CodingKey { case responseMimeType = "response_mime_type", maxOutputTokens = "max_output_tokens" }
+        let mediaResolution: String
+        enum CodingKeys: String, CodingKey {
+            case responseMimeType = "response_mime_type"
+            case maxOutputTokens = "max_output_tokens"
+            case mediaResolution = "media_resolution"
+        }
+    }
+    private struct ThinkingConfig: Encodable {
+        let thinkingBudget: Int
+        enum CodingKeys: String, CodingKey { case thinkingBudget = "thinking_budget" }
     }
 }
