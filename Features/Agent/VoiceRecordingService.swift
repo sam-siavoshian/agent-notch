@@ -20,6 +20,8 @@ private let log = Log(category: "voice")
 public final class VoiceRecordingService {
     public static let shared = VoiceRecordingService()
     private static let whisperDecoder = JSONDecoder()
+    // swiftlint:disable:next force_unwrapping — hardcoded literal, never nil
+    private static let whisperEndpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
 
     private let audioEngine = AVAudioEngine()
     private var audioFile: AVAudioFile?
