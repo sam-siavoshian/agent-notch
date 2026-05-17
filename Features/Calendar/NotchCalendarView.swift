@@ -197,9 +197,12 @@ private struct CalendarHeader: View {
         .padding(.bottom, 2)
     }
 
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "EEEE, MMM d"; return f
+    }()
+
     private var weekday: String {
-        let f = DateFormatter(); f.dateFormat = "EEEE, MMM d"
-        return f.string(from: date)
+        Self.weekdayFormatter.string(from: date)
     }
     private var subtitle: String {
         let n = todayCount
