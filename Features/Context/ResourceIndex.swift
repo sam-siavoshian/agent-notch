@@ -20,6 +20,7 @@ public final class ResourceIndex {
 
     /// Add or refresh a single resource. Updates lastSeen if URI is already present.
     public func record(_ ref: CResourceRef) {
+        var isNewURI = false
         queue.sync {
             if var existing = byURI[ref.uri] {
                 existing = CResourceRef(
@@ -32,8 +33,17 @@ public final class ResourceIndex {
                 byURI[ref.uri] = existing
             } else {
                 byURI[ref.uri] = ref
+                isNewURI = true
                 evictIfNeeded()
             }
+        }
+        if isNewURI {
+            AgentObservabilityLog.shared.record(.memoryMutation(
+                id: UUID(),
+                t: Date(),
+                kind: .resourceRecorded,
+                summary: "\(ref.kind): \(ref.uri.prefix(80))"
+            ))
         }
     }
 

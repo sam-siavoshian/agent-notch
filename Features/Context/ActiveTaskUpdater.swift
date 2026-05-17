@@ -96,12 +96,24 @@ public final class ActiveTaskUpdater {
                 try? L5Store.shared.saveActiveTask(updated)
                 lastUpdateAt = Date()
                 lastEventSeqAtUpdate = events.last?.seq ?? lastEventSeqAtUpdate
+                AgentObservabilityLog.shared.record(.memoryMutation(
+                    id: UUID(),
+                    t: Date(),
+                    kind: .activeTaskUpdated,
+                    summary: "label: \(updated.label) · kind: \(updated.kind)"
+                ))
                 return updated
             case .archiveAndStartNew(let ended, let newTask):
                 try? L5Store.shared.archive(ended)
                 try? L5Store.shared.saveActiveTask(newTask)
                 lastUpdateAt = Date()
                 lastEventSeqAtUpdate = events.last?.seq ?? lastEventSeqAtUpdate
+                AgentObservabilityLog.shared.record(.memoryMutation(
+                    id: UUID(),
+                    t: Date(),
+                    kind: .activeTaskArchived,
+                    summary: "archived: \(ended.label) → new: \(newTask.label) · kind: \(newTask.kind)"
+                ))
                 return newTask
             }
         } catch {

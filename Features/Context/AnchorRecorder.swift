@@ -112,6 +112,11 @@ public final class AnchorRecorder {
                     collection.shortcuts.append(
                         CAppRecipes.Shortcut(keys: keys, label: nil, seenCount: 1)
                     )
+                    AgentObservabilityLog.shared.record(.memoryMutation(
+                        id: UUID(), t: Date(),
+                        kind: .shortcutLearned,
+                        summary: "\(bundleID): \(keys)"
+                    ))
                 }
             }
         }
@@ -148,6 +153,11 @@ public final class AnchorRecorder {
                 confidence: 0.5   // medium — generalized but only 1 observation so far
             )
             collection.recipes.append(recipe)
+            AgentObservabilityLog.shared.record(.memoryMutation(
+                id: UUID(), t: Date(),
+                kind: .recipePromoted,
+                summary: "\(bundleID) auto-promoted: \(signature.prefix(40))"
+            ))
             return
         }
 
@@ -160,6 +170,11 @@ public final class AnchorRecorder {
                 var r = promoted
                 r.confidence = Double(promoted.seenCount) / Double(promoted.seenCount + 2)
                 collection.recipes.append(r)
+                AgentObservabilityLog.shared.record(.memoryMutation(
+                    id: UUID(), t: Date(),
+                    kind: .recipePromoted,
+                    summary: "\(bundleID): \(signature.prefix(40))"
+                ))
             }
             return
         }
@@ -172,6 +187,11 @@ public final class AnchorRecorder {
             confidence: 0.0
         )
         collection.candidates.append(candidate)
+        AgentObservabilityLog.shared.record(.memoryMutation(
+            id: UUID(), t: Date(),
+            kind: .recipeCandidateAdded,
+            summary: "\(bundleID): \(signature.prefix(40))"
+        ))
     }
 
     // MARK: - Step extraction + normalization
