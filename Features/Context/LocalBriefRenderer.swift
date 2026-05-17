@@ -42,7 +42,7 @@ public enum LocalBriefRenderer {
             return ref.uri.lowercased().contains(trimmed)
         })?.uri
         // Entities: pull any active_task entities the transcript also mentions.
-        let entities: [CIntent.Entity] = activeTask?.entities?
+        let entities: [CIntent.Entity] = activeTask?.entities
             .filter { lower.contains($0.label.lowercased()) } ?? []
         return CIntent(
             verb: verb,
