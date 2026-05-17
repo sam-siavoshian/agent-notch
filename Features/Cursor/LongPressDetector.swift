@@ -100,11 +100,11 @@ final class LongPressDetector {
     }
 
     func stop() {
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
         }
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
         eventTap = nil
         runLoopSource = nil
