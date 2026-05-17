@@ -185,9 +185,10 @@ public final class IDEAdapter: AppContextAdapter {
 
     private func walkToGit(from path: String) -> String {
         guard !path.isEmpty else { return "" }
+        let fm = FileManager.default
         var dir = URL(fileURLWithPath: path).deletingLastPathComponent()
         for _ in 0..<12 {
-            if FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path) {
+            if fm.fileExists(atPath: dir.appendingPathComponent(".git").path) {
                 return dir.path
             }
             let parent = dir.deletingLastPathComponent()
