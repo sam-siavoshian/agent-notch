@@ -10,18 +10,51 @@
 import Foundation
 import Combine
 
-public struct AgentSettings: Codable, Equatable, Sendable {
+public enum TTSVoice: String, Codable, CaseIterable, Identifiable, Sendable {
+    case alloy, echo, fable, nova, onyx, shimmer
+    public var id: String { rawValue }
+    public var displayName: String { rawValue.capitalized }
+}
+
+public struct AgentSettings: Equatable, Sendable {
     public var reasoningEffort: AgentReasoningEffort
     public var preferences: String
     public var systemPrompt: String
     public var cursorColor: CursorColor
+    public var ttsVoice: TTSVoice
 
     public static let `default` = AgentSettings(
         reasoningEffort: .medium,
         preferences: "",
         systemPrompt: "",
-        cursorColor: .blue
+        cursorColor: .blue,
+        ttsVoice: .nova
     )
+}
+
+// Custom Codable so old JSON without `ttsVoice` still loads (defaults to .nova).
+extension AgentSettings: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reasoningEffort = (try? c.decode(AgentReasoningEffort.self, forKey: .reasoningEffort)) ?? .medium
+        preferences     = (try? c.decode(String.self,               forKey: .preferences))     ?? ""
+        systemPrompt    = (try? c.decode(String.self,               forKey: .systemPrompt))    ?? ""
+        cursorColor     = (try? c.decode(CursorColor.self,          forKey: .cursorColor))     ?? .blue
+        ttsVoice        = (try? c.decode(TTSVoice.self,             forKey: .ttsVoice))        ?? .nova
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(reasoningEffort, forKey: .reasoningEffort)
+        try c.encode(preferences,     forKey: .preferences)
+        try c.encode(systemPrompt,    forKey: .systemPrompt)
+        try c.encode(cursorColor,     forKey: .cursorColor)
+        try c.encode(ttsVoice,        forKey: .ttsVoice)
+    }
 }
 
 @MainActor
@@ -65,6 +98,11 @@ public final class AgentSettingsStore: ObservableObject {
     public var cursorColor: CursorColor {
         get { settings.cursorColor }
         set { update { $0.cursorColor = newValue } }
+    }
+
+    public var ttsVoice: TTSVoice {
+        get { settings.ttsVoice }
+        set { update { $0.ttsVoice = newValue } }
     }
 
     public func update(_ mutate: (inout AgentSettings) -> Void) {

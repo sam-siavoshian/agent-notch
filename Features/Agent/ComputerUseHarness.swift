@@ -100,7 +100,7 @@ public final class ComputerUseHarness {
         // the task, skip the model loop entirely.
         let routed = await IntentRouter.tryHandle(transcript: input.transcript)
         if case .handled(let summary, let affirmation) = routed {
-            TextToSpeechService.shared.speak(affirmation)
+            TextToSpeechService.shared.speak(capped(affirmation))
             AgentState.shared.set(.idle, detail: summary)
             printRunMetrics(AgentRunMetricsRecord(
                 id: runID,
@@ -284,6 +284,7 @@ public final class ComputerUseHarness {
                     if case .text(let t) = block { return t } else { return nil }
                 }.joined(separator: " ")
                 log.info("harness.done run_id=\(runID.uuidString) status=completed_without_tool turns=\(turn)")
+                TextToSpeechService.shared.speak(capped(text))
                 await HarnessRunDetailStore.shared.appendTurn(
                     runID: runID,
                     turn: HarnessTurnRecord(
@@ -309,7 +310,7 @@ public final class ComputerUseHarness {
                     if case .text(let t) = block { return t } else { return nil }
                 }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !affirmation.isEmpty {
-                    TextToSpeechService.shared.speak(affirmation)
+                    TextToSpeechService.shared.speak(capped(affirmation))
                 }
             }
 
@@ -508,7 +509,7 @@ public final class ComputerUseHarness {
           5. menu_shortcut — for any menu item; sends the registered keyboard shortcut instead of clicking the menu.
           6. computer — vision + click/type/scroll. ONLY when nothing above applies. Do NOT screenshot first if a fast path works.
 
-        Plan-then-act: on turn 1, output one short sentence stating the goal and your first concrete action, THEN your spoken affirmation, THEN call the tool. Keep the spoken affirmation under 15 words — it will be read aloud (e.g. "Opening Anthropic's site now.").
+        Plan-then-act: on turn 1, output one short sentence stating the goal and your first concrete action, THEN your spoken affirmation, THEN call the tool. Keep the spoken affirmation under 9 words — it will be read aloud (e.g. "Opening that now." or "On it.").
 
         Screenshots are expensive. DO NOT take a screenshot before a tool call unless prior tool results are ambiguous AND no fast path applies. The activation context provided separately already tells you the frontmost app and recent on-screen text.
 
@@ -567,6 +568,13 @@ public final class ComputerUseHarness {
     }
 
     // MARK: - Helpers
+
+    // Hard-cap spoken text to N words so TTS stays brief even if the model ignores the prompt.
+    private func capped(_ text: String, maxWords: Int = 9) -> String {
+        let words = text.split(separator: " ", omittingEmptySubsequences: true)
+        guard words.count > maxWords else { return text }
+        return words.prefix(maxWords).joined(separator: " ")
+    }
 
     private func shouldFallback(_ err: AnthropicClient.Error) -> Bool {
         guard let status = err.status else { return false }
