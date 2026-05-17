@@ -172,6 +172,15 @@ public final class ContextSelector {
     authoritative for tool-callable paths; vision is authoritative for "what's
     actually on screen" and the focal point.
 
+    You may also receive `learned_surfaces`: accumulated per-surface UI knowledge
+    built up over many prior passive observations of this app. Each entry has
+    {app, surface, controls[], observation_count, last_seen}. Treat this as the
+    canonical map of "how this app's surfaces actually work" — when the current
+    screen matches a learned surface, prefer its controls/locations over your own
+    inferences. Use it to write more confident, more specific steps in the brief
+    (e.g., "Send button bottom-right of composer — seen 47 times"). Don't dump
+    raw learned_surfaces into the brief; distill them into actionable guidance.
+
     Your job is two things in one call:
 
     (1) RESOLVE INTENT. Output {verb, target, resolved_target?, entities, confidence}.
@@ -240,7 +249,29 @@ public final class ContextSelector {
             let recent_events: [CEvent]
             let recent_resources: [CResourceRef]
             let recipes_for_active_app: [CRecipe]
+            /// Accumulated per-(app, surface) UI knowledge built up by
+            /// `GeminiObserver` over many observations. Mercury should treat
+            /// this as the canonical "how this app's surfaces actually work"
+            /// reference and lean on it when AX/OCR are sparse.
+            let learned_surfaces: [SurfaceMemoryStore.SurfaceMemory]
         }
+
+        // Cap the per-surface control list to keep prompt size bounded; sort
+        // by frequency so the most-seen surfaces/controls surface first.
+        let learned: [SurfaceMemoryStore.SurfaceMemory] = Array(
+            SurfaceMemoryStore.shared
+                .memories(for: l2.app)
+                .sorted { $0.observationCount > $1.observationCount }
+                .prefix(6)
+                .map { mem -> SurfaceMemoryStore.SurfaceMemory in
+                    var trimmed = mem
+                    trimmed.controls = Array(
+                        mem.controls.sorted { $0.seenCount > $1.seenCount }.prefix(12)
+                    )
+                    return trimmed
+                }
+        )
+
         let payload = Payload(
             transcript: transcript,
             current_screen: l2,
@@ -248,7 +279,8 @@ public final class ContextSelector {
             active_task: activeTask,
             recent_events: events,
             recent_resources: Array(resources.prefix(20)),
-            recipes_for_active_app: Array(recipes.sorted { $0.seenCount > $1.seenCount }.prefix(8))
+            recipes_for_active_app: Array(recipes.sorted { $0.seenCount > $1.seenCount }.prefix(8)),
+            learned_surfaces: learned
         )
         let data = try encoder.encode(payload)
         return String(data: data, encoding: .utf8) ?? "{}"
