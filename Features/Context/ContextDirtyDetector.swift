@@ -291,8 +291,9 @@ public enum ContextDirtyDetector {
         let start = fromRow * size
         let end = min(size * size, toRowExclusive * size)
         guard end > start else { return }
-        for index in start..<end {
-            bytes[index] = 0
+        bytes.withUnsafeMutableBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            (base + start).update(repeating: 0, count: end - start)
         }
     }
 
