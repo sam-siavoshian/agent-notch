@@ -335,18 +335,20 @@ public enum ContextDirtyDetector {
                       let previousPtr = previousRaw.baseAddress?.assumingMemoryBound(to: UInt8.self)
                 else { return }
                 let threshold = Int(noiseThreshold)
+                var x = 0
+                var y = 0
                 for index in 0..<count {
                     let delta = Int(currentPtr[index]) - Int(previousPtr[index])
                     let magnitude = delta < 0 ? -delta : delta
                     if magnitude > threshold {
                         changed += 1
-                        let x = index % size
-                        let y = index / size
                         if x < minX { minX = x }
                         if x > maxX { maxX = x }
                         if y < minY { minY = y }
                         if y > maxY { maxY = y }
                     }
+                    x += 1
+                    if x == size { x = 0; y += 1 }
                 }
             }
         }
