@@ -462,6 +462,8 @@ private struct DraggableAgentIcon: View {
 /// the top-center. Matches the product — looks like the menu-bar notch.
 private struct AgentNotchBadge: View {
     private static let statusGreen = Color(red: 0.133, green: 0.773, blue: 0.369)
+    private static let bgTop       = Color(red: 0.15, green: 0.16, blue: 0.20)
+    private static let bgBottom    = Color(red: 0.05, green: 0.06, blue: 0.09)
 
     var body: some View {
         GeometryReader { geo in
@@ -470,10 +472,7 @@ private struct AgentNotchBadge: View {
                 RoundedRectangle(cornerRadius: s * 0.22, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.15, green: 0.16, blue: 0.20),
-                                Color(red: 0.05, green: 0.06, blue: 0.09)
-                            ],
+                            colors: [Self.bgTop, Self.bgBottom],
                             startPoint: .top, endPoint: .bottom
                         )
                     )
