@@ -60,6 +60,67 @@ public final class MercuryClient {
         maxTokens: Int = 1200,
         timeout: TimeInterval = 2.5
     ) async throws -> String {
+        let startedAt = Date()
+        let obsID = UUID()
+        let systemContent = messages.first(where: { $0.role == "system" })?.content
+        let role = Self.inferRole(systemContent: systemContent)
+        let userPreview = messages.last(where: { $0.role == "user" })?.content.prefix(200) ?? ""
+        let requestSummary = "model=\(model) maxTokens=\(maxTokens) timeout=\(timeout)s user_preview=\(userPreview)"
+
+        do {
+            let result = try await performRequest(
+                messages: messages,
+                model: model,
+                responseFormat: responseFormat,
+                maxTokens: maxTokens,
+                timeout: timeout
+            )
+            AgentObservabilityLog.shared.record(.mercuryCall(
+                id: obsID,
+                t: startedAt,
+                role: role,
+                requestSummary: requestSummary,
+                responseSummary: String(result.prefix(400)),
+                latencyS: Date().timeIntervalSince(startedAt),
+                success: true,
+                promptTokens: nil,
+                completionTokens: nil
+            ))
+            return result
+        } catch {
+            AgentObservabilityLog.shared.record(.mercuryCall(
+                id: obsID,
+                t: startedAt,
+                role: role,
+                requestSummary: requestSummary,
+                responseSummary: "ERROR: \(error)",
+                latencyS: Date().timeIntervalSince(startedAt),
+                success: false,
+                promptTokens: nil,
+                completionTokens: nil
+            ))
+            throw error
+        }
+    }
+
+    private static func inferRole(systemContent: String?) -> AgentObservabilityLog.MercuryRole {
+        guard let content = systemContent else { return .other }
+        if content.contains("context selector") { return .selector }
+        if content.contains("Active Task object") { return .activeTaskUpdater }
+        if content.contains("recipe") && content.contains("name") { return .recipeNaming }
+        return .other
+    }
+
+    /// The raw request — separated so the public `complete` wrapper can record
+    /// observability events for both success and failure paths without
+    /// duplicating the HTTP/timeout logic.
+    private func performRequest(
+        messages: [Message],
+        model: String,
+        responseFormat: ResponseFormat,
+        maxTokens: Int,
+        timeout: TimeInterval
+    ) async throws -> String {
         guard let apiKey = Secrets.openRouterAPIKey, !apiKey.isEmpty else {
             throw ClientError.missingAPIKey
         }
