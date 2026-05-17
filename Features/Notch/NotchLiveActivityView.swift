@@ -66,6 +66,7 @@ struct NotchLiveActivityView: View {
 final class FrontmostAppObserver: ObservableObject {
     @Published var icon: NSImage?
     private var observer: NSObjectProtocol?
+    private static let ownBundleID = Bundle.main.bundleIdentifier
 
     /// Cache own bundle id once — Bundle.main lookup is non-trivial and
     /// runs on every frontmost-app change otherwise.
