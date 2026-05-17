@@ -188,19 +188,27 @@ public struct ContextDebugScreenObsView: View {
         }
     }
 
-    private func prettyJSON(_ obs: SurfaceObservation) -> String {
+    private static let obsEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(obs),
+        return encoder
+    }()
+
+    private static let artifactEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }()
+
+    private func prettyJSON(_ obs: SurfaceObservation) -> String {
+        guard let data = try? Self.obsEncoder.encode(obs),
               let s = String(data: data, encoding: .utf8) else { return "<encode failed>" }
         return s
     }
 
     private func prettyJSONArtifact(_ artifact: [String: AnyCodable]) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(artifact),
+        guard let data = try? Self.artifactEncoder.encode(artifact),
               let s = String(data: data, encoding: .utf8) else { return "<encode failed>" }
         return s
     }
