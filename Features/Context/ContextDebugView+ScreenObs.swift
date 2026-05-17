@@ -101,6 +101,46 @@ public struct ContextDebugScreenObsView: View {
     @ViewBuilder
     private func expandedDetail(_ obs: SurfaceObservation) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            // S17: Capture Story fields — surfaced at the top because they
+            // describe what the USER is doing (the most useful telemetry
+            // when triaging a brief).
+            if let narrative = obs.narrative, !narrative.isEmpty {
+                Text(narrative)
+                    .font(.system(size: 11))
+                    .padding(.bottom, 2)
+            }
+            HStack(spacing: 6) {
+                if let goal = obs.currentGoalGuess, !goal.isEmpty {
+                    Text("goal: \(goal)")
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15))
+                        .cornerRadius(3)
+                }
+                if let ct = obs.contentType, !ct.isEmpty {
+                    Text(ct)
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.18))
+                        .cornerRadius(3)
+                }
+            }
+            if let link = obs.continuityLink, !link.isEmpty {
+                Text(link)
+                    .font(.system(size: 11).italic())
+                    .foregroundColor(.secondary)
+            }
+            if let artifact = obs.artifact, !artifact.isEmpty {
+                DisclosureGroup("artifact") {
+                    Text(prettyJSONArtifact(artifact))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                        .padding(.top, 2)
+                }
+                .font(.system(size: 11, weight: .semibold))
+            }
+
             if !obs.allVisibleApps.isEmpty {
                 Text("Visible apps: \(obs.allVisibleApps.joined(separator: ", "))")
                     .font(.system(size: 11))
@@ -149,6 +189,14 @@ public struct ContextDebugScreenObsView: View {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(obs),
+              let s = String(data: data, encoding: .utf8) else { return "<encode failed>" }
+        return s
+    }
+
+    private func prettyJSONArtifact(_ artifact: [String: AnyCodable]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(artifact),
               let s = String(data: data, encoding: .utf8) else { return "<encode failed>" }
         return s
     }

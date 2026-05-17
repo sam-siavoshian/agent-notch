@@ -174,6 +174,19 @@ public final class ContextSelector {
     (e.g., "Send button bottom-right of composer — seen 47 times"). Don't dump
     raw learned_surfaces into the brief; distill them into actionable guidance.
 
+    You may receive `recent_story`: a chronological strip of what the user has
+    been doing across the last few minutes, built from per-capture vision
+    observations. Each entry has {t, app, surface, narrative,
+    current_goal_guess, content_type, artifact}. Use this to:
+    - Resolve deictic references ("the letter", "her message", "that doc")
+      against the artifacts the user has actually been touching.
+    - Write briefs with real continuity ("you've been drafting a letter to
+      Marcus for the last 5 minutes" beats "you appear to be in TextEdit").
+    - Decide whether the user's current voice request is a CONTINUATION of
+      recent activity (most common) or a NEW task (less common).
+    Never reproduce raw artifact bodies into the brief verbatim — they may
+    be sensitive. Summarize them.
+
     Your job is two things in one call:
 
     (1) RESOLVE INTENT. Output {verb, target, resolved_target?, entities, confidence}.
@@ -234,6 +247,21 @@ public final class ContextSelector {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
 
+        /// Compact per-entry projection of `SurfaceObservation` for the
+        /// Mercury payload. We drop fields Mercury doesn't need (controls,
+        /// correlations, latency, allVisibleApps) to keep prompt size bounded;
+        /// what's left is the user-centric story: when, where, doing what,
+        /// with what content.
+        struct StoryEntry: Encodable {
+            let t: Date
+            let app: String?
+            let surface: String?
+            let narrative: String?
+            let current_goal_guess: String?
+            let content_type: String?
+            let artifact: [String: AnyCodable]?
+        }
+
         struct Payload: Encodable {
             let transcript: String
             let current_screen: CL2Snapshot
@@ -247,6 +275,12 @@ public final class ContextSelector {
             /// this as the canonical "how this app's surfaces actually work"
             /// reference and lean on it when AX/OCR are sparse.
             let learned_surfaces: [SurfaceMemoryStore.SurfaceMemory]
+            /// Recent chronological story of what the user has been doing, built
+            /// up by GeminiObserver per capture and persisted to CaptureStoryLog.
+            /// Mercury uses this to write briefs with real continuity rather than
+            /// guessing from sparse events. Last ~20 entries OR last 5 minutes,
+            /// whichever is shorter.
+            let recent_story: [StoryEntry]
         }
 
         // Cap the per-surface control list to keep prompt size bounded; sort
@@ -265,6 +299,24 @@ public final class ContextSelector {
                 }
         )
 
+        // Pull the last 20 story entries, then keep only those within the last
+        // 5 minutes. If fewer fit the window, that's fine — emit what's there.
+        let storyWindowSeconds: TimeInterval = 300
+        let now = Date()
+        let recentStory: [StoryEntry] = CaptureStoryLog.shared.tail(20)
+            .filter { now.timeIntervalSince($0.t) <= storyWindowSeconds }
+            .map { obs in
+                StoryEntry(
+                    t: obs.t,
+                    app: obs.frontmostApp,
+                    surface: obs.currentSurface,
+                    narrative: obs.narrative,
+                    current_goal_guess: obs.currentGoalGuess,
+                    content_type: obs.contentType,
+                    artifact: obs.artifact
+                )
+            }
+
         let payload = Payload(
             transcript: transcript,
             current_screen: l2,
@@ -273,7 +325,8 @@ public final class ContextSelector {
             recent_events: events,
             recent_resources: Array(resources.prefix(20)),
             recipes_for_active_app: Array(recipes.sorted { $0.seenCount > $1.seenCount }.prefix(8)),
-            learned_surfaces: learned
+            learned_surfaces: learned,
+            recent_story: recentStory
         )
         let data = try encoder.encode(payload)
         return String(data: data, encoding: .utf8) ?? "{}"
