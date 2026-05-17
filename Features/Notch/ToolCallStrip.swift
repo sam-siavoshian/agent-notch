@@ -8,6 +8,7 @@
 //  prior calls laid out as a dot-separated ghost trail to its right.
 //
 
+import AppKit
 import SwiftUI
 
 struct ToolCallStrip: View {
@@ -35,9 +36,9 @@ struct ToolCallStrip: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 1)
-        .padding(.bottom, 5)
-        .frame(maxWidth: .infinity)
+        .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 1)
+        .padding(.bottom, 3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     // MARK: - Derivation

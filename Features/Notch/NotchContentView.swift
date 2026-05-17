@@ -99,17 +99,15 @@ struct NotchContentView: View {
         return false
     }
 
+    /// Show the tool-only row instead of "thinking…" while a tool is firing.
+    /// The two readouts are mutually exclusive — never stacked.
     private var liveStripActive: Bool { liveActive && !isOpen && isToolCallLive }
-    private let liveStripHeight: CGFloat = 40
 
     private var height: CGFloat {
         if isOpen {
             return min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax)
         }
-        if liveActive {
-            return liveHeight + (liveStripActive ? liveStripHeight : 0)
-        }
-        return closedHeight
+        return liveActive ? liveHeight : closedHeight
     }
     private var cornerRadius: CGFloat {
         if isOpen { return 22 }
@@ -163,17 +161,16 @@ struct NotchContentView: View {
                 .opacity(isOpen || liveActive ? 0 : 1)
                 .allowsHitTesting(!isOpen && !liveActive)
 
-            VStack(spacing: 0) {
+            ZStack {
+                // Thinking / listening / error states — generic text row.
                 NotchLiveActivityView()
-                    .frame(width: liveWidth, height: liveHeight)
-
-                if liveStripActive {
-                    ToolCallStrip()
-                        .frame(width: liveWidth, height: liveStripHeight)
-                        .transition(.opacity)
-                }
+                    .opacity(liveActive && !liveStripActive ? 1 : 0)
+                // Tool-call live action — replaces the thinking row entirely
+                // while a computer-use tool is running.
+                ToolCallStrip()
+                    .opacity(liveStripActive ? 1 : 0)
             }
-            .frame(width: liveWidth, alignment: .top)
+            .frame(width: liveWidth, height: liveHeight, alignment: .top)
             .opacity(!isOpen && liveActive ? 1 : 0)
             .allowsHitTesting(false)
 
