@@ -66,6 +66,7 @@ public enum Env {
 
     private static func parse(_ contents: String) -> [String: String] {
         var out: [String: String] = [:]
+        out.reserveCapacity(16)
         for rawLine in contents.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, !line.hasPrefix("#") else { continue }
