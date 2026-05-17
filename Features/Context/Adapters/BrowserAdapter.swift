@@ -117,7 +117,7 @@ public final class BrowserAdapter: AppContextAdapter {
         guard let tabsAny = snap["tabs"]?.value as? [[String: Any]] else { return [] }
         let now = Date()
         let appLabel = NSWorkspace.shared.runningApplications
-            .first { $0.bundleIdentifier == bundleID }?.localizedName ?? bundleID
+            .first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
         var out: [CResourceRef] = []
         for tab in tabsAny {
             guard let title = tab["title"] as? String,
