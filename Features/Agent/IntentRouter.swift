@@ -152,19 +152,17 @@ enum ReminderIntent {
     static func handle(_ transcript: String) async -> IntentResult {
         let lower = transcript.lowercased()
         let triggers = ["remind me to ", "add a reminder to ", "add reminder to "]
-        for t in triggers where lower.hasPrefix(t) {
-            let body = String(transcript.dropFirst(t.count)).trimmingCharacters(in: .whitespaces)
-            guard !body.isEmpty else { return .notMine }
-            let safe = body.replacingOccurrences(of: "\"", with: "'")
-            let script = "tell application \"Reminders\" to make new reminder with properties {name:\"\(safe)\"}"
-            do {
-                _ = try await AppleScriptBridge.run(script)
-                return .handled(summary: "Reminder added: \(body)", affirmation: "Reminder added.")
-            } catch {
-                NSLog("[IntentRouter] Reminder add failed: \(error)")
-                return .notMine
-            }
+        guard let t = triggers.first(where: { lower.hasPrefix($0) }) else { return .notMine }
+        let body = String(transcript.dropFirst(t.count)).trimmingCharacters(in: .whitespaces)
+        guard !body.isEmpty else { return .notMine }
+        let safe = body.replacingOccurrences(of: "\"", with: "'")
+        let script = "tell application \"Reminders\" to make new reminder with properties {name:\"\(safe)\"}"
+        do {
+            _ = try await AppleScriptBridge.run(script)
+            return .handled(summary: "Reminder added: \(body)", affirmation: "Reminder added.")
+        } catch {
+            NSLog("[IntentRouter] Reminder add failed: \(error)")
+            return .notMine
         }
-        return .notMine
     }
 }
