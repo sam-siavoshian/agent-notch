@@ -152,10 +152,9 @@ enum NotchSizing {
     }
 
     static func notchWidth(for screen: NSScreen?) -> CGFloat {
-        if let aux = screen?.auxiliaryTopLeftArea {
-            let rightEdge = (screen?.frame.width ?? 0) - (screen?.auxiliaryTopRightArea?.width ?? aux.width)
-            let leftEdge = aux.width
-            let computed = rightEdge - leftEdge
+        if let screen, let aux = screen.auxiliaryTopLeftArea {
+            let rightEdge = screen.frame.width - (screen.auxiliaryTopRightArea?.width ?? aux.width)
+            let computed = rightEdge - aux.width
             if computed > 100 { return computed }
         }
         return 220
