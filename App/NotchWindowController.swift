@@ -101,10 +101,11 @@ final class NotchWindowController: NSObject {
     /// cursor, then main.
     private func preferredScreen() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
-        let screenUnderCursor = NSScreen.screens.first { NSPointInRect(mouse, $0.frame) }
+        let screens = NSScreen.screens
+        let screenUnderCursor = screens.first { NSPointInRect(mouse, $0.frame) }
         if let s = screenUnderCursor, s.auxiliaryTopLeftArea != nil { return s }
         if let s = screenUnderCursor { return s }
-        if let notched = NSScreen.screens.first(where: { $0.auxiliaryTopLeftArea != nil }) {
+        if let notched = screens.first(where: { $0.auxiliaryTopLeftArea != nil }) {
             return notched
         }
         return NSScreen.main
