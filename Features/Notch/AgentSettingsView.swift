@@ -310,8 +310,8 @@ struct AgentSettingsView: View {
     }
 
     private func refreshContextHealth() async {
-        let diagnostics = await ContextCoordinator.shared.diagnostics()
-        await MainActor.run { contextHealth = diagnostics.summary }
+        let summary = await AgentInterfaces.context?.diagnosticsSummary() ?? ""
+        await MainActor.run { contextHealth = summary }
     }
 }
 

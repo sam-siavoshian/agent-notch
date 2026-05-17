@@ -43,3 +43,4 @@ landing/node_modules/
 landing/.next/
 landing/out/
 landing/.vercel/
+.claude/worktrees/

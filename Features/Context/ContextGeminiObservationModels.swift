@@ -247,6 +247,7 @@ public enum ContextGeminiObservationLane: String, Codable, Sendable, CaseIterabl
     case entityContent
     case interaction
     case reducer
+    case update
 
     public var id: String { rawValue }
 
@@ -262,6 +263,8 @@ public enum ContextGeminiObservationLane: String, Codable, Sendable, CaseIterabl
             return "Interaction"
         case .reducer:
             return "Reducer"
+        case .update:
+            return "Update"
         }
     }
 
@@ -277,6 +280,8 @@ public enum ContextGeminiObservationLane: String, Codable, Sendable, CaseIterabl
             return "what changed after the last action"
         case .reducer:
             return "merged activation-ready memory"
+        case .update:
+            return "delta update on an unchanged surface"
         }
     }
 }
