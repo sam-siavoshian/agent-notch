@@ -8,6 +8,7 @@ import AppKit
 
 struct AgentSettingsView: View {
     @ObservedObject private var store = AgentSettingsStore.shared
+    @ObservedObject private var audio = AudioDeviceManager.shared
     @State private var savedOpacity: Double = 0
 
     var body: some View {
@@ -15,6 +16,8 @@ struct AgentSettingsView: View {
             reasoningEffortRow
             cursorColorRow
             ttsVoiceRow
+            audioInputRow
+            audioOutputRow
             quitRow
             savedBadge
         }
@@ -103,6 +106,30 @@ struct AgentSettingsView: View {
         }
     }
 
+    private var audioInputRow: some View {
+        SettingRow(title: "Mic") {
+            DevicePickerMenu(
+                icon: "mic.fill",
+                placeholder: "System Default",
+                devices: audio.inputs,
+                selectedUID: store.voiceInputDeviceUID,
+                onSelect: { store.voiceInputDeviceUID = $0 }
+            )
+        }
+    }
+
+    private var audioOutputRow: some View {
+        SettingRow(title: "Output") {
+            DevicePickerMenu(
+                icon: "speaker.wave.2.fill",
+                placeholder: "System Default",
+                devices: audio.outputs,
+                selectedUID: store.voiceOutputDeviceUID,
+                onSelect: { store.voiceOutputDeviceUID = $0 }
+            )
+        }
+    }
+
     private var quitRow: some View {
         HStack {
             Spacer()
@@ -120,6 +147,63 @@ struct AgentSettingsView: View {
             .buttonStyle(.plain)
             .help("Quit Agent in the Notch")
         }
+    }
+}
+
+private struct DevicePickerMenu: View {
+    let icon: String
+    let placeholder: String
+    let devices: [AudioDevice]
+    let selectedUID: String?
+    let onSelect: (String?) -> Void
+
+    private var selectedName: String {
+        if let uid = selectedUID, let match = devices.first(where: { $0.uid == uid }) {
+            return match.name
+        }
+        return placeholder
+    }
+
+    var body: some View {
+        Menu {
+            Button {
+                onSelect(nil)
+            } label: {
+                if selectedUID == nil {
+                    Label(placeholder, systemImage: "checkmark")
+                } else {
+                    Text(placeholder)
+                }
+            }
+            if !devices.isEmpty { Divider() }
+            ForEach(devices) { device in
+                Button {
+                    onSelect(device.uid)
+                } label: {
+                    if device.uid == selectedUID {
+                        Label(device.name, systemImage: "checkmark")
+                    } else {
+                        Text(device.name)
+                    }
+                }
+            }
+        } label: {
+            GhostPill(tint: SoftPill.Text.secondary) {
+                HStack(spacing: 4) {
+                    Image(systemName: icon)
+                        .font(.system(size: 9, weight: .bold))
+                    Text(selectedName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 140, alignment: .leading)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 }
 
