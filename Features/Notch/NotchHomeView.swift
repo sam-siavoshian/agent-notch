@@ -17,7 +17,6 @@ struct NotchHomeView: View {
     @ObservedObject private var state = AgentState.shared
     @ObservedObject private var store = AgentSettingsStore.shared
     @ObservedObject private var permissions = PermissionChecker.shared
-    @ObservedObject private var battery = BatteryService.shared
 
     private var isActive: Bool {
         switch state.activity {
@@ -32,9 +31,6 @@ struct NotchHomeView: View {
                 permissionBanner
             }
             statusHero
-            if battery.hasBattery {
-                batteryRow
-            }
             if !state.lastTranscript.isEmpty {
                 lastRequestCard
             }
@@ -505,96 +501,6 @@ private struct AgentNotchBadge: View {
                     .shadow(color: Color(red: 0.133, green: 0.773, blue: 0.369).opacity(0.6),
                             radius: s * 0.10)
             }
-        }
-    }
-}
-
-// MARK: - Battery widget
-
-extension NotchHomeView {
-    private var batteryColor: Color {
-        if battery.isCharging      { return SoftPill.Status.green }
-        if battery.percentage > 50 { return SoftPill.Status.green }
-        if battery.percentage > 20 { return SoftPill.Status.amber }
-        return SoftPill.Status.red
-    }
-
-    var batteryRow: some View {
-        HStack(spacing: 8) {
-            Text("Battery")
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(SoftPill.Text.secondary)
-
-            BatteryBodyView(percentage: battery.percentage, isCharging: battery.isCharging)
-
-            Text("\(battery.percentage)%")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(batteryColor)
-                .frame(minWidth: 30, alignment: .trailing)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            PillBackground(fill: AnyShapeStyle(SoftPill.Surface.inset), cornerRadius: 10)
-        )
-    }
-}
-
-private struct BatteryBodyView: View {
-    let percentage: Int
-    let isCharging: Bool
-
-    private var fraction: CGFloat { CGFloat(min(max(percentage, 0), 100)) / 100.0 }
-    private var color: Color {
-        if isCharging      { return SoftPill.Status.green }
-        if percentage > 50 { return SoftPill.Status.green }
-        if percentage > 20 { return SoftPill.Status.amber }
-        return SoftPill.Status.red
-    }
-
-    private let bodyH: CGFloat  = 12
-    private let inset: CGFloat  = 2
-    private let corner: CGFloat = 3
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ZStack(alignment: .leading) {
-                // Shell
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .stroke(color.opacity(0.35), lineWidth: 1)
-
-                // Proportional fill
-                GeometryReader { geo in
-                    RoundedRectangle(cornerRadius: max(1.5, corner - inset), style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [color.opacity(0.65), color],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .frame(
-                            width: max(0, (geo.size.width - inset * 2) * fraction),
-                            height: bodyH - inset * 2
-                        )
-                        .padding(.leading, inset)
-                        .frame(maxHeight: .infinity)
-                        .animation(.easeInOut(duration: 0.45), value: fraction)
-                }
-
-                // Charging bolt
-                if isCharging {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: bodyH)
-
-            // Terminal nub
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(color.opacity(0.35))
-                .frame(width: 3, height: 6)
         }
     }
 }

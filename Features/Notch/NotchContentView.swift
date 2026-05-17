@@ -216,8 +216,11 @@ struct NotchContentView: View {
     @ViewBuilder
     private var openContent: some View {
         VStack(spacing: 8) {
-            NotchTabBar(selected: selectedTabBinding)
-                .padding(.top, 4)
+            HStack(spacing: 6) {
+                NotchTabBar(selected: selectedTabBinding)
+                BatteryStatusPill()
+            }
+            .padding(.top, 4)
             Group {
                 switch selectedTab {
                 case .home:
@@ -225,10 +228,8 @@ struct NotchContentView: View {
                 case .spotify:
                     NotchMusicView()
                 case .calendar:
-                    ScrollView(.vertical, showsIndicators: false) {
-                        NotchCalendarView()
-                            .padding(.bottom, 4)
-                    }
+                    NotchCalendarView()
+                        .padding(.bottom, 4)
                 case .settings:
                     ScrollView(.vertical, showsIndicators: false) {
                         AgentSettingsView()
@@ -326,6 +327,61 @@ private struct SpotifyTabButton: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Battery status pill (macOS menubar-style glyph)
+
+private struct BatteryStatusPill: View {
+    @ObservedObject private var battery = BatteryService.shared
+    @State private var hovered = false
+
+    var body: some View {
+        if battery.hasBattery {
+            content
+        }
+    }
+
+    private var color: Color {
+        if battery.isCharging       { return SoftPill.Status.green }
+        if battery.percentage <= 20 { return SoftPill.Status.red }
+        if battery.percentage <= 50 { return SoftPill.Status.amber }
+        return SoftPill.Status.green
+    }
+
+    private var glyph: String {
+        if battery.isCharging { return "battery.100percent.bolt" }
+        switch battery.percentage {
+        case ...10: return "battery.0percent"
+        case ...30: return "battery.25percent"
+        case ...60: return "battery.50percent"
+        case ...85: return "battery.75percent"
+        default:    return "battery.100percent"
+        }
+    }
+
+    private var content: some View {
+        HStack(spacing: 4) {
+            Image(systemName: glyph)
+                .font(.system(size: 15, weight: .regular))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(color, SoftPill.Text.secondary)
+                .shadow(color: color.opacity(0.55), radius: hovered ? 5 : 0)
+
+            if hovered {
+                Text("\(battery.percentage)%")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(color)
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .frame(minHeight: 26)
+        .background(PillBackground(fill: AnyShapeStyle(SoftPill.Surface.base)))
+        .help("Battery \(battery.percentage)%\(battery.isCharging ? " · Charging" : "")")
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
     }
 }
 
