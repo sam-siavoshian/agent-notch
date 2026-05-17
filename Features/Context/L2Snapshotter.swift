@@ -173,9 +173,11 @@ public enum L2Snapshotter {
         }
     }
 
-    /// Synchronous AX dump of the frontmost window's children (one level deep,
-    /// top 10). Records (role, label, ax_path, bbox, focused). Best-effort —
-    /// returns [] on permission error or when AX times out.
+    /// Synchronous AX dump of the frontmost window, walking 3 levels deep and
+    /// capturing up to 50 elements. Prioritizes clickable controls (buttons,
+    /// menu items, links, text fields, etc.) so the most actionable surface
+    /// reaches the selector even when the window is deeply nested.
+    /// Best-effort — returns [] on permission error or when AX times out.
     private static func dumpAXSync(pid: Int) -> [CL2Snapshot.AXElement] {
         guard pid > 0 else { return [] }
         let appElement = AXUIElementCreateApplication(pid_t(pid))
@@ -183,30 +185,59 @@ public enum L2Snapshotter {
         guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
               let windows = windowsValue as? [AXUIElement], let window = windows.first else { return [] }
 
-        // Focused element via the app's focused-element attribute.
         var focusedAny: AnyObject?
         AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedAny)
-        let focusedElement: AXUIElement? = {
+        let focused: AXUIElement? = {
             guard let v = focusedAny, CFGetTypeID(v) == AXUIElementGetTypeID() else { return nil }
             return (v as! AXUIElement)
         }()
 
-        // Walk children one level deep.
-        var childrenValue: AnyObject?
-        guard AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &childrenValue) == .success,
-              let children = childrenValue as? [AXUIElement] else { return [] }
+        var collected: [CL2Snapshot.AXElement] = []
+        walk(element: window, parentPath: "AXWindow", depth: 0, maxDepth: 3, focused: focused, collected: &collected)
 
-        var out: [CL2Snapshot.AXElement] = []
-        for child in children.prefix(10) {
-            let isFocused: Bool = {
-                guard let focusedElement else { return false }
-                return CFEqual(child, focusedElement)
-            }()
-            if let el = describe(child, parent: "AXWindow", isFocused: isFocused) {
-                out.append(el)
-            }
+        // Prioritize clickable elements; drop unlabeled passive ones; cap at 50.
+        let clickableRoles: Set<String> = [
+            "AXButton", "AXMenuItem", "AXMenuButton", "AXLink",
+            "AXRadioButton", "AXCheckBox", "AXTab", "AXTabGroup",
+            "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea",
+            "AXSearchField", "AXSlider", "AXStepper"
+        ]
+        let withLabel = collected.filter { ($0.label?.isEmpty == false) || $0.focused }
+        let clickable = withLabel.filter { clickableRoles.contains($0.role) }
+        let passive = withLabel.filter { !clickableRoles.contains($0.role) }
+        // Take clickables first, fill the rest with passives.
+        let combined = (clickable + passive).prefix(50)
+        return Array(combined)
+    }
+
+    private static func walk(
+        element: AXUIElement,
+        parentPath: String,
+        depth: Int,
+        maxDepth: Int,
+        focused: AXUIElement?,
+        collected: inout [CL2Snapshot.AXElement]
+    ) {
+        guard collected.count < 80 else { return }   // hard cap before sort/filter
+        guard depth <= maxDepth else { return }
+
+        if let el = describe(element, parent: parentPath, isFocused: focused.map { CFEqual(element, $0) } ?? false) {
+            collected.append(el)
         }
-        return out
+
+        // Recurse into children
+        var childrenValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+              let children = childrenValue as? [AXUIElement] else { return }
+
+        // For deep windows, cap children per level so the recursion stays bounded
+        let perLevelCap = depth == 0 ? 30 : (depth == 1 ? 20 : 10)
+        let role = (collected.last?.role ?? "?")
+        let pathPrefix = "\(parentPath)/\(role)"
+
+        for child in children.prefix(perLevelCap) {
+            walk(element: child, parentPath: pathPrefix, depth: depth + 1, maxDepth: maxDepth, focused: focused, collected: &collected)
+        }
     }
 
     private static func describe(_ element: AXUIElement, parent: String, isFocused: Bool) -> CL2Snapshot.AXElement? {
