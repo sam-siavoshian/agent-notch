@@ -36,6 +36,10 @@ public final class ComputerUseHarness {
     public var fallbackModelID: String = AnthropicModel.haiku45
     public var maxTurns: Int = 100
     public var maxOutputTokens: Int = 4096
+    /// Long-edge ceiling for what the agent sees + clicks in. Anthropic's
+    /// computer-use models are most accurate at XGA/WXGA scale and degrade
+    /// noticeably past ~1280px; keep this small unless we change models.
+    public var agentScreenshotLongEdge: Int = 1280
 
     public private(set) var isRunning: Bool = false
     private var stopRequested: Bool = false
@@ -134,11 +138,24 @@ public final class ComputerUseHarness {
             return
         }
 
-        let displaySize = primaryDisplayPixelSize()
-        let dispatcher = ToolDispatcher(displaySize: displaySize)
+        // Three distinct coordinate spaces collide here — keep them straight:
+        //   * logicalSize: macOS logical points (NSScreen.frame). What
+        //     CGEvent / CGWarpMouseCursorPosition operate in.
+        //   * backingSize: backing-store pixels (logical × backingScaleFactor).
+        //     Useful for almost nothing except SCKit raw captures.
+        //   * agentTargetSize: what the model SEES — screenshot dimensions +
+        //     coordinate space we advertise to Anthropic. Capped at 1280 long
+        //     edge per Anthropic's computer-use accuracy guidance.
+        let logicalSize = primaryLogicalDisplaySize()
+        let agentTargetSize = computeAgentTargetSize(logicalSize: logicalSize, maxLongEdge: agentScreenshotLongEdge)
+        let dispatcher = ToolDispatcher(
+            agentDisplaySize: agentTargetSize,
+            logicalDisplaySize: logicalSize,
+            screenshotLongEdge: agentScreenshotLongEdge
+        )
         let client = AnthropicClient(apiKey: apiKey)
 
-        let tools = buildTools(displaySize: displaySize)
+        let tools = buildTools(displaySize: agentTargetSize)
         let system = buildSystemBlocks(
             settings: settings,
             contextSummary: input.contextSummary,
@@ -166,12 +183,18 @@ public final class ComputerUseHarness {
         // `computer.screenshot` tool call on turn 1 just to see the screen.
         let firstUserContent: [ContentBlock]
         if let jpeg = input.initiationScreenshot, !jpeg.isEmpty {
-            let base64 = jpeg.base64EncodedString()
+            // Selector hands us a 1568-long-edge JPEG (sized for OCR). The
+            // agent's coordinate space is `agentTargetSize` (≤1280 long edge),
+            // so resize the initiation image to match — otherwise the model
+            // sees one resolution but is told the display is another, and
+            // every turn-1 click lands off-target.
+            let resizedJPEG = Self.resizeJPEG(jpeg, maxLongEdge: agentScreenshotLongEdge) ?? jpeg
+            let base64 = resizedJPEG.base64EncodedString()
             firstUserContent = [
                 .text(input.transcript),
                 .image(mediaType: "image/jpeg", base64: base64, cache: false)
             ]
-            log.info("harness.first_user has_image=true image_bytes=\(jpeg.count)")
+            log.info("harness.first_user has_image=true image_bytes=\(resizedJPEG.count) original_bytes=\(jpeg.count)")
         } else {
             firstUserContent = [.text(input.transcript)]
         }
@@ -804,6 +827,54 @@ public final class ComputerUseHarness {
         let scale = screen.backingScaleFactor
         let size = screen.frame.size
         return CGSize(width: size.width * scale, height: size.height * scale)
+    }
+
+    /// macOS logical points (NSScreen.frame). The coordinate space CGEvent
+    /// uses for mouse positioning. NOT backing-store pixels.
+    private func primaryLogicalDisplaySize() -> CGSize {
+        NSScreen.main?.frame.size ?? CGSize(width: 1440, height: 900)
+    }
+
+    /// Resize a JPEG so its longest edge is ≤ `maxLongEdge`. Returns nil on
+    /// any decode/encode failure so the caller can fall back to the original.
+    static func resizeJPEG(_ data: Data, maxLongEdge: Int) -> Data? {
+        guard let src = NSBitmapImageRep(data: data) else { return nil }
+        let w = src.pixelsWide
+        let h = src.pixelsHigh
+        let longest = max(w, h)
+        guard longest > maxLongEdge, longest > 0 else { return data }
+        let scale = CGFloat(maxLongEdge) / CGFloat(longest)
+        let newW = Int(CGFloat(w) * scale)
+        let newH = Int(CGFloat(h) * scale)
+        guard newW > 0, newH > 0,
+              let cs = src.cgImage?.colorSpace,
+              let ctx = CGContext(
+                  data: nil, width: newW, height: newH,
+                  bitsPerComponent: 8, bytesPerRow: 0,
+                  space: cs,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        ctx.interpolationQuality = .medium
+        if let cg = src.cgImage {
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: newW, height: newH))
+        }
+        guard let outCG = ctx.makeImage() else { return nil }
+        let rep = NSBitmapImageRep(cgImage: outCG)
+        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
+    }
+
+    /// Scale the logical display down so the longest edge equals `maxLongEdge`,
+    /// preserving aspect ratio. Used to derive the agent's coordinate space —
+    /// also matches what `ScreenCapture.snapshot(maxLongEdge:)` will produce
+    /// when we ask it for screenshots at the same cap.
+    private func computeAgentTargetSize(logicalSize: CGSize, maxLongEdge: Int) -> CGSize {
+        let longest = max(logicalSize.width, logicalSize.height)
+        guard longest > CGFloat(maxLongEdge), longest > 0 else { return logicalSize }
+        let scale = CGFloat(maxLongEdge) / longest
+        return CGSize(
+            width: (logicalSize.width * scale).rounded(),
+            height: (logicalSize.height * scale).rounded()
+        )
     }
 
     /// Compact JSON representation of a tool input. Used for the Dev Tools

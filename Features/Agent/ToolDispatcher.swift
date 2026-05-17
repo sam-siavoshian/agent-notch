@@ -30,11 +30,33 @@ public struct DispatchedToolResult: Sendable {
 }
 
 public actor ToolDispatcher {
-    public let displaySize: CGSize
+    /// Coordinate space the MODEL sees: matches the screenshot dimensions we
+    /// send back AND the `display_width_px/display_height_px` we advertise in
+    /// the computer tool registration. Anthropic computer-use models are
+    /// trained on roughly-XGA-sized inputs and degrade past ~1280px wide —
+    /// keep this small for accurate clicks.
+    public let agentDisplaySize: CGSize
+    /// Real macOS logical-point space — what `CGEvent.mouseCursorPosition`
+    /// and `NSEvent.mouseLocation` operate in. On a 14" MBP this is
+    /// 1512×982-ish, NOT the 3024×1964 backing-store pixel count and NOT the
+    /// 1280×~ agent target. Coordinates from the model are scaled from
+    /// agentDisplaySize → this space before being posted as CGEvents.
+    public let logicalDisplaySize: CGSize
+    /// Long-edge cap for screenshots returned via `computer.screenshot`.
+    /// Matches `agentDisplaySize.longEdge` so the image the model receives
+    /// and the coordinate space it emits clicks in are 1:1.
+    public let screenshotLongEdge: Int
     private let capture: ScreenCapture
 
-    public init(displaySize: CGSize, capture: ScreenCapture = .shared) {
-        self.displaySize = displaySize
+    public init(
+        agentDisplaySize: CGSize,
+        logicalDisplaySize: CGSize,
+        screenshotLongEdge: Int,
+        capture: ScreenCapture = .shared
+    ) {
+        self.agentDisplaySize = agentDisplaySize
+        self.logicalDisplaySize = logicalDisplaySize
+        self.screenshotLongEdge = screenshotLongEdge
         self.capture = capture
     }
 
@@ -79,7 +101,7 @@ public actor ToolDispatcher {
         }
         switch action {
         case "screenshot":
-            let snap = try await capture.snapshot()
+            let snap = try await capture.snapshot(maxLongEdge: screenshotLongEdge)
             let b64 = snap.jpegData.base64EncodedString()
             return DispatchedToolResult(
                 toolUseId: toolUseId,
@@ -108,7 +130,7 @@ public actor ToolDispatcher {
             return ok(toolUseId, "double-clicked at \(Int(p.x)),\(Int(p.y))")
 
         case "left_click_drag":
-            let from = NSEvent.mouseLocationFlipped(displayHeight: displaySize.height)
+            let from = NSEvent.mouseLocationFlipped(displayHeight: logicalDisplaySize.height)
             let to = try requireCoordinate(input)
             postDrag(from: from, to: to)
             return ok(toolUseId, "dragged to \(Int(to.x)),\(Int(to.y))")
@@ -120,7 +142,7 @@ public actor ToolDispatcher {
             return ok(toolUseId, "moved to \(Int(p.x)),\(Int(p.y))")
 
         case "cursor_position":
-            let loc = NSEvent.mouseLocationFlipped(displayHeight: displaySize.height)
+            let loc = NSEvent.mouseLocationFlipped(displayHeight: logicalDisplaySize.height)
             return ok(toolUseId, "X=\(Int(loc.x)) Y=\(Int(loc.y))")
 
         case "type":
@@ -265,6 +287,12 @@ public actor ToolDispatcher {
 
     private struct DispatchError: Swift.Error { let message: String; init(_ m: String) { self.message = m } }
 
+    /// Decode the `coordinate` array the model emitted (in agentDisplaySize
+    /// space) and scale it into macOS logical points so the resulting CGPoint
+    /// can be handed directly to `CGEvent.mouseCursorPosition` /
+    /// `CGWarpMouseCursorPosition`. Without this scaling, clicks land
+    /// (logical/agent) ratio off-target — a 2x mismatch on Retina means
+    /// every click lands at twice the intended offset.
     private func requireCoordinate(_ input: JSON) throws -> CGPoint {
         guard let coord = input.objectValue?["coordinate"]?.arrayValue,
               coord.count >= 2,
@@ -272,7 +300,9 @@ public actor ToolDispatcher {
               let y = coord[1].intValue else {
             throw DispatchError("Missing or invalid 'coordinate'")
         }
-        return CGPoint(x: x, y: y)
+        let sx = logicalDisplaySize.width / max(1, agentDisplaySize.width)
+        let sy = logicalDisplaySize.height / max(1, agentDisplaySize.height)
+        return CGPoint(x: CGFloat(x) * sx, y: CGFloat(y) * sy)
     }
 
     private func ok(_ id: String, _ text: String) -> DispatchedToolResult {
