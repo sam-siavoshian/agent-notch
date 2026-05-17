@@ -326,6 +326,10 @@ private struct GrantPermissionButton: View {
     @State private var armed = false
     @State private var activateObserver: NSObjectProtocol?
 
+    private static let gradientStart = Color(red: 0.953, green: 0.478, blue: 0.478)
+    private static let gradientEnd   = Color(red: 1.0,   green: 0.62,  blue: 0.42)
+    private static let glow          = Color(red: 1.0,   green: 0.55,  blue: 0.50)
+
     var body: some View {
         Button {
             if armed {
@@ -343,10 +347,7 @@ private struct GrantPermissionButton: View {
                 .background(
                     Capsule().fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.953, green: 0.478, blue: 0.478),
-                                Color(red: 1.0,   green: 0.62,  blue: 0.42)
-                            ],
+                            colors: [Self.gradientStart, Self.gradientEnd],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
                     )
@@ -365,7 +366,7 @@ private struct GrantPermissionButton: View {
                     )
                 )
                 .shadow(
-                    color: pressed ? .clear : Color(red: 1.0, green: 0.55, blue: 0.50).opacity(hover ? 0.55 : 0.35),
+                    color: pressed ? .clear : Self.glow.opacity(hover ? 0.55 : 0.35),
                     radius: hover ? 12 : 6, y: hover ? 4 : 2
                 )
                 .scaleEffect(pressed ? 0.95 : (hover ? 1.04 : 1.0))
