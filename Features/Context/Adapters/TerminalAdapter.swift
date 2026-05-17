@@ -84,12 +84,13 @@ public final class TerminalAdapter: AppContextAdapter {
         guard let contents = try? FileManager.default.contentsOfDirectory(at: Self.cacheDir, includingPropertiesForKeys: [.contentModificationDateKey]) else {
             return nil
         }
-        let cwdFiles = contents.filter { $0.lastPathComponent.hasPrefix("term-cwd-") }
-        guard let mostRecent = cwdFiles.max(by: {
-            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            return a < b
-        }) else { return nil }
+        // Pre-compute modification dates so max(by:) doesn't re-stat each file O(n log n) times.
+        let cwdFiles: [(url: URL, mtime: Date)] = contents.compactMap { url in
+            guard url.lastPathComponent.hasPrefix("term-cwd-") else { return nil }
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return (url, mtime)
+        }
+        guard let mostRecent = cwdFiles.max(by: { $0.mtime < $1.mtime })?.url else { return nil }
         let raw = (try? String(contentsOf: mostRecent, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
         return raw?.isEmpty == false ? raw : nil
     }
