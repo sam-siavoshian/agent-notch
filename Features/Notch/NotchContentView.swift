@@ -86,51 +86,49 @@ struct NotchContentView: View {
         if liveActive { return liveWidth }
         return closedWidth
     }
+    /// True when there is at least one tool call in the live activity or the
+    /// recent log — gates the inline chip strip.
+    private var hasToolCalls: Bool {
+        if case .toolCall = agentState.activity { return true }
+        return agentState.activityLog.contains { entry in
+            if case .toolCall = entry.activity { return true }
+            return false
+        }
+    }
+
+    /// Inline chip strip is part of the live-activity surface — only shown
+    /// when the notch is in its live state and there's something to display.
+    private var liveStripActive: Bool { liveActive && !isOpen && hasToolCalls }
+    private let liveStripHeight: CGFloat = 40
+
     private var height: CGFloat {
         if isOpen {
             return min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax)
         }
-        return liveActive ? liveHeight : closedHeight
+        if liveActive {
+            return liveHeight + (liveStripActive ? liveStripHeight : 0)
+        }
+        return closedHeight
     }
     private var cornerRadius: CGFloat {
         if isOpen { return 22 }
         return liveActive ? 16 : 10
     }
 
-    /// Strip is the live-activity extension only — hidden when the notch is
-    /// open because the home tab already surfaces the activity feed there.
-    private var showToolStrip: Bool { liveActive && !isOpen }
-
     var body: some View {
-        ZStack(alignment: .top) {
-            notchBody
-
-            // Tucked 8px behind the notch's bottom curve so the two shapes
-            // read as one surface. Matches the notch's current bottom radius
-            // and width so the seam vanishes.
-            ToolCallStrip(bottomCornerRadius: cornerRadius)
-                .frame(width: width, height: 40)
-                .offset(y: max(height, 0) - 8)
-                .opacity(showToolStrip ? 1 : 0)
-                .scaleEffect(showToolStrip ? 1 : 0.96, anchor: .top)
-                .allowsHitTesting(false)
-                .zIndex(-1)
-                .animation(.spring(response: 0.34, dampingFraction: 0.82), value: showToolStrip)
-                .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0), value: height)
-                .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0), value: width)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .preferredColorScheme(.dark)
-        .onChange(of: isOpen) { _, _ in
-            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
-            if isOpen {
-                close()
-            } else {
-                openViaShortcut()
+        notchBody
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .preferredColorScheme(.dark)
+            .onChange(of: isOpen) { _, _ in
+                NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
             }
-        }
+            .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
+                if isOpen {
+                    close()
+                } else {
+                    openViaShortcut()
+                }
+            }
     }
 
     @ViewBuilder
@@ -164,10 +162,19 @@ struct NotchContentView: View {
                 .opacity(isOpen || liveActive ? 0 : 1)
                 .allowsHitTesting(!isOpen && !liveActive)
 
-            NotchLiveActivityView()
-                .frame(width: liveWidth, height: liveHeight)
-                .opacity(!isOpen && liveActive ? 1 : 0)
-                .allowsHitTesting(false)
+            VStack(spacing: 0) {
+                NotchLiveActivityView()
+                    .frame(width: liveWidth, height: liveHeight)
+
+                if liveStripActive {
+                    ToolCallStrip()
+                        .frame(width: liveWidth, height: liveStripHeight)
+                        .transition(.opacity)
+                }
+            }
+            .frame(width: liveWidth, alignment: .top)
+            .opacity(!isOpen && liveActive ? 1 : 0)
+            .allowsHitTesting(false)
 
             openContent
                 .padding(.horizontal, 10)
