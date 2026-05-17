@@ -33,7 +33,7 @@ private func systemCursorVisible() -> Bool {
 final class CursorTracker {
     private let window: CursorCompanionWindow
     private var timer: DispatchSourceTimer?
-    private let interval: DispatchTimeInterval = .milliseconds(8) // ~120Hz
+    private static let interval: DispatchTimeInterval = .milliseconds(8) // ~120Hz
     private var lastVisible: Bool = true
 
     init(window: CursorCompanionWindow) {
@@ -43,7 +43,7 @@ final class CursorTracker {
     func start() {
         stop()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now(), repeating: interval, leeway: .milliseconds(1))
+        timer.schedule(deadline: .now(), repeating: Self.interval, leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in
             self?.tick()
         }
