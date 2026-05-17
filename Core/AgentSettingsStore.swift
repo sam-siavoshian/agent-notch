@@ -28,6 +28,10 @@ public struct AgentSettings: Equatable, Sendable {
     /// Optional Gemini Flash Lite vision call at long-press time. Defaults on;
     /// gracefully no-ops if `GEMINI_API_KEY` is unset.
     public var geminiVisionEnabled: Bool
+    /// Continuous, throttled (>=8s) background Gemini observer that watches the
+    /// screen after major-change captures and accumulates per-surface UI/UX
+    /// memory. Defaults on; no-ops without `GEMINI_API_KEY`.
+    public var geminiObserverEnabled: Bool
 
     public static let defaultNeverLogApps: [String] = [
         "com.1password.1password7",
@@ -46,7 +50,8 @@ public struct AgentSettings: Equatable, Sendable {
         collectionPaused: false,
         neverLogApps: AgentSettings.defaultNeverLogApps,
         mercuryEnabled: true,
-        geminiVisionEnabled: true
+        geminiVisionEnabled: true,
+        geminiObserverEnabled: true
     )
 }
 
@@ -55,32 +60,35 @@ extension AgentSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
         case collectionPaused, neverLogApps, mercuryEnabled, geminiVisionEnabled
+        case geminiObserverEnabled
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        reasoningEffort     = (try? c.decode(AgentReasoningEffort.self, forKey: .reasoningEffort))     ?? .medium
-        preferences         = (try? c.decode(String.self,               forKey: .preferences))         ?? ""
-        systemPrompt        = (try? c.decode(String.self,               forKey: .systemPrompt))        ?? ""
-        cursorColor         = (try? c.decode(CursorColor.self,          forKey: .cursorColor))         ?? .blue
-        ttsVoice            = (try? c.decode(TTSVoice.self,             forKey: .ttsVoice))            ?? .nova
-        collectionPaused    = (try? c.decode(Bool.self,                 forKey: .collectionPaused))    ?? false
-        neverLogApps        = (try? c.decode([String].self,             forKey: .neverLogApps))        ?? AgentSettings.defaultNeverLogApps
-        mercuryEnabled      = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))      ?? true
-        geminiVisionEnabled = (try? c.decode(Bool.self,                 forKey: .geminiVisionEnabled)) ?? true
+        reasoningEffort      = (try? c.decode(AgentReasoningEffort.self, forKey: .reasoningEffort))      ?? .medium
+        preferences          = (try? c.decode(String.self,               forKey: .preferences))          ?? ""
+        systemPrompt         = (try? c.decode(String.self,               forKey: .systemPrompt))         ?? ""
+        cursorColor          = (try? c.decode(CursorColor.self,          forKey: .cursorColor))          ?? .blue
+        ttsVoice             = (try? c.decode(TTSVoice.self,             forKey: .ttsVoice))             ?? .nova
+        collectionPaused     = (try? c.decode(Bool.self,                 forKey: .collectionPaused))     ?? false
+        neverLogApps         = (try? c.decode([String].self,             forKey: .neverLogApps))         ?? AgentSettings.defaultNeverLogApps
+        mercuryEnabled       = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))       ?? true
+        geminiVisionEnabled  = (try? c.decode(Bool.self,                 forKey: .geminiVisionEnabled))  ?? true
+        geminiObserverEnabled = (try? c.decode(Bool.self,                forKey: .geminiObserverEnabled)) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(reasoningEffort,     forKey: .reasoningEffort)
-        try c.encode(preferences,         forKey: .preferences)
-        try c.encode(systemPrompt,        forKey: .systemPrompt)
-        try c.encode(cursorColor,         forKey: .cursorColor)
-        try c.encode(ttsVoice,            forKey: .ttsVoice)
-        try c.encode(collectionPaused,    forKey: .collectionPaused)
-        try c.encode(neverLogApps,        forKey: .neverLogApps)
-        try c.encode(mercuryEnabled,      forKey: .mercuryEnabled)
-        try c.encode(geminiVisionEnabled, forKey: .geminiVisionEnabled)
+        try c.encode(reasoningEffort,      forKey: .reasoningEffort)
+        try c.encode(preferences,          forKey: .preferences)
+        try c.encode(systemPrompt,         forKey: .systemPrompt)
+        try c.encode(cursorColor,          forKey: .cursorColor)
+        try c.encode(ttsVoice,             forKey: .ttsVoice)
+        try c.encode(collectionPaused,     forKey: .collectionPaused)
+        try c.encode(neverLogApps,         forKey: .neverLogApps)
+        try c.encode(mercuryEnabled,       forKey: .mercuryEnabled)
+        try c.encode(geminiVisionEnabled,  forKey: .geminiVisionEnabled)
+        try c.encode(geminiObserverEnabled, forKey: .geminiObserverEnabled)
     }
 }
 
@@ -163,6 +171,14 @@ public final class AgentSettingsStore: ObservableObject {
     public var geminiVisionEnabled: Bool {
         get { settings.geminiVisionEnabled }
         set { update { $0.geminiVisionEnabled = newValue } }
+    }
+
+    /// Toggle for the continuous background screen observer. When off,
+    /// `GeminiObserver.observe(...)` no-ops and no per-surface memory is
+    /// accumulated.
+    public var geminiObserverEnabled: Bool {
+        get { settings.geminiObserverEnabled }
+        set { update { $0.geminiObserverEnabled = newValue } }
     }
 
     public func update(_ mutate: (inout AgentSettings) -> Void) {
