@@ -47,22 +47,54 @@ public final class AgentSession {
         }
         log.info("session.fire transcript=\(transcript)")
 
-        // Resolve intent first (capped at 3s) so we can ask context for a
-        // tailored packet. Context gather itself blocks on a fresh capture, so
-        // serializing here barely costs latency vs the old parallel layout.
-        let intent = await Self.resolveIntent(transcript: transcript, deadlineSeconds: 3.0)
-        let hint = intent.map(Self.makeHint)
-        let context = await (AgentInterfaces.context?.getRecentActivityContext(hint: hint) ?? "")
-        log.info("session.context context_len=\(context.count) has_context=\(AgentInterfaces.context != nil) intent=\(intent != nil)")
+        // Phase 4 Mercury path: a single Selector call returns BOTH the resolved
+        // intent and the markdown brief (formerly two passes — Haiku resolver +
+        // ContextActivationBuilder). Brief is handed to the harness verbatim as
+        // `contextSummary`; intent is mapped to the legacy `ContextResolvedIntent`
+        // shape until Phase 5b cuts the legacy type from `ComputerUseHarness.Input`.
+        let result = await ContextSelector.shared.select(transcript: transcript)
+        log.info("session.selector latency=\(String(format: "%.2f", result.latencyS))s degraded=\(result.degraded) model=\(result.modelUsed ?? "<local>") brief_len=\(result.brief.count)")
+
+        let legacyIntent = Self.mapToLegacyIntent(result.intent, degraded: result.degraded, latencyS: result.latencyS)
 
         let input = ComputerUseHarness.Input(
             transcript: transcript,
-            contextSummary: context,
-            resolvedIntent: intent
+            contextSummary: result.brief,
+            resolvedIntent: legacyIntent
         )
         await ComputerUseHarness.shared.run(input)
     }
 
+    /// Maps the Phase 4 `CIntent` (Selector output) into the legacy
+    /// `ContextResolvedIntent` shape still required by `ComputerUseHarness.Input`.
+    /// Phase 5b is expected to delete `ContextResolvedIntent` (and this helper)
+    /// once the harness consumes `CIntent` directly.
+    private static func mapToLegacyIntent(_ intent: CIntent, degraded: Bool, latencyS: Double) -> ContextResolvedIntent {
+        // CIntent.Entity (label, kind, resolvedTo) -> ContextEntityResolution
+        // (userPhrase, entityID, entityLabel, entityType, confidence, evidence)
+        let entities: [ContextEntityResolution] = intent.entities.map { e in
+            ContextEntityResolution(
+                userPhrase: e.label,
+                entityID: e.resolvedTo,
+                entityLabel: e.resolvedTo ?? e.label,
+                entityType: e.kind,
+                confidence: intent.confidence,
+                evidence: "selector"
+            )
+        }
+        return ContextResolvedIntent(
+            verb: intent.verb,
+            target: intent.target,
+            resolvedEntities: entities,
+            candidateRecipes: [],            // recipes are already inlined in the brief
+            inferredGoal: intent.resolvedTarget ?? intent.target ?? "",
+            confidence: intent.confidence,
+            resolverLatencyMs: Int(latencyS * 1000.0),
+            usedFallback: degraded
+        )
+    }
+
+    @available(*, deprecated, message: "Legacy intent→hint path; replaced by Selector. Removed in Phase 5b.")
     private static func makeHint(_ intent: ContextResolvedIntent) -> ActivationContextHint {
         var mentionedApps: [String] = []
         var entityLabels: [String] = []
@@ -98,6 +130,7 @@ public final class AgentSession {
 
     /// Race the resolver against a hard wall-clock deadline so a slow Haiku
     /// response can never delay the harness. Returns nil if we time out.
+    @available(*, deprecated, message: "Legacy Haiku resolver path; replaced by Selector. Removed in Phase 5b.")
     private static func resolveIntent(transcript: String, deadlineSeconds: TimeInterval) async -> ContextResolvedIntent? {
         let snapshots = await ContextCoordinator.shared.recentSnapshots()
         let currentApp = snapshots.last?.appName
@@ -127,12 +160,14 @@ public final class AgentSession {
         }
     }
 
+    @available(*, deprecated, message: "Legacy resolver helper; replaced by Selector. Removed in Phase 5b.")
     private static func findAppMemory(for appName: String?) async -> ContextAppMemory? {
         guard let appName, !appName.isEmpty else { return nil }
         let memories = await ContextMemoryStore.shared.debugMemories(limit: 50)
         return memories.first { $0.appName.compare(appName, options: .caseInsensitive) == .orderedSame }
     }
 
+    @available(*, deprecated, message: "Legacy resolver helper; replaced by Selector. Removed in Phase 5b.")
     private static func normalizeSurfaceID(appName: String, windowTitle: String) -> String {
         let normalizedTitle = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Untitled window"
