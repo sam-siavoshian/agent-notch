@@ -317,9 +317,8 @@ struct NotchMusicView: View {
                         spotifyGreen: spotifyGreen, action: action)
     }
 
-    private var spotifyGreen: Color {
-        Color(red: 0.114, green: 0.725, blue: 0.329) // #1DB954
-    }
+    private static let _spotifyGreen = Color(red: 0.114, green: 0.725, blue: 0.329) // #1DB954
+    private var spotifyGreen: Color { Self._spotifyGreen }
 }
 
 // MARK: - Transport button (prev / play / next)
