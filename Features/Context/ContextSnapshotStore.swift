@@ -45,9 +45,10 @@ public actor ContextSnapshotStore {
     public func recentForOCR(limit: Int) -> [(app: String, surface: String, ocr: [String])] {
         let tail = snapshots.suffix(max(0, limit))
         return tail.map { snap in
-            let lines = snap.recognizedText
-                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            let lines = snap.recognizedText.compactMap { item -> String? in
+                let trimmed = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
             return (app: snap.appName, surface: snap.windowTitle, ocr: lines)
         }
     }
