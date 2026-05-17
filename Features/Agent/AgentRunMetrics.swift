@@ -140,9 +140,8 @@ public struct HarnessTurnRecord: Sendable, Identifiable {
 }
 
 /// Full per-run harness payload: system blocks at request time, transcript,
-/// resolved intent verb (joinable to ContextIntentResolverOutcomeLog by
-/// recordedAt), and the per-turn timeline. `turns` and `finalStatus` mutate
-/// as the run progresses; everything else is set once at startRun.
+/// resolved intent verb, and the per-turn timeline. `turns` and `finalStatus`
+/// mutate as the run progresses; everything else is set once at startRun.
 public struct HarnessRunDetail: Sendable, Identifiable {
     public let id: UUID
     public let startedAt: Date

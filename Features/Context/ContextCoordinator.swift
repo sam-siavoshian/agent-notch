@@ -20,7 +20,6 @@ public final class ContextCoordinator: RecentActivityContext {
     public static let shared = ContextCoordinator()
 
     private let store = ContextSnapshotStore(maxSnapshots: 20)
-    private let memoryStore: ContextMemoryStore
     private let ocrService: ContextOCRService
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
@@ -53,11 +52,9 @@ public final class ContextCoordinator: RecentActivityContext {
 
     private init(
         capture: ScreenCapture = .shared,
-        memoryStore: ContextMemoryStore = .shared,
         ocrService: ContextOCRService = .shared
     ) {
         self.capture = capture
-        self.memoryStore = memoryStore
         self.ocrService = ocrService
         self.clickMonitor = ContextClickMonitor { location in
             Task {
@@ -125,12 +122,8 @@ public final class ContextCoordinator: RecentActivityContext {
     public func getRecentActivityContext() async -> String {
         let cursorLocation = await MainActor.run { NSEvent.mouseLocation }
         await capture(trigger: .activation, cursorLocation: cursorLocation)
-        return await buildActivityContext()
+        return await currentActivationPreview()
     }
-
-    // Phase 5b: getRecentActivityContext(hint:) override removed. The default
-    // implementation in RecentActivityContext (which calls the hintless variant)
-    // is sufficient now that AgentSession routes through ContextSelector.
 
     public func diagnosticsSummary() async -> String {
         await diagnostics().summary
@@ -140,15 +133,13 @@ public final class ContextCoordinator: RecentActivityContext {
         await store.recentSnapshots()
     }
 
+    /// Returns the brief from the most recent Selector run, or an empty string
+    /// if no run has happened yet. The Dev Tools poll this for the live header
+    /// preview. The legacy `ContextActivationBuilder` prose was removed in
+    /// Phase 5b — Selector + LocalBriefRenderer is now the single source of
+    /// activation context.
     public func currentActivationPreview() async -> String {
-        await buildActivityContext()
-    }
-
-    private func buildActivityContext() async -> String {
-        let snapshots = await store.recentSnapshots()
-        let appName = snapshots.last?.appName ?? ""
-        let learnedMemory = await memoryStore.activationMemory(appName: appName)
-        return await store.recentActivityContext(learnedUIMemory: learnedMemory)
+        ContextSelector.shared.lastRun?.brief ?? ""
     }
 
     public func diagnostics() async -> ContextDiagnostics {
@@ -160,19 +151,16 @@ public final class ContextCoordinator: RecentActivityContext {
                 latestWindowTitle: "Unknown window",
                 latestTrigger: nil,
                 latestRecognizedTextCount: 0,
-                hasLearnedMemory: false,
                 isGatheringPaused: await MainActor.run { isGatheringPaused }
             )
         }
 
-        let learnedMemory = await memoryStore.activationMemory(appName: latest.appName)
         return ContextDiagnostics(
             snapshotCount: snapshots.count,
             latestAppName: latest.appName,
             latestWindowTitle: latest.windowTitle,
             latestTrigger: latest.trigger,
             latestRecognizedTextCount: latest.recognizedText.count,
-            hasLearnedMemory: !learnedMemory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             isGatheringPaused: await MainActor.run { isGatheringPaused }
         )
     }
@@ -227,7 +215,6 @@ public final class ContextCoordinator: RecentActivityContext {
                 screenHeight: snapshot.height
             )
             await store.record(contextSnapshot, signature: signature)
-            await memoryStore.record(contextSnapshot)
             let classification = await classifyDirtyChange(
                 trigger: trigger,
                 currentSignature: signature,

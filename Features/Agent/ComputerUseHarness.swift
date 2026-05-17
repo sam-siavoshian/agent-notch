@@ -209,31 +209,10 @@ public final class ComputerUseHarness {
                 errorMessage: errorMessage
             ))
 
-            if let intent = input.resolvedIntent {
-                let outcome = ContextIntentResolverOutcomeLog.Outcome(
-                    recordedAt: endedAt,
-                    transcript: input.transcript,
-                    intent: intent,
-                    harnessStatus: status,
-                    harnessErrorMessage: errorMessage,
-                    harnessDurationMs: milliseconds(from: startedAt, to: endedAt)
-                )
-                await ContextIntentResolverOutcomeLog.shared.record(outcome)
-
-                // Recipe feedback loop: when the harness completed successfully
-                // and the resolver had surfaced a candidate recipe, bump that
-                // recipe's confidence. Successful completion = no anthropic /
-                // network / max_turn error AND tool calls actually ran.
-                let succeeded = (status == "completed_without_tool" || status == "completed_after_tools")
-                if succeeded, let topRecipe = intent.candidateRecipes.first,
-                   !topRecipe.appKey.isEmpty, !topRecipe.recipeID.isEmpty {
-                    await ContextMemoryStore.shared.bumpRecipeConfidence(
-                        appName: topRecipe.appKey,
-                        recipeID: topRecipe.recipeID
-                    )
-                    NSLog("[Harness] Bumped confidence for recipe \(topRecipe.recipeID) in \(topRecipe.appKey)")
-                }
-            }
+            // Phase 5b: legacy ContextIntentResolverOutcomeLog + ContextMemoryStore
+            // recipe-confidence feedback loop were removed alongside the Haiku
+            // resolver and per-app memory store. Recipe learning now flows
+            // through AnchorRecorder.
         }
 
         // Preview of the latest user message — used in the observability log so

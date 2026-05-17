@@ -56,9 +56,10 @@ public final class AgentSession {
 
         // Phase 4 Mercury path: a single Selector call returns BOTH the resolved
         // intent and the markdown brief (formerly two passes — Haiku resolver +
-        // ContextActivationBuilder). Brief is handed to the harness verbatim as
-        // `contextSummary`; intent is mapped to the legacy `ContextResolvedIntent`
-        // shape until Phase 5b cuts the legacy type from `ComputerUseHarness.Input`.
+        // ContextActivationBuilder, both deleted in Phase 5b). Brief is handed
+        // to the harness verbatim as `contextSummary`; intent is mapped to the
+        // transport `ContextResolvedIntent` shape until the harness Input is
+        // retyped to take `CIntent` directly.
         let result = await ContextSelector.shared.select(transcript: transcript)
         log.info("session.selector latency=\(String(format: "%.2f", result.latencyS))s degraded=\(result.degraded) model=\(result.modelUsed ?? "<local>") brief_len=\(result.brief.count)")
 
@@ -94,10 +95,11 @@ public final class AgentSession {
         await ComputerUseHarness.shared.run(input)
     }
 
-    /// Maps the Phase 4 `CIntent` (Selector output) into the legacy
-    /// `ContextResolvedIntent` shape still required by `ComputerUseHarness.Input`.
-    /// Phase 5b is expected to delete `ContextResolvedIntent` (and this helper)
-    /// once the harness consumes `CIntent` directly.
+    /// Maps the Phase 4 `CIntent` (Selector output) into the
+    /// `ContextResolvedIntent` shape still consumed by `ComputerUseHarness.Input`.
+    /// Phase 5b deleted the old Haiku resolver but kept the typed payload as a
+    /// transport shim; a follow-up commit will retype the harness Input to
+    /// take `CIntent` directly and drop this helper.
     private static func mapToLegacyIntent(_ intent: CIntent, degraded: Bool, latencyS: Double) -> ContextResolvedIntent {
         // CIntent.Entity (label, kind, resolvedTo) -> ContextEntityResolution
         // (userPhrase, entityID, entityLabel, entityType, confidence, evidence)
@@ -121,92 +123,5 @@ public final class AgentSession {
             resolverLatencyMs: Int(latencyS * 1000.0),
             usedFallback: degraded
         )
-    }
-
-    @available(*, deprecated, message: "Legacy intent→hint path; replaced by Selector. Removed in Phase 5b.")
-    private static func makeHint(_ intent: ContextResolvedIntent) -> ActivationContextHint {
-        var mentionedApps: [String] = []
-        var entityLabels: [String] = []
-        for entity in intent.resolvedEntities {
-            let label = entity.entityLabel ?? entity.userPhrase
-            entityLabels.append(label)
-            if (entity.entityType ?? "").lowercased() == "app" {
-                mentionedApps.append(label)
-            }
-        }
-        var keywords = Set<String>()
-        let verbLower = intent.verb.lowercased()
-        if !verbLower.isEmpty { keywords.insert(verbLower) }
-        for entity in intent.resolvedEntities {
-            keywords.insert(entity.userPhrase.lowercased())
-        }
-        for recipe in intent.candidateRecipes {
-            recipe.recipeName.split(separator: " ").forEach { word in
-                let w = word.lowercased()
-                if w.count > 2 { keywords.insert(w) }
-            }
-        }
-        return ActivationContextHint(
-            verb: intent.verb,
-            target: intent.target,
-            inferredGoal: intent.inferredGoal,
-            mentionedApps: Array(Set(mentionedApps)),
-            mentionedEntityLabels: Array(Set(entityLabels)),
-            keywords: Array(keywords),
-            confidence: intent.confidence
-        )
-    }
-
-    /// Race the resolver against a hard wall-clock deadline so a slow Haiku
-    /// response can never delay the harness. Returns nil if we time out.
-    @available(*, deprecated, message: "Legacy Haiku resolver path; replaced by Selector. Removed in Phase 5b.")
-    private static func resolveIntent(transcript: String, deadlineSeconds: TimeInterval) async -> ContextResolvedIntent? {
-        let snapshots = await ContextCoordinator.shared.recentSnapshots()
-        let currentApp = snapshots.last?.appName
-        let currentWindow = snapshots.last?.windowTitle ?? ""
-        let memory = await findAppMemory(for: currentApp)
-        let surfaceID = currentApp.map { appName -> String in
-            normalizeSurfaceID(appName: appName, windowTitle: currentWindow)
-        }
-
-        return await withTaskGroup(of: ContextResolvedIntent?.self) { group in
-            group.addTask {
-                await ContextIntentResolver.shared.resolve(
-                    transcript: transcript,
-                    currentApp: currentApp,
-                    currentSurfaceID: surfaceID,
-                    appMemory: memory,
-                    globalMemorySummary: nil
-                )
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(deadlineSeconds * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
-    }
-
-    @available(*, deprecated, message: "Legacy resolver helper; replaced by Selector. Removed in Phase 5b.")
-    private static func findAppMemory(for appName: String?) async -> ContextAppMemory? {
-        guard let appName, !appName.isEmpty else { return nil }
-        let memories = await ContextMemoryStore.shared.debugMemories(limit: 50)
-        return memories.first { $0.appName.compare(appName, options: .caseInsensitive) == .orderedSame }
-    }
-
-    @available(*, deprecated, message: "Legacy resolver helper; replaced by Selector. Removed in Phase 5b.")
-    private static func normalizeSurfaceID(appName: String, windowTitle: String) -> String {
-        let normalizedTitle = windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "Untitled window"
-            : windowTitle
-        func normalize(_ s: String) -> String {
-            s.lowercased()
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                .joined(separator: "-")
-        }
-        return "\(normalize(appName))#\(normalize(normalizedTitle))"
     }
 }

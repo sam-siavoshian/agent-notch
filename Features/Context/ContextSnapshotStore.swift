@@ -50,14 +50,8 @@ public actor ContextSnapshotStore {
         signatures[snapshotID]
     }
 
-    // Phase 5b: Gemini reducer observation persistence removed — Phase 1-3
-    // monitors and the L5Store now own surface understanding.
-
-    public func recentActivityContext(now: Date = Date(), learnedUIMemory: String = "") -> String {
-        ContextActivationBuilder.build(
-            from: snapshots,
-            learnedUIMemory: learnedUIMemory,
-            now: now
-        ).promptText
-    }
+    // Phase 5b: Gemini reducer observation persistence and the
+    // ContextActivationBuilder prose hook were removed — surface understanding
+    // and activation text now flow through Phase 1-3 monitors plus the Selector
+    // + LocalBriefRenderer path.
 }
