@@ -41,10 +41,10 @@ final class LongPressDetector {
     }
 
     /// Minimum hold time before we treat it as a long-press.
-    private let holdThreshold: TimeInterval = 0.35
+    private static let holdThreshold: TimeInterval = 0.35
     /// Maximum total cursor displacement (in points) during the hold.
     /// Anything beyond this cancels — that's a drag, not a press.
-    private let movementThreshold: CGFloat = 6.0
+    private static let movementThreshold: CGFloat = 6.0
 
     private let queue = DispatchQueue(label: "agentnotch.longpress", qos: .userInteractive)
     private var lock = os_unfair_lock_s()
@@ -96,7 +96,7 @@ final class LongPressDetector {
 
         self.eventTap = tap
         self.runLoopSource = source
-        log.info("longpress.ready ax_trusted=\(trusted) tap_installed=true hold_s=\(self.holdThreshold) movement_pt=\(self.movementThreshold)")
+        log.info("longpress.ready ax_trusted=\(trusted) tap_installed=true hold_s=\(Self.holdThreshold) movement_pt=\(Self.movementThreshold)")
     }
 
     func stop() {
@@ -149,7 +149,7 @@ final class LongPressDetector {
         }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + holdThreshold)
+        timer.schedule(deadline: .now() + Self.holdThreshold)
         timer.setEventHandler { [weak self] in
             self?.onThresholdCrossed()
         }
@@ -166,7 +166,7 @@ final class LongPressDetector {
         let dx = location.x - start.x
         let dy = location.y - start.y
         let distanceSquared = dx * dx + dy * dy
-        let thresholdSquared = movementThreshold * movementThreshold
+        let thresholdSquared = Self.movementThreshold * Self.movementThreshold
         if distanceSquared > thresholdSquared {
             timer.cancel()
             state = .cancelled
