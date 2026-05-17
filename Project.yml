@@ -1,9 +1,5 @@
 name: AgentNotch
 
-packages:
-  WhisperKit:
-    url: https://github.com/argmaxinc/WhisperKit
-    from: 0.9.0
 
 options:
   bundleIdPrefix: com.agentnotch
@@ -44,8 +40,6 @@ targets:
         type: folder
         buildPhase: resources
         optional: true
-    dependencies:
-      - package: WhisperKit
     info:
       path: App/Info.plist
       properties:
@@ -75,14 +69,3 @@ targets:
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: YES
         COMBINE_HIDPI_IMAGES: YES
-    postCompileScripts:
-      # Some Swift packages (whisperkit's CoreML resources especially) ship
-      # files with extended attributes that codesign refuses ("resource fork,
-      # Finder information, or similar detritus not allowed"). Strip them
-      # from the bundle right before CodeSign runs.
-      - name: Strip xattrs before codesign
-        script: |
-          if [ -d "${CODESIGNING_FOLDER_PATH}" ]; then
-            /usr/bin/xattr -cr "${CODESIGNING_FOLDER_PATH}" || true
-          fi
-        basedOnDependencyAnalysis: false

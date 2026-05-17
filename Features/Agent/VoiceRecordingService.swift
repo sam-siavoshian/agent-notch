@@ -3,19 +3,16 @@
 //  Agent in the Notch
 //
 //  Handles the full voice pipeline: record on longPressBegan, transcribe on
-//  longPressEnded, write result to AgentState.lastTranscript, then post
-//  .transcriptReady for AgentSession to consume.
+//  longPressEnded via OpenAI Whisper API, write result to AgentState.lastTranscript,
+//  then post .transcriptReady for AgentSession to consume.
 //
-//  WhisperKit (openai/whisper-tiny) runs on-device via Core ML. The model
-//  downloads once (~75 MB) to the system cache on first launch.
-//
-//  Demo mode: if ANTHROPIC_NOTCH_DEMO_PROMPT is set and no recording happened
-//  (or Whisper is still initializing), the env var is used as the transcript
-//  so the end-to-end loop works without a microphone.
+//  Demo mode: if ANTHROPIC_NOTCH_DEMO_PROMPT is set and no recording happened,
+//  the env var is used as the transcript so the end-to-end loop works without
+//  a microphone.
 //
 
 import AVFoundation
-import WhisperKit
+import Foundation
 
 private let log = Log(category: "voice")
 
@@ -23,7 +20,6 @@ private let log = Log(category: "voice")
 public final class VoiceRecordingService {
     public static let shared = VoiceRecordingService()
 
-    private var whisper: WhisperKit?
     private let audioEngine = AVAudioEngine()
     private var audioFile: AVAudioFile?
     private var recordingURL: URL?
@@ -34,7 +30,6 @@ public final class VoiceRecordingService {
     private init() {}
 
     public func start() {
-        Task { await initWhisper() }
         Task.detached {
             let tmp = FileManager.default.temporaryDirectory
             guard let files = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) else { return }
@@ -60,7 +55,7 @@ public final class VoiceRecordingService {
         }
 
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-        log.info("voice.ready mic_authorized=\(micStatus == .authorized) whisper_loading=true")
+        log.info("voice.ready mic_authorized=\(micStatus == .authorized)")
     }
 
     public func stop() {
@@ -75,18 +70,6 @@ public final class VoiceRecordingService {
     }
 
     // MARK: - Private
-
-    private func initWhisper() async {
-        // Model names follow argmaxinc/whisperkit-coreml folder paths
-        // (e.g. "openai_whisper-tiny"), not the OpenAI repo slugs.
-        let modelName = "openai_whisper-tiny"
-        do {
-            whisper = try await WhisperKit(model: modelName)
-            log.info("voice.whisper_ready model=\(modelName)")
-        } catch {
-            log.error("voice.whisper_failed model=\(modelName) error=\(error)")
-        }
-    }
 
     private func startRecording() async {
         guard !audioEngine.isRunning else { return }
@@ -131,7 +114,6 @@ public final class VoiceRecordingService {
     private func stopAndTranscribe() async {
         let demoPrompt = Env.value("ANTHROPIC_NOTCH_DEMO_PROMPT") ?? ""
 
-        // No recording in progress — demo mode only path
         if !audioEngine.isRunning {
             guard !demoPrompt.isEmpty else { return }
             AgentState.shared.lastTranscript = demoPrompt
@@ -153,20 +135,15 @@ public final class VoiceRecordingService {
 
         var transcript = ""
         var transcriptError: Error? = nil
-        if let whisper {
-            do {
-                let results = try await whisper.transcribe(audioPath: url.path)
-                transcript = results.map(\.text).joined(separator: " ")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            } catch {
-                log.error("transcription failed: \(error)")
-                transcriptError = error
-            }
+        do {
+            transcript = try await transcribeWithOpenAI(audioURL: url)
+        } catch {
+            log.error("transcription failed: \(error)")
+            transcriptError = error
         }
 
         try? FileManager.default.removeItem(at: url)
 
-        // Fall back to demo prompt if Whisper produced nothing
         if transcript.isEmpty { transcript = demoPrompt }
 
         guard !transcript.isEmpty else {
@@ -182,5 +159,52 @@ public final class VoiceRecordingService {
 
         AgentState.shared.lastTranscript = transcript
         NotificationCenter.default.post(name: .transcriptReady, object: nil)
+    }
+
+    private func transcribeWithOpenAI(audioURL: URL) async throws -> String {
+        guard let apiKey = Secrets.openAIAPIKey else {
+            throw TranscriptionError.missingAPIKey
+        }
+
+        let audioData = try Data(contentsOf: audioURL)
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"model\"\r\n\r\n".data(using: .utf8)!)
+        body.append("whisper-1\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"audio.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let http = response as? HTTPURLResponse else {
+            throw TranscriptionError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            let responseBody = String(data: data, encoding: .utf8) ?? ""
+            log.error("openai whisper status=\(http.statusCode) body=\(responseBody)")
+            throw TranscriptionError.httpError(http.statusCode)
+        }
+
+        struct WhisperResponse: Decodable { let text: String }
+        let decoded = try JSONDecoder().decode(WhisperResponse.self, from: data)
+        return decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private enum TranscriptionError: Error {
+        case missingAPIKey
+        case invalidResponse
+        case httpError(Int)
     }
 }
