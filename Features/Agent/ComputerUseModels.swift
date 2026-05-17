@@ -10,7 +10,6 @@ import Foundation
 
 public enum AnthropicModel {
     public static let haiku45 = "claude-haiku-4-5-20251001"
-    public static let sonnet46 = "claude-sonnet-4-6"
 }
 
 /// Anthropic prompt cache marker. Server caches everything up to and including

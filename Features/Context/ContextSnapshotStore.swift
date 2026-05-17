@@ -65,8 +65,4 @@ public actor ContextSnapshotStore {
         signatures[snapshotID]
     }
 
-    // Phase 5b: Gemini reducer observation persistence and the
-    // ContextActivationBuilder prose hook were removed — surface understanding
-    // and activation text now flow through Phase 1-3 monitors plus the Selector
-    // + LocalBriefRenderer path.
 }

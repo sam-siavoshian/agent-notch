@@ -7,9 +7,6 @@
 //  AgentState as it goes so the notch UI reflects what's happening.
 //
 //  Optimizations layered on top of the basic loop:
-//  - Pre-flight IntentRouter handles obvious commands (open URL, Spotify,
-//    add reminder) WITHOUT any model call. Many tasks now complete in 0
-//    model turns.
 //  - Static system prompt cached server-side via cache_control. Dynamic
 //    context (activation packet, prefs, custom prompt) lives after the
 //    cache breakpoint.
@@ -55,7 +52,8 @@ public final class ComputerUseHarness {
     public struct Input {
         public var transcript: String
         public var contextSummary: String
-        public var resolvedIntent: ContextResolvedIntent?
+        /// Intent verb from the Selector — forwarded to HarnessRunDetail for DevTools display.
+        public var intentVerb: String?
         /// JPEG bytes of the screen at long-press time. When non-nil the
         /// harness prepends an image block to the FIRST user message so
         /// Claude sees the screen on turn 1 — eliminating the throwaway
@@ -64,12 +62,12 @@ public final class ComputerUseHarness {
         public init(
             transcript: String,
             contextSummary: String,
-            resolvedIntent: ContextResolvedIntent? = nil,
+            intentVerb: String? = nil,
             initiationScreenshot: Data? = nil
         ) {
             self.transcript = transcript
             self.contextSummary = contextSummary
-            self.resolvedIntent = resolvedIntent
+            self.intentVerb = intentVerb
             self.initiationScreenshot = initiationScreenshot
         }
     }
@@ -158,8 +156,7 @@ public final class ComputerUseHarness {
         let tools = buildTools(displaySize: agentTargetSize)
         let system = buildSystemBlocks(
             settings: settings,
-            contextSummary: input.contextSummary,
-            resolvedIntent: input.resolvedIntent
+            contextSummary: input.contextSummary
         )
 
         let systemSummaries = system.map { block in
@@ -174,7 +171,7 @@ public final class ComputerUseHarness {
             startedAt: startedAt,
             transcript: input.transcript,
             systemBlocks: systemSummaries,
-            resolvedIntentVerb: input.resolvedIntent?.verb
+            resolvedIntentVerb: input.intentVerb
         ))
 
         // First user message: transcript + (optionally) the long-press
@@ -234,10 +231,6 @@ public final class ComputerUseHarness {
                 errorMessage: errorMessage
             ))
 
-            // Phase 5b: legacy ContextIntentResolverOutcomeLog + ContextMemoryStore
-            // recipe-confidence feedback loop were removed alongside the Haiku
-            // resolver and per-app memory store. Recipe learning now flows
-            // through AnchorRecorder.
         }
 
         // Preview of the latest user message — used in the observability log so
@@ -620,8 +613,7 @@ public final class ComputerUseHarness {
 
     private func buildSystemBlocks(
         settings: AgentSettings,
-        contextSummary: String,
-        resolvedIntent: ContextResolvedIntent? = nil
+        contextSummary: String
     ) -> [SystemBlock] {
         let staticText = """
         You are an on-screen macOS computer-use ACTOR — not a chatbot, not an assistant. Your only outputs are tool calls and (on turn 1) a 9-word spoken affirmation read aloud to the user.
@@ -655,9 +647,6 @@ public final class ComputerUseHarness {
         var blocks: [SystemBlock] = [SystemBlock(text: staticText, cache: true)]
 
         var dynamicParts: [String] = []
-        if let intent = resolvedIntent, !intent.usedFallback {
-            dynamicParts.append(Self.renderResolvedIntent(intent))
-        }
         if !contextSummary.isEmpty {
             // The contextSummary is the Mercury/local-renderer brief itself — already
             // structured ("## What the user wants" / "## You are here" / ...). Phase 4
@@ -791,35 +780,6 @@ public final class ComputerUseHarness {
 
     private func milliseconds(from start: Date, to end: Date) -> Int {
         max(0, Int(end.timeIntervalSince(start) * 1000))
-    }
-
-    private static func renderResolvedIntent(_ intent: ContextResolvedIntent) -> String {
-        var lines: [String] = []
-        lines.append("Resolved user intent: \(intent.inferredGoal)")
-        lines.append("Verb: \(intent.verb)")
-        if let target = intent.target, !target.isEmpty {
-            lines.append("Target: \(target)")
-        }
-        if !intent.resolvedEntities.isEmpty {
-            let entityLines = intent.resolvedEntities.prefix(5).map { entity -> String in
-                let label = entity.entityLabel ?? "(unmatched)"
-                let type = entity.entityType.map { " [\($0)]" } ?? ""
-                return "  - \"\(entity.userPhrase)\" → \(label)\(type) — \(entity.evidence)"
-            }
-            lines.append("Resolved entities:")
-            lines.append(contentsOf: entityLines)
-        }
-        if !intent.candidateRecipes.isEmpty {
-            lines.append("Candidate recipes (ranked):")
-            for recipe in intent.candidateRecipes.prefix(3) {
-                lines.append("  - \(recipe.recipeName) (score \(String(format: "%.2f", recipe.matchScore)))")
-                for step in recipe.stepsProse.prefix(6) {
-                    lines.append("      • \(step)")
-                }
-            }
-        }
-        lines.append("Resolver confidence: \(String(format: "%.2f", intent.confidence)). Treat this as a hint — re-derive only if it clearly contradicts the live screen.")
-        return lines.joined(separator: "\n")
     }
 
     private func primaryDisplayPixelSize() -> CGSize {

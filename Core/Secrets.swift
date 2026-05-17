@@ -47,7 +47,7 @@ public enum Secrets {
         Keychain.set(key, account: Account.anthropic)
     }
 
-    // Phase 5b: setGeminiAPIKey removed alongside the Gemini observation pipeline.
+    // setOpenRouterAPIKey is below; Gemini observer is still active.
 
     public static func setOpenRouterAPIKey(_ key: String) {
         Keychain.set(key, account: Account.openRouter)
