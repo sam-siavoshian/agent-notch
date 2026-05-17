@@ -41,7 +41,7 @@ public final class OnboardingWindowController {
         // when TCC has the grant. Re-check after a short delay before
         // bothering the user.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             self.checker.refresh()
             if self.checker.allGranted {
                 onCompletion()
