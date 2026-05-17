@@ -23,6 +23,7 @@ public final class GeminiObserver {
     private var lastObservedAt: Date = .distantPast
     private static let minIntervalBetweenObservations: TimeInterval = 8.0   // >= 8s between calls
     private let queue = DispatchQueue(label: "AgentNotch.GeminiObserver.queue")
+    private static let observationDecoder = JSONDecoder()
 
     public init() {}
 
@@ -65,7 +66,7 @@ public final class GeminiObserver {
         }
 
         guard let data = raw.data(using: .utf8),
-              let parsed = try? JSONDecoder().decode(ObservationDTO.self, from: data) else {
+              let parsed = try? Self.observationDecoder.decode(ObservationDTO.self, from: data) else {
             // Successful HTTP but observation didn't parse — log it so we can debug.
             AgentObservabilityLog.shared.record(.memoryMutation(
                 id: UUID(), t: now, kind: .resourceRecorded,
