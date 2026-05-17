@@ -102,7 +102,7 @@ extension ContextDebugView {
     }
 
     private static func ocrPreview(_ items: [ContextRecognizedText]) -> String {
-        let joined = items.map { $0.text }.joined(separator: " | ")
+        let joined = items.lazy.map { $0.text }.joined(separator: " | ")
         if joined.count <= 200 { return joined }
         let idx = joined.index(joined.startIndex, offsetBy: 200)
         return String(joined[..<idx]) + "…"
