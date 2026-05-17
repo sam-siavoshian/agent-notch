@@ -45,12 +45,13 @@ struct NotchHomeView: View {
     private var permissionBanner: some View {
         let missing = permissions.missing
         let primary = missing.first
+        let count = missing.count
         return HStack(spacing: 8) {
             StatusBadge(color: SoftPill.Status.amber, symbol: "exclamationmark.triangle.fill", size: 14)
             VStack(alignment: .leading, spacing: 0) {
-                Text(missing.count == 1
+                Text(count == 1
                      ? "\(primary?.label ?? "Permission") not granted"
-                     : "\(missing.count) permissions missing")
+                     : "\(count) permissions missing")
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(SoftPill.Status.amber)
                 Text("Drag the icon into Settings, or tap Grant")
