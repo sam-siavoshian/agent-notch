@@ -455,8 +455,11 @@ private extension String {
 public actor ContextIntentResolverOutcomeLog {
     public static let shared = ContextIntentResolverOutcomeLog()
 
-    private let fileURL: URL
+    private nonisolated let fileURL: URL
     private let maxEntries: Int = 500
+
+    private let memoryCapacity: Int = 100
+    private var memoryBuffer: [Outcome] = []
 
     public init(fileURL: URL? = nil) {
         if let url = fileURL {
@@ -496,6 +499,11 @@ public actor ContextIntentResolverOutcomeLog {
     }
 
     public func record(_ outcome: Outcome) {
+        memoryBuffer.append(outcome)
+        if memoryBuffer.count > memoryCapacity {
+            memoryBuffer.removeFirst(memoryBuffer.count - memoryCapacity)
+        }
+
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(outcome) else { return }
@@ -518,6 +526,18 @@ public actor ContextIntentResolverOutcomeLog {
 
         trimIfNeeded()
     }
+
+    public func recentOutcomes(limit: Int = 50) -> [Outcome] {
+        let take = min(max(limit, 0), memoryBuffer.count)
+        guard take > 0 else { return [] }
+        return Array(memoryBuffer.suffix(take).reversed())
+    }
+
+    public func clear() {
+        memoryBuffer.removeAll(keepingCapacity: true)
+    }
+
+    public nonisolated var persistedFileURL: URL { fileURL }
 
     private func trimIfNeeded() {
         guard let data = try? Data(contentsOf: fileURL) else { return }

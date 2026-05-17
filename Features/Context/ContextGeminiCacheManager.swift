@@ -27,6 +27,12 @@ public actor ContextGeminiCacheManager {
         }
     }
 
+    public enum CacheStatus: String, Sendable {
+        case active
+        case permanentlyRejected
+        case none
+    }
+
     private struct Entry: Sendable {
         let name: String
         let model: String
@@ -36,6 +42,11 @@ public actor ContextGeminiCacheManager {
 
         var isLikelyExpired: Bool {
             Date().timeIntervalSince(createdAt) > TimeInterval(max(0, ttlSeconds - 60))
+        }
+
+        var expiresInSeconds: Int {
+            let remaining = TimeInterval(ttlSeconds) - Date().timeIntervalSince(createdAt)
+            return max(0, Int(remaining))
         }
     }
 
@@ -50,6 +61,48 @@ public actor ContextGeminiCacheManager {
     /// Lane keys whose system instruction is permanently too small for caching
     /// (Gemini requires >=1024 tokens). Skip the create call entirely for these.
     private var permanentlyRejected: Set<Key> = []
+
+    public private(set) var hitCount: Int = 0
+    public private(set) var missCount: Int = 0
+    public private(set) var permanentRejectCount: Int = 0
+
+    public struct LaneState: Sendable {
+        public let lane: ContextGeminiObservationLane
+        public let status: CacheStatus
+        public let name: String?
+        public let createdAt: Date?
+        public let expiresInSeconds: Int?
+    }
+
+    public struct Counters: Sendable {
+        public let hitCount: Int
+        public let missCount: Int
+        public let permanentRejectCount: Int
+        public var totalLookups: Int { hitCount + missCount }
+        public var hitRate: Double {
+            let total = totalLookups
+            guard total > 0 else { return 0 }
+            return Double(hitCount) / Double(total)
+        }
+    }
+
+    public func counters() -> Counters {
+        Counters(hitCount: hitCount, missCount: missCount, permanentRejectCount: permanentRejectCount)
+    }
+
+    public func state() -> [LaneState] {
+        ContextGeminiObservationLane.allCases.map { lane in
+            let candidates = entries.filter { $0.key.lane == lane }
+            let permanent = permanentlyRejected.contains(where: { $0.lane == lane })
+            if let newest = candidates.values.max(by: { $0.createdAt < $1.createdAt }) {
+                return LaneState(lane: lane, status: .active, name: newest.name, createdAt: newest.createdAt, expiresInSeconds: newest.expiresInSeconds)
+            }
+            if permanent {
+                return LaneState(lane: lane, status: .permanentlyRejected, name: nil, createdAt: nil, expiresInSeconds: nil)
+            }
+            return LaneState(lane: lane, status: .none, name: nil, createdAt: nil, expiresInSeconds: nil)
+        }
+    }
     private let endpointBaseURL: URL
     private let session: URLSession
     private let ttlSeconds: Int
@@ -78,8 +131,10 @@ public actor ContextGeminiCacheManager {
         let key = Key(lane: lane, model: model, promptVersion: promptVersion)
         if permanentlyRejected.contains(key) { return nil }
         if let entry = entries[key], !entry.isLikelyExpired {
+            hitCount += 1
             return entry.name
         }
+        missCount += 1
         if let task = inflight[key] {
             return await task.value
         }
@@ -116,6 +171,7 @@ public actor ContextGeminiCacheManager {
         }
         if result.permanentlyRejected {
             permanentlyRejected.insert(key)
+            permanentRejectCount += 1
         }
         return nil
     }

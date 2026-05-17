@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func bootAgent() {
         CursorCompanion.shared.start()
         ContextCoordinator.shared.start()
+        ContextDevToolsWindowController.shared.install()
+        ContextDevToolsWindowController.shared.present()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
         // Keep polling TCC state after onboarding so the Notch UI can show a

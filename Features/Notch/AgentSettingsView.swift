@@ -308,6 +308,9 @@ struct AgentSettingsView: View {
     private var diagnosticsRow: some View {
         SettingRow(title: "Context") {
             PillToolbar {
+                ToolbarIconButton(systemImage: "wrench.and.screwdriver") {
+                    ContextDevToolsWindowController.shared.present()
+                }
                 ToolbarIconButton(systemImage: "doc.on.doc") {
                     copyActivationContext()
                 }
@@ -330,8 +333,8 @@ struct AgentSettingsView: View {
     }
 
     private func refreshContextHealth() async {
-        let summary = await AgentInterfaces.context?.diagnosticsSummary() ?? ""
-        await MainActor.run { contextHealth = summary }
+        let diagnostics = await ContextCoordinator.shared.diagnostics()
+        await MainActor.run { contextHealth = diagnostics.summary }
     }
 }
 

@@ -26,6 +26,27 @@ public final class ContextCoordinator: RecentActivityContext {
     private let clickMonitor: ContextClickMonitor
     private let appSwitchMonitor: ContextAppSwitchMonitor
     private let dirtyThresholdsTracker = DirtyThresholdsTracker()
+    private let dirtyRing = ContextDirtyRingBuffer(capacity: 30)
+
+    public struct DirtyComparisonRecord: Sendable {
+        public let snapshotID: UUID
+        public let classification: ContextDirtyClassification
+        public let hamming: Int
+        public let changedArea: Double
+        public let dirtyBoundingRect: CGRect?
+        public let capturedAt: Date
+        public let appName: String
+        public let windowTitle: String
+        public let jpegData: Data
+    }
+
+    public func recentDirtyComparisons(limit: Int = 30) async -> [DirtyComparisonRecord] {
+        await dirtyRing.recent(limit: limit)
+    }
+
+    public func dirtyThresholdsSnapshot() async -> ContextDirtyThresholds {
+        await dirtyThresholdsTracker.currentThresholds()
+    }
 
     @MainActor private var isStarted = false
     @MainActor private var isGatheringPaused = false
@@ -279,8 +300,38 @@ public final class ContextCoordinator: RecentActivityContext {
             }
 
             await dirtyThresholdsTracker.observe(classification.classification)
+            await dirtyRing.append(DirtyComparisonRecord(
+                snapshotID: contextSnapshot.id,
+                classification: classification.classification,
+                hamming: classification.comparison?.hammingDistance ?? 0,
+                changedArea: classification.comparison?.changedAreaFraction ?? 0,
+                dirtyBoundingRect: classification.comparison?.dirtyBoundingRect,
+                capturedAt: contextSnapshot.capturedAt,
+                appName: contextSnapshot.appName,
+                windowTitle: contextSnapshot.windowTitle,
+                jpegData: snapshot.jpegData
+            ))
         } catch {
             log.error("capture failed: \(error)")
+        }
+    }
+
+    actor ContextDirtyRingBuffer {
+        private var records: [DirtyComparisonRecord] = []
+        let capacity: Int
+
+        init(capacity: Int) { self.capacity = capacity }
+
+        func append(_ record: DirtyComparisonRecord) {
+            records.append(record)
+            if records.count > capacity {
+                records.removeFirst(records.count - capacity)
+            }
+        }
+
+        func recent(limit: Int) -> [DirtyComparisonRecord] {
+            let slice = records.suffix(min(limit, records.count))
+            return Array(slice.reversed())
         }
     }
 

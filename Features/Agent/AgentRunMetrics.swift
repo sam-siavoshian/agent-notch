@@ -33,4 +33,33 @@ public func printRunMetrics(_ r: AgentRunMetricsRecord) {
     if let data = try? encoder.encode(r), let json = String(data: data, encoding: .utf8) {
         print("[INFO]  [metrics] run \(json)")
     }
+    Task { await AgentRunMetricsStore.shared.append(r) }
+}
+
+public actor AgentRunMetricsStore {
+    public static let shared = AgentRunMetricsStore()
+
+    public let capacity: Int
+    private var buffer: [AgentRunMetricsRecord] = []
+
+    public init(capacity: Int = 50) {
+        self.capacity = capacity
+    }
+
+    public func append(_ record: AgentRunMetricsRecord) {
+        buffer.append(record)
+        if buffer.count > capacity {
+            buffer.removeFirst(buffer.count - capacity)
+        }
+    }
+
+    /// Newest first.
+    public func recentRuns(limit: Int = 50) -> [AgentRunMetricsRecord] {
+        let slice = buffer.suffix(min(limit, buffer.count))
+        return Array(slice.reversed())
+    }
+
+    public func clear() {
+        buffer.removeAll()
+    }
 }

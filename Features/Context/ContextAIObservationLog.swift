@@ -148,8 +148,25 @@ public struct ContextAIObservationEvent: Sendable {
 public actor ContextAIObservationLog {
     public static let shared = ContextAIObservationLog()
 
+    private let capacity = 200
+    private var buffer: [ContextAIObservationEvent] = []
+
     public func record(_ event: ContextAIObservationEvent) {
         print("[INFO]  [gemini] \(Self.describe(event))")
+        buffer.append(event)
+        if buffer.count > capacity {
+            buffer.removeFirst(buffer.count - capacity)
+        }
+    }
+
+    public func recentEvents(limit: Int = 50) -> [ContextAIObservationEvent] {
+        let take = min(max(limit, 0), buffer.count)
+        guard take > 0 else { return [] }
+        return Array(buffer.suffix(take).reversed())
+    }
+
+    public func clear() {
+        buffer.removeAll(keepingCapacity: true)
     }
 
     public static func describe(_ event: ContextAIObservationEvent) -> String {
