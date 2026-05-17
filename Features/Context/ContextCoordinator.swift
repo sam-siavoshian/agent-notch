@@ -382,11 +382,12 @@ public final class ContextCoordinator: RecentActivityContext {
         }
     }
 
+    private static let ignoredAppNames: Set<String> = ["agentnotch", "agent in the notch"]
+
     private static func shouldIgnoreCapture(_ metadata: ContextWindowMetadata) -> Bool {
         let appName = metadata.appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if ignoredAppNames.contains(appName) { return true }
         let windowTitle = metadata.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return appName == "agentnotch"
-            || appName == "agent in the notch"
-            || windowTitle.contains("agentnotch dev tools")
+        return windowTitle.contains("agentnotch dev tools")
     }
 }
