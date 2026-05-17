@@ -49,6 +49,7 @@ public struct KillSwitchShortcut: Codable, Equatable, Sendable {
 }
 
 public struct AgentSettings: Equatable, Sendable {
+    public var agentModel: AgentModel
     public var reasoningEffort: AgentReasoningEffort
     public var preferences: String
     public var systemPrompt: String
@@ -78,6 +79,7 @@ public struct AgentSettings: Equatable, Sendable {
     ]
 
     public static let `default` = AgentSettings(
+        agentModel: .sonnet,
         reasoningEffort: .medium,
         preferences: "",
         systemPrompt: "",
@@ -96,6 +98,7 @@ public struct AgentSettings: Equatable, Sendable {
 // Custom Codable so old JSON without newer fields still loads with safe defaults.
 extension AgentSettings: Codable {
     private enum CodingKeys: String, CodingKey {
+        case agentModel
         case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
         case voiceInputDeviceUID, voiceOutputDeviceUID
         case collectionPaused, neverLogApps, mercuryEnabled
@@ -105,6 +108,7 @@ extension AgentSettings: Codable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        agentModel           = (try? c.decode(AgentModel.self,           forKey: .agentModel))           ?? .sonnet
         reasoningEffort      = (try? c.decode(AgentReasoningEffort.self, forKey: .reasoningEffort))      ?? .medium
         preferences          = (try? c.decode(String.self,               forKey: .preferences))          ?? ""
         systemPrompt         = (try? c.decode(String.self,               forKey: .systemPrompt))         ?? ""
@@ -121,6 +125,7 @@ extension AgentSettings: Codable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(agentModel,           forKey: .agentModel)
         try c.encode(reasoningEffort,      forKey: .reasoningEffort)
         try c.encode(preferences,          forKey: .preferences)
         try c.encode(systemPrompt,         forKey: .systemPrompt)
@@ -161,6 +166,11 @@ public final class AgentSettingsStore: ObservableObject {
         // before any monitor fires its first event.
         PrivacyGate.shared.collectionPaused = settings.collectionPaused
         PrivacyGate.shared.neverLogApps = Set(settings.neverLogApps)
+    }
+
+    public var agentModel: AgentModel {
+        get { settings.agentModel }
+        set { update { $0.agentModel = newValue } }
     }
 
     public var reasoningEffort: AgentReasoningEffort {
