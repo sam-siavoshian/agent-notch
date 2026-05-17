@@ -25,7 +25,7 @@ final class HarnessTests: XCTestCase {
         XCTAssertEqual(runResult.fixtureResults.count, 1)
         let scores = runResult.fixtureResults[0].scoreResults
         XCTAssertEqual(scores.count, 6, "expected 6 scorers: \(scores.map(\.scorerName))")
-        XCTAssertTrue(scores.allSatisfy { $0.passed }, "all should pass: \(scores.filter{!$0.passed}.map{$0.details})")
+        XCTAssertTrue(scores.allSatisfy(\.passed), "all should pass: \(scores.filter { !$0.passed }.map(\.details))")
     }
 
     func testReportsFailingScorers() async throws {
