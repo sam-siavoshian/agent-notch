@@ -23,8 +23,6 @@ struct NotchCalendarView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: - Request access (editorial layout)
-
     private var requestView: some View {
         EditorialPermissionView(
             eyebrow: eyebrowDate,
@@ -37,8 +35,6 @@ struct NotchCalendarView: View {
             secondary: nil
         )
     }
-
-    // MARK: - Denied
 
     private var deniedView: some View {
         EditorialPermissionView(
@@ -64,8 +60,6 @@ struct NotchCalendarView: View {
     private var eyebrowDate: String {
         Self.eyebrowFormatter.string(from: Date()).uppercased()
     }
-
-    // MARK: - Authorized
 
     @ViewBuilder
     private var authorizedView: some View {
@@ -94,8 +88,6 @@ struct NotchCalendarView: View {
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-
-    // MARK: - Events list
 
     private var eventsView: some View {
         let buckets = classify(service.todayEvents, now: now)
@@ -139,8 +131,6 @@ struct NotchCalendarView: View {
     }
 }
 
-// MARK: - Classification
-
 private struct EventBuckets {
     var live: EKEvent?
     var next: EKEvent?
@@ -153,12 +143,12 @@ private func classify(_ events: [EKEvent], now: Date) -> EventBuckets {
     var next: EKEvent?
     var later: [EKEvent] = []
     var past: [EKEvent] = []
+    var allDay: [EKEvent] = []
 
-    let timed = events.filter { !$0.isAllDay }
-    let allDay = events.filter { $0.isAllDay }
-
-    for e in timed {
-        if e.startDate <= now && e.endDate > now {
+    for e in events {
+        if e.isAllDay {
+            allDay.append(e)
+        } else if e.startDate <= now && e.endDate > now {
             if live == nil { live = e }
         } else if e.startDate > now {
             if next == nil { next = e } else { later.append(e) }
@@ -166,13 +156,10 @@ private func classify(_ events: [EKEvent], now: Date) -> EventBuckets {
             past.append(e)
         }
     }
-    // All-day events live in "later today" unless already past midnight wraparound
     later.insert(contentsOf: allDay, at: 0)
 
     return EventBuckets(live: live, next: next, laterToday: later, past: past)
 }
-
-// MARK: - Header
 
 private struct CalendarHeader: View {
     let date: Date
@@ -180,7 +167,7 @@ private struct CalendarHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            DateTile(date: date, tint: SoftPill.Status.red, compact: true)
+            DateTile(date: date, tint: SoftPill.Status.red)
                 .frame(width: 30, height: 30)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -207,8 +194,7 @@ private struct CalendarHeader: View {
         Self.weekdayFormatter.string(from: date)
     }
     private var subtitle: String {
-        let n = todayCount
-        return n == 1 ? "1 event today" : "\(n) events today"
+        todayCount == 1 ? "1 event today" : "\(todayCount) events today"
     }
 }
 
@@ -251,37 +237,33 @@ private struct SectionLabel: View {
     }
 }
 
-// MARK: - Date tile
-
 private struct DateTile: View {
     let date: Date
     let tint: Color
-    var compact: Bool = false
-    var dimmed: Bool = false
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: compact ? 7 : 10, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [tint.opacity(dimmed ? 0.35 : 0.95), tint.opacity(dimmed ? 0.2 : 0.7)],
+                        colors: [tint.opacity(0.95), tint.opacity(0.7)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: compact ? 7 : 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
                 )
-                .shadow(color: tint.opacity(dimmed ? 0.1 : 0.45), radius: compact ? 4 : 10, y: compact ? 2 : 4)
+                .shadow(color: tint.opacity(0.45), radius: 4, y: 2)
 
-            VStack(spacing: compact ? 0 : 1) {
+            VStack(spacing: 0) {
                 Text(monthText)
-                    .font(.system(size: compact ? 6.5 : 8.5, weight: .bold))
-                    .tracking(compact ? 0.5 : 1)
+                    .font(.system(size: 6.5, weight: .bold))
+                    .tracking(0.5)
                     .foregroundStyle(.white.opacity(0.95))
                 Text(dayText)
-                    .font(.system(size: compact ? 14 : 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
             }
         }
@@ -302,8 +284,6 @@ private struct DateTile: View {
     }
 }
 
-// MARK: - Event card
-
 private enum EventEmphasis { case live, next, normal, past, future }
 
 private struct EventCard: View {
@@ -315,7 +295,6 @@ private struct EventCard: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            // Color stripe + dot
             ZStack(alignment: .top) {
                 Capsule()
                     .fill(calendarColor.opacity(emphasis == .past ? 0.3 : 0.9))
@@ -373,9 +352,7 @@ private struct EventCard: View {
 
             Spacer(minLength: 4)
 
-            if let badge = trailingBadge {
-                badge
-            }
+            trailingBadge
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
@@ -395,10 +372,12 @@ private struct EventCard: View {
         .scaleEffect(hovered ? 1.01 : 1.0)
         .onHover { hovered = $0 }
         .animation(.easeOut(duration: 0.14), value: hovered)
-        .onTapGesture { openInCalendar() }
+        .onTapGesture {
+            if let url = URL(string: "ical://") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
-
-    // MARK: tokens
 
     private var calendarColor: Color {
         if let cg = event.calendar?.cgColor { return Color(cgColor: cg) }
@@ -406,30 +385,20 @@ private struct EventCard: View {
     }
 
     private var titleColor: Color {
-        switch emphasis {
-        case .past: return SoftPill.Text.secondary
-        default: return SoftPill.Text.primary
-        }
+        emphasis == .past ? SoftPill.Text.secondary : SoftPill.Text.primary
     }
 
     private var cardFill: Color {
         switch emphasis {
         case .live: return SoftPill.Surface.hover
-        case .next: return SoftPill.Surface.raised
         case .past: return SoftPill.Surface.base.opacity(0.6)
         default: return SoftPill.Surface.raised
         }
     }
 
     private var borderColor: Color {
-        switch emphasis {
-        case .live: return calendarColor.opacity(0.45)
-        case .next: return SoftPill.Border.subtle
-        default: return SoftPill.Border.subtle
-        }
+        emphasis == .live ? calendarColor.opacity(0.45) : SoftPill.Border.subtle
     }
-
-    // MARK: progress
 
     private var liveProgress: Double? {
         let total = event.endDate.timeIntervalSince(event.startDate)
@@ -438,38 +407,34 @@ private struct EventCard: View {
         return max(0, min(1, elapsed / total))
     }
 
-    // MARK: trailing badge (relative time)
-
-    private var trailingBadge: AnyView? {
+    @ViewBuilder
+    private var trailingBadge: some View {
         switch emphasis {
         case .live:
             let remaining = event.endDate.timeIntervalSince(now)
-            return AnyView(RelativeTimeChip(label: shortDuration(remaining) + " left",
-                                            tint: SoftPill.Status.green,
-                                            filled: true))
+            RelativeTimeChip(label: shortDuration(remaining) + " left",
+                             tint: SoftPill.Status.green,
+                             filled: true)
         case .next:
             let until = event.startDate.timeIntervalSince(now)
-            return AnyView(RelativeTimeChip(label: "in " + shortDuration(until),
-                                            tint: SoftPill.Status.blue,
-                                            filled: true))
+            RelativeTimeChip(label: "in " + shortDuration(until),
+                             tint: SoftPill.Status.blue,
+                             filled: true)
         case .normal:
             let until = event.startDate.timeIntervalSince(now)
             if until > 0, until < 60 * 60 * 6 {
-                return AnyView(RelativeTimeChip(label: "in " + shortDuration(until),
-                                                tint: SoftPill.Text.secondary,
-                                                filled: false))
+                RelativeTimeChip(label: "in " + shortDuration(until),
+                                 tint: SoftPill.Text.secondary,
+                                 filled: false)
             }
-            return nil
         case .future:
-            return AnyView(RelativeTimeChip(label: dayLabel(event.startDate),
-                                            tint: SoftPill.Text.secondary,
-                                            filled: false))
+            RelativeTimeChip(label: dayLabel(event.startDate),
+                             tint: SoftPill.Text.secondary,
+                             filled: false)
         case .past:
-            return nil
+            EmptyView()
         }
     }
-
-    // MARK: text
 
     private static let shortTimeFormatter: DateFormatter = {
         let f = DateFormatter(); f.timeStyle = .short; return f
@@ -478,9 +443,7 @@ private struct EventCard: View {
     private var timeText: String {
         if event.isAllDay { return "All day" }
         let f = Self.shortTimeFormatter
-        let start = f.string(from: event.startDate)
-        let end = f.string(from: event.endDate)
-        return "\(start) – \(end)"
+        return "\(f.string(from: event.startDate)) – \(f.string(from: event.endDate))"
     }
 
     private var locationText: String? {
@@ -489,17 +452,7 @@ private struct EventCard: View {
         }
         return loc
     }
-
-    private static let icalURL = URL(string: "ical://")
-
-    private func openInCalendar() {
-        if let url = Self.icalURL {
-            NSWorkspace.shared.open(url)
-        }
-    }
 }
-
-// MARK: - Tiny components
 
 private struct LiveBadge: View {
     @State private var pulse = false
@@ -575,8 +528,6 @@ private struct ProgressBar: View {
     }
 }
 
-// MARK: - Buttons
-
 private struct GradientPillButton: View {
     let label: String
     var icon: String? = nil
@@ -621,24 +572,6 @@ private struct GradientPillButton: View {
     }
 }
 
-private struct GhostPillButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(SoftPill.Text.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(SoftPill.Text.secondary.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [3]))
-            )
-            .scaleEffect(configuration.isPressed ? 0.95 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-// MARK: - Editorial permission layout
-
 private struct EditorialPermissionView: View {
     let eyebrow: String
     let headlineTop: String
@@ -651,7 +584,6 @@ private struct EditorialPermissionView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Eyebrow
             HStack(spacing: 6) {
                 Rectangle()
                     .fill(accent)
@@ -667,7 +599,6 @@ private struct EditorialPermissionView: View {
                     .foregroundStyle(SoftPill.Text.muted)
             }
 
-            // Serif headline — two lines, italic accent on bottom line
             VStack(alignment: .leading, spacing: -2) {
                 Text(headlineTop)
                     .font(.system(size: 22, weight: .semibold, design: .serif))
@@ -683,11 +614,9 @@ private struct EditorialPermissionView: View {
             }
             .padding(.top, 1)
 
-            // Mini week strip
             WeekStrip(reference: Date(), accent: accent)
                 .padding(.top, 2)
 
-            // CTA row
             HStack(spacing: 6) {
                 GradientPillButton(label: ctaLabel, icon: ctaIcon, action: ctaAction)
                 if let secondary {
@@ -713,7 +642,6 @@ private struct WeekStrip: View {
     private var days: [Date] {
         let cal = Calendar.current
         let weekday = cal.component(.weekday, from: reference) // Sun=1
-        // Anchor strip to Monday
         let offsetToMonday = ((weekday + 5) % 7)
         guard let monday = cal.date(byAdding: .day, value: -offsetToMonday,
                                     to: cal.startOfDay(for: reference)) else { return [] }
@@ -721,11 +649,11 @@ private struct WeekStrip: View {
     }
 
     var body: some View {
-        let today = Calendar.current.startOfDay(for: Date())
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
         HStack(spacing: 4) {
             ForEach(days, id: \.self) { day in
-                let isToday = Calendar.current.isDate(day, inSameDayAs: today)
-                DayCell(date: day, isToday: isToday, accent: accent)
+                DayCell(date: day, isToday: cal.isDate(day, inSameDayAs: today), accent: accent)
                     .frame(maxWidth: .infinity)
             }
         }
@@ -749,7 +677,7 @@ private struct WeekStrip: View {
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity)
             .background(
-                ZStack {
+                Group {
                     if isToday {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .fill(
@@ -784,8 +712,6 @@ private struct WeekStrip: View {
     }
 }
 
-// MARK: - Helpers
-
 private func shortDuration(_ seconds: TimeInterval) -> String {
     let s = max(0, Int(seconds))
     if s < 60 { return "\(s)s" }
@@ -793,8 +719,7 @@ private func shortDuration(_ seconds: TimeInterval) -> String {
     if m < 60 { return "\(m)m" }
     let h = m / 60
     let rem = m % 60
-    if rem == 0 { return "\(h)h" }
-    return "\(h)h \(rem)m"
+    return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
 }
 
 private let dayLabelWeekdayFormatter: DateFormatter = {
@@ -813,8 +738,7 @@ private func dayLabel(_ date: Date) -> String {
     let days = cal.dateComponents([.day], from: cal.startOfDay(for: Date()),
                                   to: cal.startOfDay(for: date)).day ?? 0
     if days < 7 {
-        let weekday = dayLabelWeekdayFormatter.string(from: date)
-        return "\(weekday) \(dayLabelTimeFormatter.string(from: date))"
+        return "\(dayLabelWeekdayFormatter.string(from: date)) \(dayLabelTimeFormatter.string(from: date))"
     }
     return dayLabelMonthDayFormatter.string(from: date)
 }
