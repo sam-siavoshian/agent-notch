@@ -225,4 +225,6 @@ public final class VoiceRecordingService {
         case invalidResponse
         case httpError(Int)
     }
+
+    private static let whisperDecoder = JSONDecoder()
 }
