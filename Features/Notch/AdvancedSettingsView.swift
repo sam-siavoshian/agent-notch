@@ -193,7 +193,7 @@ private struct APIKeyRow: View {
         stored = true
         withAnimation(.easeOut(duration: 0.15)) { savedFlash = true }
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 900_000_000)
+            try? await Task.sleep(for: .milliseconds(900))
             withAnimation(.easeOut(duration: 0.4)) { savedFlash = false }
         }
     }
