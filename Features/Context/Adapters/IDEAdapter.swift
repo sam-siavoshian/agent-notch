@@ -106,7 +106,7 @@ public final class IDEAdapter: AppContextAdapter {
 
         // Title format (most VSCode/Cursor variants): "<filename> — <project> — <app>"
         // Some installs use "•" or "–" or different em-dash variants.
-        let separators: [Character] = ["—", "–", "-", "•"]
+        let separators: Set<Character> = ["—", "–", "-", "•"]
         var parts: [String] = []
         var current = ""
         for ch in title {
