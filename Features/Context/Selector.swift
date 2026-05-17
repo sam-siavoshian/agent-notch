@@ -334,6 +334,8 @@ public final class ContextSelector {
 
     // MARK: - Response parser
 
+    private static let intentDecoder = JSONDecoder()
+
     /// Robust parse: extract `brief` via JSONSerialization first (so it survives even when
     /// Mercury's intent shape doesn't decode), then attempt typed intent decode.
     static func parseResponse(_ raw: String) -> (intent: CIntent, brief: String)? {
@@ -345,7 +347,7 @@ public final class ContextSelector {
         var intent: CIntent
         if let intentAny = obj["intent"],
            let intentData = try? JSONSerialization.data(withJSONObject: intentAny),
-           let parsed = try? JSONDecoder().decode(CIntent.self, from: intentData) {
+           let parsed = try? Self.intentDecoder.decode(CIntent.self, from: intentData) {
             intent = parsed
         } else {
             // Brief is valid but intent malformed — return a low-confidence default.
