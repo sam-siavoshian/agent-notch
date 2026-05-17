@@ -57,7 +57,7 @@ public struct ModelOutput {
             throw NSError(domain: "ModelOutput", code: 2, userInfo: [NSLocalizedDescriptionKey: "rawJSON not an object"])
         }
         let brief = (obj["brief"] as? String) ?? ""
-        var intent: Intent? = nil
+        var intent: Intent?
         if let intentAny = obj["intent"] {
             if let intentData = try? JSONSerialization.data(withJSONObject: intentAny) {
                 intent = try? JSONDecoder().decode(Intent.self, from: intentData)
