@@ -134,11 +134,12 @@ public actor ScreenCapture {
     }
 }
 
+private let screenNumberKey = NSDeviceDescriptionKey("NSScreenNumber")
+
 private extension SCDisplay {
     func pointPixelScale() -> CGFloat {
-        let nsScreens = NSScreen.screens
-        let match = nsScreens.first { screen in
-            let desc = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        let match = NSScreen.screens.first { screen in
+            let desc = screen.deviceDescription[screenNumberKey] as? NSNumber
             return desc?.uint32Value == displayID
         }
         return match?.backingScaleFactor ?? 2.0
