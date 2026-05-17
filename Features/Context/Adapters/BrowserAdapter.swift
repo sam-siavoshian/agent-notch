@@ -95,8 +95,9 @@ public final class BrowserAdapter: AppContextAdapter {
         let result = try await runScript(script, bundleID: bundleID)
         let (activeURL, activeTitle, tabs) = parseBrowserResult(result)
 
+        let cleanedActiveURL = Self.cleanURL(activeURL)
         var dict: [String: AnyCodable] = [
-            "active_url": AnyCodable(Self.cleanURL(activeURL)),
+            "active_url": AnyCodable(cleanedActiveURL),
             "active_title": AnyCodable(activeTitle)
         ]
         // tabs: array of {title, url, active}
@@ -105,7 +106,7 @@ public final class BrowserAdapter: AppContextAdapter {
             return [
                 "title": tab.title,
                 "url": cleanedURL,
-                "active": cleanedURL == Self.cleanURL(activeURL)
+                "active": cleanedURL == cleanedActiveURL
             ]
         }
         dict["tabs"] = AnyCodable(cleanedTabs)
