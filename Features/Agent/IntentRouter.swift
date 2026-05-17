@@ -55,7 +55,7 @@ enum OpenURLIntent {
         }
         // "open <domain>" / "go to <domain>" / "navigate to <domain>"
         let triggers = ["open ", "go to ", "navigate to ", "visit "]
-        for t in triggers where lower.hasPrefix(t) {
+        if let t = triggers.first(where: { lower.hasPrefix($0) }) {
             let tail = String(transcript.dropFirst(t.count)).trimmingCharacters(in: .whitespaces)
             if let url = domainURL(from: tail) {
                 return open(url, label: url.host ?? tail)
