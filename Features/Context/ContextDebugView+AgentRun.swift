@@ -75,6 +75,7 @@ public struct ContextDebugAgentRunView: View {
         case .l2Snapshot: return "L2 SNAPSHOT"
         case .selectorRun: return "SELECTOR"
         case .mercuryCall(_, _, let role, _, _, _, _, _, _): return "MERCURY · \(role.rawValue.uppercased())"
+        case .geminiCall(_, _, let model, _, _, _, _, _, _): return "GEMINI · \(model)"
         case .harnessTurn(_, _, let idx, _, _, _, _, _, _, _, _): return "CLAUDE TURN #\(idx)"
         case .memoryMutation(_, _, let kind, _): return "MEMORY · \(kind.rawValue)"
         }
@@ -85,6 +86,7 @@ public struct ContextDebugAgentRunView: View {
         case .longPressTranscript: return .blue
         case .l2Snapshot: return .teal
         case .selectorRun, .mercuryCall: return .purple
+        case .geminiCall: return .indigo
         case .harnessTurn: return .orange
         case .memoryMutation: return .green
         }
@@ -114,6 +116,18 @@ public struct ContextDebugAgentRunView: View {
                 Text("\(String(format: "%.2f", latency))s \(success ? "✓" : "✗")").font(.system(size: 11, weight: .semibold))
                 DisclosureGroup("Request") {
                     Text(req).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                }
+                DisclosureGroup("Response") {
+                    Text(resp).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
+                }
+            }
+        case let .geminiCall(_, _, model, prompt, imageBytes, resp, latency, success, httpStatus):
+            VStack(alignment: .leading, spacing: 4) {
+                let statusText = httpStatus.map { " · HTTP \($0)" } ?? ""
+                Text("\(model) · \(String(format: "%.2f", latency))s \(success ? "✓" : "✗")\(statusText) · \(imageBytes) image bytes")
+                    .font(.system(size: 11, weight: .semibold))
+                DisclosureGroup("Request") {
+                    Text(prompt).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
                 }
                 DisclosureGroup("Response") {
                     Text(resp).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)

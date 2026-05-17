@@ -22,6 +22,7 @@ public final class AgentObservabilityLog {
         case l2Snapshot(id: UUID, t: Date, app: String, window: String?, axElementCount: Int, ocrLineCount: Int, screenshotJPEG: Data?)
         case selectorRun(id: UUID, t: Date, latencyS: Double, degraded: Bool, model: String?, intentVerb: String, intentTarget: String?, briefLength: Int)
         case mercuryCall(id: UUID, t: Date, role: MercuryRole, requestSummary: String, responseSummary: String, latencyS: Double, success: Bool, promptTokens: Int?, completionTokens: Int?)
+        case geminiCall(id: UUID, t: Date, model: String, promptPreview: String, imageBytes: Int, responsePreview: String, latencyS: Double, success: Bool, httpStatus: Int?)
         case harnessTurn(id: UUID, t: Date, turnIndex: Int, modelID: String, systemBlocksPreview: String, userContentPreview: String, assistantPreview: String, toolCalls: [ToolCallSummary], inputTokens: Int?, outputTokens: Int?, latencyS: Double)
         case memoryMutation(id: UUID, t: Date, kind: MutationKind, summary: String)
 
@@ -31,6 +32,7 @@ public final class AgentObservabilityLog {
                  .l2Snapshot(let id, _, _, _, _, _, _),
                  .selectorRun(let id, _, _, _, _, _, _, _),
                  .mercuryCall(let id, _, _, _, _, _, _, _, _),
+                 .geminiCall(let id, _, _, _, _, _, _, _, _),
                  .harnessTurn(let id, _, _, _, _, _, _, _, _, _, _),
                  .memoryMutation(let id, _, _, _):
                 return id
@@ -43,6 +45,7 @@ public final class AgentObservabilityLog {
                  .l2Snapshot(_, let t, _, _, _, _, _),
                  .selectorRun(_, let t, _, _, _, _, _, _),
                  .mercuryCall(_, let t, _, _, _, _, _, _, _),
+                 .geminiCall(_, let t, _, _, _, _, _, _, _),
                  .harnessTurn(_, let t, _, _, _, _, _, _, _, _, _),
                  .memoryMutation(_, let t, _, _):
                 return t
@@ -105,6 +108,16 @@ public final class AgentObservabilityLog {
         queue.sync {
             buffer.filter {
                 if case .mercuryCall = $0 { return true }
+                return false
+            }
+        }
+    }
+
+    /// All Gemini calls in the buffer.
+    public func geminiCalls() -> [Event] {
+        queue.sync {
+            buffer.filter {
+                if case .geminiCall = $0 { return true }
                 return false
             }
         }

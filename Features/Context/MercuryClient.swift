@@ -64,8 +64,9 @@ public final class MercuryClient {
         let obsID = UUID()
         let systemContent = messages.first(where: { $0.role == "system" })?.content
         let role = Self.inferRole(systemContent: systemContent)
-        let userPreview = messages.last(where: { $0.role == "user" })?.content.prefix(200) ?? ""
-        let requestSummary = "model=\(model) maxTokens=\(maxTokens) timeout=\(timeout)s user_preview=\(userPreview)"
+        let userPreview = messages.last(where: { $0.role == "user" })?.content.prefix(4000) ?? ""
+        let systemPreview = systemContent?.prefix(4000) ?? "<none>"
+        let requestSummary = "model=\(model) maxTokens=\(maxTokens) timeout=\(timeout)s\n--- system ---\n\(systemPreview)\n--- user ---\n\(userPreview)"
 
         do {
             let result = try await performRequest(
@@ -80,7 +81,7 @@ public final class MercuryClient {
                 t: startedAt,
                 role: role,
                 requestSummary: requestSummary,
-                responseSummary: String(result.prefix(400)),
+                responseSummary: String(result.prefix(4000)),
                 latencyS: Date().timeIntervalSince(startedAt),
                 success: true,
                 promptTokens: nil,

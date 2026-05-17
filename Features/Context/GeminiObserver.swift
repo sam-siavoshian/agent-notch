@@ -39,15 +39,29 @@ public final class GeminiObserver {
         let systemPrompt = Self.systemPrompt
         let userText = Self.userText(frontmostHint: frontmostHint)
 
-        guard let raw = try? await GeminiVisionClient.shared.generate(
-            systemPrompt: systemPrompt,
-            userText: userText,
-            imagePNG: screenshotPNG,
-            timeout: 60.0
-        ),
-        let data = raw.data(using: .utf8),
-        let parsed = try? JSONDecoder().decode(ObservationDTO.self, from: data)
-        else { return }
+        let raw: String
+        do {
+            raw = try await GeminiVisionClient.shared.generate(
+                systemPrompt: systemPrompt,
+                userText: userText,
+                imagePNG: screenshotPNG,
+                timeout: 60.0
+            )
+        } catch {
+            // GeminiVisionClient already logged the failure to AgentObservabilityLog
+            // via the new .geminiCall event — nothing else to do here.
+            return
+        }
+
+        guard let data = raw.data(using: .utf8),
+              let parsed = try? JSONDecoder().decode(ObservationDTO.self, from: data) else {
+            // Successful HTTP but observation didn't parse — log it so we can debug.
+            AgentObservabilityLog.shared.record(.memoryMutation(
+                id: UUID(), t: now, kind: .resourceRecorded,
+                summary: "screen obs FAILED parse — raw response preview: \(raw.prefix(300))"
+            ))
+            return
+        }
 
         let latency = Date().timeIntervalSince(started)
 

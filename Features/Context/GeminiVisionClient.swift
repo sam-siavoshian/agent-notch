@@ -57,6 +57,78 @@ public final class GeminiVisionClient {
         model: String = GeminiVisionClient.defaultModel,
         timeout: TimeInterval = 60.0
     ) async throws -> String {
+        let startedAt = Date()
+        let combinedText: String = {
+            let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? systemPrompt : systemPrompt + "\n" + trimmed
+        }()
+
+        do {
+            let result = try await performRequest(
+                systemPrompt: systemPrompt,
+                userText: userText,
+                imagePNG: imagePNG,
+                model: model,
+                timeout: timeout
+            )
+            AgentObservabilityLog.shared.record(.geminiCall(
+                id: UUID(),
+                t: startedAt,
+                model: model,
+                promptPreview: combinedText,
+                imageBytes: imagePNG.count,
+                responsePreview: result,
+                latencyS: Date().timeIntervalSince(startedAt),
+                success: true,
+                httpStatus: 200
+            ))
+            return result
+        } catch {
+            let (responsePreview, status) = Self.describeError(error)
+            AgentObservabilityLog.shared.record(.geminiCall(
+                id: UUID(),
+                t: startedAt,
+                model: model,
+                promptPreview: combinedText,
+                imageBytes: imagePNG.count,
+                responsePreview: responsePreview,
+                latencyS: Date().timeIntervalSince(startedAt),
+                success: false,
+                httpStatus: status
+            ))
+            throw error
+        }
+    }
+
+    /// Extract a human-readable error preview and HTTP status (if available) from
+    /// any thrown error. Used by the observability path so failures show up in
+    /// the DevTools timeline.
+    private static func describeError(_ error: Error) -> (preview: String, status: Int?) {
+        if let ce = error as? ClientError {
+            switch ce {
+            case .httpStatus(let code, let data):
+                let body = String(data: data, encoding: .utf8).map { String($0.prefix(400)) } ?? "<binary>"
+                return ("HTTP \(code): \(body)", code)
+            case .missingAPIKey:
+                return ("ERROR: GEMINI_API_KEY not set", nil)
+            case .timeout:
+                return ("ERROR: Gemini request timed out", nil)
+            case .malformedResponse(let s):
+                return ("ERROR: Malformed Gemini response: \(s)", nil)
+            }
+        }
+        return ("ERROR: \(error)", nil)
+    }
+
+    /// Raw request — separated so the public `generate` wrapper can log both
+    /// success and failure paths without duplicating HTTP/timeout logic.
+    private func performRequest(
+        systemPrompt: String,
+        userText: String,
+        imagePNG: Data,
+        model: String,
+        timeout: TimeInterval
+    ) async throws -> String {
         guard let apiKey = Secrets.geminiAPIKey, !apiKey.isEmpty else {
             throw ClientError.missingAPIKey
         }
