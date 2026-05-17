@@ -12,6 +12,7 @@ enum LucideName {
     case accessibility
     case monitor
     case mic
+    case keyboard
     case sparkles
     case rotateCW
     case settings
@@ -38,6 +39,7 @@ struct LucideIcon: View {
         case .accessibility: return "figure.arms.open"
         case .monitor:       return "display"
         case .mic:           return "mic.fill"
+        case .keyboard:      return "keyboard"
         case .sparkles:      return "sparkles"
         case .rotateCW:      return "arrow.clockwise"
         case .settings:      return "gearshape.fill"

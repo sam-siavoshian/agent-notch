@@ -2,7 +2,7 @@
 //  PermissionChecker.swift
 //  Agent in the Notch
 //
-//  Polls macOS TCC state for the three permissions we need. Publishes status
+//  Polls macOS TCC state for the four permissions we need. Publishes status
 //  so the onboarding UI re-renders the moment the user toggles a switch in
 //  System Settings.
 //
@@ -18,7 +18,7 @@ public final class PermissionChecker: ObservableObject {
     public static let shared = PermissionChecker()
 
     public enum PermissionID: String, CaseIterable, Identifiable, Sendable {
-        case accessibility, screenRecording, microphone
+        case accessibility, screenRecording, microphone, inputMonitoring
         public var id: String { rawValue }
 
         public var label: String {
@@ -26,6 +26,7 @@ public final class PermissionChecker: ObservableObject {
             case .accessibility:    return "Accessibility"
             case .screenRecording:  return "Screen Recording"
             case .microphone:       return "Microphone"
+            case .inputMonitoring:  return "Input Monitoring"
             }
         }
     }
@@ -39,7 +40,8 @@ public final class PermissionChecker: ObservableObject {
     @Published public private(set) var statuses: [PermissionID: Status] = [
         .accessibility: .unknown,
         .screenRecording: .unknown,
-        .microphone: .unknown
+        .microphone: .unknown,
+        .inputMonitoring: .unknown
     ]
 
     public var allGranted: Bool {
@@ -47,7 +49,7 @@ public final class PermissionChecker: ObservableObject {
     }
 
     /// IDs that are not currently granted, in stable display order
-    /// (accessibility → screen recording → microphone).
+    /// (accessibility → screen recording → microphone → input monitoring).
     public var missing: [PermissionID] {
         PermissionID.allCases.filter { statuses[$0] != .granted }
     }
@@ -90,7 +92,8 @@ public final class PermissionChecker: ObservableObject {
         statuses = [
             .accessibility: checkAccessibility(),
             .screenRecording: checkScreenRecording(),
-            .microphone: checkMicrophone()
+            .microphone: checkMicrophone(),
+            .inputMonitoring: checkInputMonitoring()
         ]
     }
 
@@ -119,12 +122,20 @@ public final class PermissionChecker: ObservableObject {
         }
     }
 
+    /// Triggers the system Input Monitoring prompt. Required for CGEvent
+    /// taps that observe keystrokes (separate TCC grant from Accessibility
+    /// on macOS 14+).
+    public func requestInputMonitoring() {
+        _ = CGRequestListenEventAccess()
+    }
+
     public func openSettings(for id: PermissionID) {
         let urlString: String
         switch id {
         case .accessibility:    urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         case .screenRecording:  urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         case .microphone:       urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        case .inputMonitoring:  urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
         }
         if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
@@ -148,5 +159,9 @@ public final class PermissionChecker: ObservableObject {
         case .denied, .restricted: return .denied
         @unknown default: return .unknown
         }
+    }
+
+    private func checkInputMonitoring() -> Status {
+        CGPreflightListenEventAccess() ? .granted : .denied
     }
 }

@@ -211,11 +211,11 @@ struct OnboardingView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 18) {
-            DraggableAppIcon(pulse: grantedCount < 3)
+            DraggableAppIcon(pulse: grantedCount < 4)
                 .frame(width: 84, height: 84)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Three quick permissions")
+                Text("Four quick permissions")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Pill.text)
 
@@ -237,7 +237,7 @@ struct OnboardingView: View {
                 .foregroundStyle(allGranted ? Pill.green : Pill.text)
                 .contentTransition(.numericText(value: Double(grantedCount)))
                 .animation(.spring(response: 0.4, dampingFraction: 0.7), value: grantedCount)
-            Text("/ 3")
+            Text("/ 4")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Pill.muted)
         }
@@ -281,6 +281,17 @@ struct OnboardingView: View {
                 status: checker.statuses[.microphone] ?? .unknown,
                 onGrant: { checker.requestMicrophone() },
                 onSettings: { checker.openSettings(for: .microphone) }
+            )
+            PermPill(
+                icon: .keyboard,
+                title: "Input Monitoring",
+                blurb: "Lets AgentNotch observe the keystrokes you make so it can learn the shortcuts you actually use.",
+                status: checker.statuses[.inputMonitoring] ?? .unknown,
+                onGrant: {
+                    checker.requestInputMonitoring()
+                    checker.openSettings(for: .inputMonitoring)
+                },
+                onSettings: { checker.openSettings(for: .inputMonitoring) }
             )
         }
     }
