@@ -490,8 +490,10 @@ private struct EventCard: View {
         return loc
     }
 
+    private static let icalURL = URL(string: "ical://")
+
     private func openInCalendar() {
-        if let url = URL(string: "ical://") {
+        if let url = Self.icalURL {
             NSWorkspace.shared.open(url)
         }
     }
