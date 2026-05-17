@@ -65,7 +65,7 @@ public final class ActiveTaskUpdater {
     public func tick() async -> CActiveTask? {
         let now = Date()
         let elapsed = now.timeIntervalSince(lastUpdateAt)
-        let latestSeq = EventLog.shared.snapshot().last?.seq ?? 0
+        let latestSeq = EventLog.shared.tail(1).last?.seq ?? 0
         let newEvents = latestSeq > lastEventSeqAtUpdate
         guard elapsed >= 90.0 && newEvents else { return nil }
         return await refresh(timeout: 8.0)
