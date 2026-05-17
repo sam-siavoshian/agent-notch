@@ -30,8 +30,7 @@ final class NotchWindowController: NSObject {
     func install() {
         guard window == nil else { return }
 
-        let size = NotchSizing.windowSize(for: NSScreen.main)
-        let rect = NSRect(origin: .zero, size: size)
+        let rect = NSRect(origin: .zero, size: NotchSizing.windowSize)
         let styleMask: NSWindow.StyleMask = [.borderless, .nonactivatingPanel]
         let panel = NotchWindow(
             contentRect: rect,
@@ -94,9 +93,8 @@ final class NotchWindowController: NSObject {
         }
     }
 
-    /// Pick the screen the user is currently on. Prefer the screen with a
-    /// real notch (auxiliaryTopLeftArea). Fall back to the screen under the
-    /// cursor, then main.
+    /// Prefer the screen under the cursor with a real notch, else the screen
+    /// under the cursor, else any notched screen, else main.
     private func preferredScreen() -> NSScreen? {
         let mouse = NSEvent.mouseLocation
         let screens = NSScreen.screens
@@ -109,8 +107,7 @@ final class NotchWindowController: NSObject {
         return NSScreen.main
     }
 
-    /// Re-check active screen at ~10Hz so the notch slides to whatever
-    /// display the cursor is on. Cheap: a timer + an origin check.
+    /// Re-check active screen at ~10Hz so the notch follows the cursor across displays.
     private func startFollowingActiveScreen() {
         followTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: .main)
@@ -136,25 +133,15 @@ enum NotchSizing {
     /// (see NotchContentView). The window pre-allocates the maximum so the
     /// inner SwiftUI can grow without resizing the NSWindow.
     static let openHeightMax: CGFloat = 640
-    static let openHeight: CGFloat = openHeightMax  // legacy alias
     static let shadowPadding: CGFloat = 24
 
-    static func windowSize(for _: NSScreen?) -> CGSize {
-        CGSize(width: openWidth + shadowPadding * 2,
-               height: openHeightMax + shadowPadding)
-    }
+    static let windowSize = CGSize(
+        width: openWidth + shadowPadding * 2,
+        height: openHeightMax + shadowPadding
+    )
 
     static func notchHeight(for screen: NSScreen?) -> CGFloat {
         let inset = screen?.safeAreaInsets.top ?? 0
         return inset > 0 ? inset : 32
-    }
-
-    static func notchWidth(for screen: NSScreen?) -> CGFloat {
-        if let screen, let aux = screen.auxiliaryTopLeftArea {
-            let rightEdge = screen.frame.width - (screen.auxiliaryTopRightArea?.width ?? aux.width)
-            let computed = rightEdge - aux.width
-            if computed > 100 { return computed }
-        }
-        return 220
     }
 }

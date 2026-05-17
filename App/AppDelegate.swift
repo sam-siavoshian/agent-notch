@@ -6,17 +6,13 @@
 //
 
 import AppKit
-import SwiftUI
 
 private let log = Log(category: "boot")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Force line-buffering on stdout so dev.sh's `tee` sees output live
-        // instead of waiting for the 4KB block buffer to fill. Default Swift
-        // behavior when stdout is a pipe (not a TTY) is fully buffered, which
-        // hides errors for minutes when the app is producing only a handful
-        // of log lines per second.
+        // Line-buffer stdout so dev.sh's `tee` sees output live (default is
+        // fully-buffered when stdout is a pipe, hiding errors for minutes).
         setvbuf(stdout, nil, _IOLBF, 0)
 
         NSApp.setActivationPolicy(.accessory)
@@ -40,15 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
         KillSwitch.shared.start()
-        // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
         AdapterRegistry.shared.register(BrowserAdapter())
         AdapterRegistry.shared.register(TerminalAdapter())
         AdapterRegistry.shared.register(IDEAdapter())
         log.info("Registered \(AdapterRegistry.shared.allRegistered().count) app-specific adapter instance(s)")
-        // Phase 1 monitors — passively collect events into EventLog via
-        // EventIngester. Start order matters: KeystrokeMonitor wants
-        // AXObserverManager's focused-element provider, so AXObserverManager
-        // comes first.
+        // KeystrokeMonitor depends on AXObserverManager's focused-element provider — order matters.
         AXObserverManager.shared.start()
         let keystrokeOK = KeystrokeMonitor.shared.start()
         if !keystrokeOK {
@@ -56,22 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ClipboardWatcher.shared.start()
         DwellTimer.shared.start()
-        // Phase 3 — sequence inference + rolling active_task synthesis.
-        // AnchorRecorder is pure-local (no Mercury inside its tick), so it
-        // always runs. ActiveTaskUpdater calls OpenRouter each tick, so we
-        // gate it behind the mercuryEnabled setting to avoid surprise spend.
         AnchorRecorder.shared.start()
+        // ActiveTaskUpdater calls OpenRouter each tick; gate to avoid surprise spend.
         if AgentSettingsStore.shared.mercuryEnabled {
             ActiveTaskUpdater.shared.start()
         } else {
             log.info("ActiveTaskUpdater disabled by settings (mercuryEnabled=false)")
         }
-        // Keep polling TCC state after onboarding so the Notch UI can show a
-        // banner the moment a permission is revoked / not yet granted.
         let p = PermissionChecker.shared
         p.startPolling()
-        // Spotify: user-opt-in. Resume the connection if they previously
-        // tapped Connect (state persists in UserDefaults).
         SpotifyController.shared.startIfPreviouslyConnected()
         log.info("boot.complete ax=\(p.statuses[.accessibility]?.rawValue ?? "?") screen=\(p.statuses[.screenRecording]?.rawValue ?? "?") mic=\(p.statuses[.microphone]?.rawValue ?? "?")")
     }
