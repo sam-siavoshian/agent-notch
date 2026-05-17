@@ -19,6 +19,7 @@ private let log = Log(category: "voice")
 @MainActor
 public final class VoiceRecordingService {
     public static let shared = VoiceRecordingService()
+    private static let whisperDecoder = JSONDecoder()
 
     private let audioEngine = AVAudioEngine()
     private var audioFile: AVAudioFile?
