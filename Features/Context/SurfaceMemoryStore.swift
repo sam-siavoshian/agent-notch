@@ -67,7 +67,8 @@ public final class SurfaceMemoryStore {
             memory.observationCount += 1
 
             for control in obs.observableControls {
-                if let idx = memory.controls.firstIndex(where: { $0.label.lowercased() == control.label.lowercased() }) {
+                let needle = control.label.lowercased()
+                if let idx = memory.controls.firstIndex(where: { $0.label.lowercased() == needle }) {
                     memory.controls[idx].seenCount += 1
                     memory.controls[idx].lastSeen = obs.t
                     if memory.controls[idx].purpose == nil, control.purpose != nil {
