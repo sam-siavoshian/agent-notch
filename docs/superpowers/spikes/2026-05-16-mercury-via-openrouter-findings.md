@@ -138,3 +138,72 @@ This is the version used as the Phase-0 baseline. Phase 4 will import this verba
 | Revision | Date | Change | A pass? | B pass? | C pass? | Notes |
 |---|---|---|---|---|---|---|
 | v1 (Phase 0 baseline) | 2026-05-16 | initial | partial (4/6 scorers) | full | full | Established baseline. |
+
+---
+
+## Phase 3 (P3-6) — eval harness extended to two new prompt classes
+
+Date: 2026-05-17.
+
+The eval harness now covers two additional Mercury prompt categories beyond the Selector:
+
+1. **`active_task_updater`** — maintains a rolling `CActiveTask` from the recent `CEvent` stream. Returns `{update: ...}` or `{archive_and_start_new: {ended_task, new_task}}`.
+2. **`recipe_naming`** — abstracts three observed step sequences into a named recipe with a pipe-separated trigger pattern.
+
+### New CLI commands
+
+```
+eval-runner mock-active-task        # offline replay, 3 fixtures
+eval-runner live-active-task        # OpenRouter, requires OPENROUTER_API_KEY
+eval-runner mock-recipe-naming      # offline replay, 2 fixtures
+eval-runner live-recipe-naming      # OpenRouter, requires OPENROUTER_API_KEY
+```
+
+Pre-existing `mock`, `live`, `list` (selector-only) remain unchanged.
+
+### Fixtures added
+
+| Category | Scenario | Pattern under test |
+|---|---|---|
+| active_task_updater | cold-start | null current + Figma events → must emit `{update: ...}` with onboarding/figma label |
+| active_task_updater | continuation | Figma task already exists + more in-domain events → update in place, expand resources |
+| active_task_updater | archive-and-new | Figma task + iTerm/VSCode app switch → `{archive_and_start_new: ...}` with coding kind |
+| recipe_naming | slack-cmd-k-dm | `cmd+k → type <person> → return` ×3 → DM-with-person recipe |
+| recipe_naming | browser-cmd-l-url | `cmd+l → type <url> → return` ×3 → navigate-to-URL recipe |
+
+### Mock-LLM validation
+
+All 5 hand-curated goldens pass their assertions in offline replay:
+
+- `mock-active-task`: 3/3 fixtures pass (response_shape, label_contains, kind_in, narrative_must_contain, resources_must_include, plus archive-side ended_outcome / new_task_label / new_task_kind checks).
+- `mock-recipe-naming`: 2/2 fixtures pass (has_name, has_trigger_pattern, name_must_contain_any, trigger_pattern_must_contain_any).
+- Selector mock unchanged: 3/3 fixtures still pass.
+- All 35 EvalHarness + OpenRouterAPI unit tests still pass.
+
+### Live-Mercury validation
+
+**Not run.** `OPENROUTER_API_KEY` was not present in the worktree subprocess env when P3-6 ran, so live validation against real Mercury is deferred. Re-run with the key exported:
+
+```bash
+export OPENROUTER_API_KEY=...
+swift run --package-path tools/MercurySpike eval-runner live-active-task
+swift run --package-path tools/MercurySpike eval-runner live-recipe-naming
+```
+
+### Prompt-engineering notes for Phase 4
+
+A few signals worth tracking on the next live pass:
+
+- **`response_shape` discipline (active_task_updater).** Phase-4 risk: Mercury may try to be helpful and return a *third* shape (`{ended_task, new_task}` without the wrapper, or `{update, archive_and_start_new}` mixed). The system prompt's "Return strictly one of these JSON shapes" should hold, but watch for it.
+- **`kind` taxonomy drift.** The active_task `kind` field is free-form ("design_iteration", "coding", ...). Goldens use `kind_in` (any-of) to absorb variance, but if Mercury picks something far afield ("ui_work" instead of "design_iteration"), the fixture will fail and we should either expand the allowed set or pin the prompt to a closed enum.
+- **`trigger_pattern` generalization (recipe_naming).** The biggest risk for the recipe_naming prompt is Mercury enumerating the literal observations ("DM maya | DM wyatt | DM arshan") instead of generalizing with `<person>`. The system prompt explicitly forbids this; if it slips through, lean harder on the example output.
+- **No live latency data yet.** The mock-mode latency (~0 ms) is just file I/O. Real Mercury latency on these prompts is the open question — particularly active_task_updater which uses a 2-8 s timeout in production.
+
+### Shortcut taken (revisit in Phase 4)
+
+The new categories use **ad-hoc per-command scorers** (`PromptCategoryCommands.scoreActiveTask` / `scoreRecipeNaming`) rather than new generic `Scorer` types, because the Selector's typed `Fixture.Expected` schema doesn't fit either new prompt shape. Phase 4 cleanup options:
+
+- (a) Promote `RawFixture` + ad-hoc scorers into proper `Scorer` implementations with category-specific `Expected` decoders. Cleaner, more uniform.
+- (b) Keep ad-hoc per-category scoring. Cheaper, more flexible for fast prompt iteration.
+
+The active_task_updater system prompt is currently duplicated between `Features/Context/ActiveTaskUpdater.swift` (production) and `tools/MercurySpike/Sources/EvalHarness/ActiveTaskUpdaterSystemPrompt.swift` (eval). Phase 4 should make production import the eval-validated constant, same pattern as `SelectorSystemPrompt`.

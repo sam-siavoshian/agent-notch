@@ -1,0 +1,24 @@
+{
+  "update": {
+    "id": "t_2026-05-17_10",
+    "startedAt": "2026-05-17T10:00:00Z",
+    "label": "Iterate Onboarding v3 in Figma",
+    "kind": "design_iteration",
+    "narrative": "User just switched to Figma and is deep-focused on the Onboarding v3 file, currently editing the Step 1 frame (email-capture copy). Two minutes of dwell signals real iteration, not browsing.",
+    "actionsTaken": [
+      {"t": "2026-05-17T10:02:10Z", "what": "edited Step 1 email-capture copy ('Enter your email')"}
+    ],
+    "resources": [
+      "figma://file/abc/Onboarding-v3"
+    ],
+    "entities": [
+      {"label": "Onboarding v3", "kind": "file", "resolvedTo": "figma://file/abc/Onboarding-v3"}
+    ],
+    "blockedOn": null,
+    "likelyNextSteps": [
+      "finish Step 1 copy",
+      "move to Step 2",
+      "review with team"
+    ]
+  }
+}

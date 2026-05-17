@@ -1,0 +1,4 @@
+{
+  "name": "navigate to URL",
+  "trigger_pattern": "go to <url> | open <url> | navigate to <url>"
+}

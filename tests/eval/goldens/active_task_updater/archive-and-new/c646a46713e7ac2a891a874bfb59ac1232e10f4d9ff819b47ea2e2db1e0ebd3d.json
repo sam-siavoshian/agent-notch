@@ -1,0 +1,36 @@
+{
+  "archive_and_start_new": {
+    "ended_task": {
+      "id": "t_2026-05-17_10",
+      "label": "Iterate Onboarding v3 in Figma",
+      "endedAt": "2026-05-17T10:30:00Z",
+      "outcome": "Finished a pass on Figma Onboarding v3 Step 1 + Step 2 helper copy. User switched away to a coding session — likely a context shift, not a pause.",
+      "kind": "design_iteration"
+    },
+    "new_task": {
+      "id": "t_2026-05-17_10_30",
+      "startedAt": "2026-05-17T10:30:00Z",
+      "label": "Work on agent-notch in VSCode",
+      "kind": "coding",
+      "narrative": "User switched from Figma to iTerm2 in ~/code/agent-notch, ran `git status`, then opened VSCode on ActiveTaskUpdater.swift. Starting an editing session on the active-task pipeline.",
+      "actionsTaken": [
+        {"t": "2026-05-17T10:30:08Z", "what": "ran `git status` in ~/code/agent-notch"},
+        {"t": "2026-05-17T10:31:00Z", "what": "opened ActiveTaskUpdater.swift in VSCode"}
+      ],
+      "resources": [
+        "file:///Users/arshan/code/agent-notch",
+        "file:///Users/arshan/code/agent-notch/Features/Context/ActiveTaskUpdater.swift"
+      ],
+      "entities": [
+        {"label": "agent-notch", "kind": "cwd", "resolvedTo": "file:///Users/arshan/code/agent-notch"},
+        {"label": "ActiveTaskUpdater.swift", "kind": "file", "resolvedTo": "file:///Users/arshan/code/agent-notch/Features/Context/ActiveTaskUpdater.swift"}
+      ],
+      "blockedOn": null,
+      "likelyNextSteps": [
+        "edit ActiveTaskUpdater.swift",
+        "run `swift build`",
+        "commit changes"
+      ]
+    }
+  }
+}

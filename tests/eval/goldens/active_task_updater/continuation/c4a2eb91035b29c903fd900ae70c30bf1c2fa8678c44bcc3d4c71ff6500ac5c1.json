@@ -1,0 +1,28 @@
+{
+  "update": {
+    "id": "t_2026-05-17_10",
+    "startedAt": "2026-05-17T10:00:00Z",
+    "label": "Iterate Onboarding v3 in Figma",
+    "kind": "design_iteration",
+    "narrative": "User has been editing the Onboarding v3 file in Figma for ~17 minutes. Worked through Step 1 copy first, then moved to Step 2 and is now polishing the helper text ('Check your inbox for a 6-digit code'). Sustained dwell — real iteration on the email-verification flow.",
+    "actionsTaken": [
+      {"t": "2026-05-17T10:02:10Z", "what": "edited Step 1 email-capture copy"},
+      {"t": "2026-05-17T10:14:30Z", "what": "edited Step 2 verify-email heading"},
+      {"t": "2026-05-17T10:16:45Z", "what": "edited Step 2 helper text"}
+    ],
+    "resources": [
+      "figma://file/abc/Onboarding-v3",
+      "figma://file/abc/Onboarding-v3#frame:Step-1",
+      "figma://file/abc/Onboarding-v3#frame:Step-2"
+    ],
+    "entities": [
+      {"label": "Onboarding v3", "kind": "file", "resolvedTo": "figma://file/abc/Onboarding-v3"}
+    ],
+    "blockedOn": null,
+    "likelyNextSteps": [
+      "finish Step 2 helper copy",
+      "move to Step 3",
+      "review with team"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "name": "open DM with person",
+  "trigger_pattern": "open DM | message <person> | DM <person>"
+}
