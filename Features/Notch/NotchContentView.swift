@@ -50,6 +50,12 @@ enum NotchTab: String, CaseIterable, Identifiable {
 }
 
 struct NotchContentView: View {
+    /// Shared spring driving every animatable property on the notch surface.
+    /// Hoisted so each body recompute reuses one instance instead of allocating
+    /// three identical Animation values per render.
+    private static let notchSpring: Animation =
+        .spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0)
+
     @AppStorage("notch.selectedTab") private var selectedTabRaw: String = NotchTab.home.rawValue
     @State private var isOpen = false
     @State private var closeTask: Task<Void, Never>?
@@ -230,12 +236,9 @@ struct NotchContentView: View {
         // Single spring drives box size + content opacity + height changes.
         // High damping kills bounce so top edge can't punch into the real
         // hardware notch. Response ~0.32 feels organic without feeling slow.
-        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
-                   value: isOpen)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
-                   value: measuredOpenHeight)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0),
-                   value: liveActive)
+        .animation(Self.notchSpring, value: isOpen)
+        .animation(Self.notchSpring, value: measuredOpenHeight)
+        .animation(Self.notchSpring, value: liveActive)
         .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
             // Update even while closed so the first open animates to the
             // right size in a single motion (no two-step pop).
