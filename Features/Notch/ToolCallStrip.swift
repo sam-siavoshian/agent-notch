@@ -29,7 +29,7 @@ struct ToolCallStrip: View {
             }
 
             if let live = liveEntry {
-                LiveLabel(name: prettify(live.name))
+                LiveLabel(name: displayName(for: live))
             }
 
             if !recent.isEmpty {
@@ -40,7 +40,7 @@ struct ToolCallStrip: View {
                         .padding(.horizontal, 9)
                 }
 
-                GhostTrail(names: recent.map { prettify($0.name) })
+                GhostTrail(names: recent.map(displayName(for:)))
             }
 
             Spacer(minLength: 0)
@@ -65,27 +65,73 @@ struct ToolCallStrip: View {
         return nil
     }
 
-    /// Recent tool calls with adjacent duplicates collapsed, including a
-    /// dupe of the currently-live name as the most recent log entry — the
-    /// agent fires the same `screenshot` tool many times in a row, and
-    /// printing five copies of "screenshot" is noise.
+    /// Recent tool calls with adjacent + live duplicates collapsed by their
+    /// rendered display name. The harness fires the same Anthropic `computer`
+    /// tool many times with different `action` values (screenshot, click,
+    /// type) — comparing raw names would treat them all as duplicates and
+    /// drop the trail to a single chip. Comparing display names treats the
+    /// action as the identity, which is what the user actually reads.
     private var recent: [Entry] {
         var out: [Entry] = []
-        var lastName: String? = liveEntry?.name
+        var lastDisplay: String? = liveEntry.map(displayName(for:))
         for log in state.activityLog {
             guard case .toolCall(let name) = log.activity else { continue }
-            if name == lastName { continue }
-            out.append(Entry(name: name, detail: log.detail))
-            lastName = name
+            let candidate = Entry(name: name, detail: log.detail)
+            let display = displayName(for: candidate)
+            if display == lastDisplay { continue }
+            out.append(candidate)
+            lastDisplay = display
             if out.count >= 5 { break }
         }
         return out
     }
 
-    private func prettify(_ s: String) -> String {
-        var t = s
+    /// Maps a raw `(toolName, action)` pair onto the label the user reads in
+    /// the strip. Anthropic's computer-use API names the tool `computer` and
+    /// puts the verb in the `action` field — so `name="computer"` collapses
+    /// onto the action, with a hand-curated short label per verb.
+    private func displayName(for entry: Entry) -> String {
+        if entry.name == "computer" {
+            let action = entry.detail
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if action.isEmpty { return "computer" }
+            return Self.actionLabel(action)
+        }
+        var t = entry.name
         if t.hasPrefix("computer_") { t.removeFirst("computer_".count) }
         return t.replacingOccurrences(of: "_", with: " ").lowercased()
+    }
+
+    /// Strips coordinate/argument suffixes from `detail` ("left_click (420, 300)"
+    /// → "left_click") then maps onto a UI-friendly short verb.
+    private static func actionLabel(_ raw: String) -> String {
+        let head = raw
+            .split(whereSeparator: { " (".contains($0) })
+            .first
+            .map(String.init) ?? raw
+
+        switch head {
+        case "screenshot":            return "screenshot"
+        case "left_click",
+             "left_mouse_down",
+             "left_mouse_up":         return "click"
+        case "right_click":           return "right click"
+        case "middle_click":          return "middle click"
+        case "double_click":          return "double click"
+        case "triple_click":          return "triple click"
+        case "left_click_drag",
+             "drag":                  return "drag"
+        case "mouse_move",
+             "cursor_position":       return "move"
+        case "type":                  return "type"
+        case "key":                   return "key"
+        case "hold_key":              return "hold key"
+        case "scroll":                return "scroll"
+        case "wait":                  return "wait"
+        default:
+            return head.replacingOccurrences(of: "_", with: " ")
+        }
     }
 }
 
