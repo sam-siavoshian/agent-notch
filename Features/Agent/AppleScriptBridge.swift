@@ -89,10 +89,8 @@ public enum AppleScriptBridge {
     private static func assertAllowed(_ script: String) throws {
         let range = NSRange(script.startIndex..., in: script)
         let matches = targetRegex.matches(in: script, options: [], range: range)
-        var sawTarget = false
         for m in matches where m.numberOfRanges >= 2 {
             guard let r = Range(m.range(at: 1), in: script) else { continue }
-            sawTarget = true
             let target = String(script[r])
             if !allowedTargets.contains(target) {
                 throw AppleScriptBridgeError.disallowedTarget(target)
@@ -100,7 +98,6 @@ public enum AppleScriptBridge {
         }
         // No `tell application` at all = utility script (e.g. `return "x"`).
         // Allow these; they cannot drive other apps.
-        _ = sawTarget
     }
 }
 
