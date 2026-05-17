@@ -173,8 +173,12 @@ enum ContextTextSignalFilter {
     }
 
     private static func mostlyNonLetters(_ text: String) -> Bool {
-        let letters = text.filter(\.isLetter).count
-        let numbers = text.filter(\.isNumber).count
+        var letters = 0
+        var numbers = 0
+        for ch in text {
+            if ch.isLetter { letters += 1 }
+            else if ch.isNumber { numbers += 1 }
+        }
         return letters < 2 && numbers > 0
     }
 
