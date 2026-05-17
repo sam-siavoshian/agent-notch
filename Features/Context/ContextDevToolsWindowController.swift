@@ -2,7 +2,7 @@
 //  ContextDevToolsWindowController.swift
 //  Agent in the Notch
 //
-//  Hosts the Dev Tools panel. Cmd+Option+D toggles visibility; the window is
+//  Hosts the Dev Tools panel. Cmd+Shift+I toggles visibility; the window is
 //  created lazily and kept around between presentations so SwiftUI state
 //  persists. Floating level so it stays above the user's working windows.
 //
@@ -83,9 +83,9 @@ public final class ContextDevToolsWindowController: NSObject {
 
     private static func matchesToggleShortcut(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let needed: NSEvent.ModifierFlags = [.command, .option]
+        let needed: NSEvent.ModifierFlags = [.command, .shift]
         guard flags == needed else { return false }
         let chars = event.charactersIgnoringModifiers?.lowercased()
-        return chars == "d"
+        return chars == "i"
     }
 }

@@ -139,7 +139,7 @@ All features should use these — never duplicate them.
 | `ContextDirtyDetector.swift` | dHash + downscaled pixel-diff classifier; gates whether a frame is `.majorChange` and warrants a Gemini call |
 | `ContextModels.swift` | Data types: `ContextSnapshot`, `ContextDiagnostics`, etc. |
 | `ContextSchema.swift` | New-system event schema (`CEvent` envelope + variants, L2/L3/L4/L5 types, recipes, resources, active_task) |
-| `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
+| `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Shift+I toggles it |
 
 **Path 1: continuous background observer (Gemini)**
 
@@ -188,7 +188,7 @@ All features should use these — never duplicate them.
 | `TerminalAdapter.swift` | Terminal.app / iTerm2 / Ghostty — OSC 7-style cwd reporter (installed by `scripts/install-cwd-reporter.sh`) read from `~/.cache/agentnotch/term-cwd-<ttyname>`; AppleScript buffer-scrape fallback |
 | `IDEAdapter.swift` | VSCode / Cursor / Xcode / Zed — window-title parsing + filesystem walk for `.git`, AppleScript for Xcode |
 
-**Dev Tools UI (separate window, Cmd+Option+D)**
+**Dev Tools UI (separate window, Cmd+Shift+I)**
 
 | File | What it is |
 |---|---|
@@ -279,7 +279,7 @@ AppDelegate.applicationDidFinishLaunching
       → bootAgent()
           → CursorCompanion.shared.start()                // AgentInterfaces.cursor
           → ContextCoordinator.shared.start()             // AgentInterfaces.context (drives GeminiObserver on major-change captures)
-          → ContextDevToolsWindowController.shared.install()  // Cmd+Option+D toggle only; window does NOT open automatically
+          → ContextDevToolsWindowController.shared.install()  // Cmd+Shift+I toggle only; window does NOT open automatically
           → VoiceRecordingService.shared.start()          // mic; flushes to OpenAI Whisper
           → AgentSession.shared.start()                   // subscribes to .transcriptReady; IntentRouter → Selector → harness
           → AdapterRegistry.register(BrowserAdapter / TerminalAdapter / IDEAdapter)
