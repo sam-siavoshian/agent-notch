@@ -31,17 +31,14 @@ public enum LocalBriefRenderer {
     private static func inferIntent(transcript: String, activeTask: CActiveTask?, recentResources: [CResourceRef]) -> CIntent {
         let lower = transcript.lowercased()
         let verb = actionVerbs.first(where: { lower.contains($0) }) ?? "do"
-        // Crude target: strip verb + leading articles, take the rest.
         let trimmed = lower
             .replacingOccurrences(of: verb, with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let target = trimmed.isEmpty ? nil : trimmed
-        // Lightweight resource resolution: if the transcript mentions "PR", look for a github.com pull URL.
         let resolved: String? = recentResources.first(where: { ref in
             if let label = ref.label?.lowercased(), trimmed.contains(label) { return true }
             return ref.uri.lowercased().contains(trimmed)
         })?.uri
-        // Entities: pull any active_task entities the transcript also mentions.
         let entities: [CIntent.Entity] = activeTask?.entities
             .filter { lower.contains($0.label.lowercased()) } ?? []
         return CIntent(
@@ -49,7 +46,7 @@ public enum LocalBriefRenderer {
             target: target,
             resolvedTarget: resolved,
             entities: entities,
-            confidence: 0.4   // low: this is a heuristic, not synthesis
+            confidence: 0.4   // heuristic, not synthesis
         )
     }
 
@@ -75,7 +72,6 @@ public enum LocalBriefRenderer {
 
         lines.append("## You are here")
         lines.append("- App: \(l2.app) — \(l2.windowTitle ?? "(no window title)")")
-        // AX paths
         let useful = l2.axElements.filter { ($0.label?.isEmpty == false) }.prefix(5)
         if !useful.isEmpty {
             lines.append("- Useful AX elements:")
@@ -101,7 +97,6 @@ public enum LocalBriefRenderer {
             lines.append("")
         }
 
-        // Resolved deictics
         let entities = intent.entities
         if !entities.isEmpty {
             for ent in entities {

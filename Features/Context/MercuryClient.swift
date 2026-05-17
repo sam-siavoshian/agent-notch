@@ -1,26 +1,20 @@
 import Foundation
 
-/// Production client for Mercury 2 via OpenRouter, used by ActiveTaskUpdater (Phase 3)
-/// and Selector (Phase 4). Mirrors `tools/MercurySpike/Sources/OpenRouterAPI/OpenRouterClient.swift`
-/// shape but lives inside the AgentNotch app target so it can be wired into context
-/// services without a separate dependency.
-///
-/// Hard timeout per call (default 2.5s for selector / 2.0s for task updater).
+/// Production client for Mercury 2 via OpenRouter. Per-call hard timeout
+/// (default 2.5s for Selector / 2.0s for ActiveTaskUpdater).
 public final class MercuryClient {
 
     public static let shared = MercuryClient()
 
-    public static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     public static let defaultModel = "inception/mercury-2"
 
+    private static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
 
-    public let session: URLSession
+    private let session: URLSession = .shared
 
-    public init(session: URLSession = .shared) {
-        self.session = session
-    }
+    private init() {}
 
     public enum ClientError: Error, CustomStringConvertible {
         case missingAPIKey
@@ -52,6 +46,11 @@ public final class MercuryClient {
             self.content = (try? c.decode(String.self, forKey: .content)) ?? ""
         }
         private enum CodingKeys: String, CodingKey { case role, content }
+    }
+
+    public enum ResponseFormat {
+        case jsonObject
+        case freeform
     }
 
     /// Send a chat completion request and return the assistant's content string.
@@ -115,9 +114,8 @@ public final class MercuryClient {
         return .other
     }
 
-    /// The raw request — separated so the public `complete` wrapper can record
-    /// observability events for both success and failure paths without
-    /// duplicating the HTTP/timeout logic.
+    /// Separated from `complete` so the public wrapper can record observability
+    /// events for both success and failure paths without duplicating logic.
     private func performRequest(
         messages: [Message],
         model: String,
@@ -145,7 +143,7 @@ public final class MercuryClient {
         )
         req.httpBody = try Self.encoder.encode(body)
 
-        // Race the request against an explicit timeout to make the deadline tight.
+        // Race the request against the deadline.
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
                 let (data, response) = try await self.session.data(for: req)
@@ -172,11 +170,6 @@ public final class MercuryClient {
             group.cancelAll()
             return first
         }
-    }
-
-    public enum ResponseFormat {
-        case jsonObject
-        case freeform
     }
 
     // MARK: - Request body
