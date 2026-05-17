@@ -70,7 +70,8 @@ public final class AudioDeviceManager: ObservableObject {
     /// Pass nil to fall back to system default. Returns true if applied.
     @discardableResult
     public static func setInputDevice(uid: String?, on engine: AVAudioEngine) -> Bool {
-        guard let uid, let device = enumerateAllDevices().first(where: { $0.uid == uid && $0.hasInput })
+        guard let uid, !uid.isEmpty,
+              let device = enumerateAllDevices().first(where: { $0.uid == uid && $0.hasInput })
         else { return false }
         guard let unit = engine.inputNode.audioUnit else { return false }
         var deviceID = device.id
@@ -88,7 +89,8 @@ public final class AudioDeviceManager: ObservableObject {
     /// Apply selected device UID to an AVAudioEngine's output audio unit.
     @discardableResult
     public static func setOutputDevice(uid: String?, on engine: AVAudioEngine) -> Bool {
-        guard let uid, let device = enumerateAllDevices().first(where: { $0.uid == uid && $0.hasOutput })
+        guard let uid, !uid.isEmpty,
+              let device = enumerateAllDevices().first(where: { $0.uid == uid && $0.hasOutput })
         else { return false }
         guard let unit = engine.outputNode.audioUnit else { return false }
         var deviceID = device.id
