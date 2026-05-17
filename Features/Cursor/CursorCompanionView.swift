@@ -37,13 +37,25 @@ struct CursorCompanionView: View {
         .frame(width: spriteSize * 2.8, height: spriteSize * 2.8)
         .onAppear { startIdleAnimations() }
         .onChange(of: viewModel.isListening) { _, listening in
-            withAnimation(
-                listening
-                ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
-                : .easeOut(duration: 0.25)
-            ) {
-                pulse = listening ? 1.22 : 1.0
-                haloPhase = listening ? 1.25 : 1.0
+            if listening {
+                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                    pulse = 1.22
+                    haloPhase = 1.25
+                }
+            } else {
+                // Kill the active repeatForever transaction first, then
+                // ease back to rest. Without the nil-animation reset the
+                // pulse keeps oscillating after the task ends.
+                var tx = Transaction(animation: nil)
+                tx.disablesAnimations = true
+                withTransaction(tx) {
+                    pulse = 1.0
+                    haloPhase = 1.0
+                }
+                withAnimation(.easeOut(duration: 0.25)) {
+                    pulse = 1.0
+                    haloPhase = 1.0
+                }
             }
         }
         .onChange(of: viewModel.isThinking) { _, thinking in
@@ -52,7 +64,9 @@ struct CursorCompanionView: View {
                     orbit = 360
                 }
             } else {
-                orbit = 0
+                var tx = Transaction(animation: nil)
+                tx.disablesAnimations = true
+                withTransaction(tx) { orbit = 0 }
             }
         }
         .allowsHitTesting(false)
