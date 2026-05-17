@@ -14,6 +14,11 @@ public final class ContextSelector {
         public let intent: CIntent
         public let brief: String
         public let l2: CL2Snapshot
+        /// JPEG bytes captured at long-press time (same frame OCR ran on).
+        /// Forwarded to the harness as the first user-message image so Claude
+        /// sees the screen without taking a `computer.screenshot` tool call.
+        /// Nil if capture failed or timed out.
+        public let initiationScreenshot: Data?
         public let degraded: Bool        // true if we fell back to LocalBriefRenderer
         public let latencyS: Double
         public let modelUsed: String?    // nil when degraded
@@ -27,7 +32,9 @@ public final class ContextSelector {
     /// Run the selector for a long-press transcript. Total budget ~3.5s worst case.
     public func select(transcript: String) async -> Result {
         let started = Date()
-        let l2 = await L2Snapshotter.snapshot(overallDeadline: 0.4)
+        let snap = await L2Snapshotter.snapshot(overallDeadline: 0.4)
+        let l2 = snap.l2
+        let initiationScreenshot = snap.screenshotJPEG
 
         // Ensure active_task isn't more than 30 s stale before bundling it.
         let staleThreshold: TimeInterval = 30.0
@@ -66,6 +73,7 @@ public final class ContextSelector {
                         intent: parsed.intent,
                         brief: parsed.brief,
                         l2: l2,
+                        initiationScreenshot: initiationScreenshot,
                         degraded: false,
                         latencyS: Date().timeIntervalSince(started),
                         modelUsed: MercuryClient.defaultModel
@@ -91,6 +99,7 @@ public final class ContextSelector {
             intent: intent,
             brief: brief,
             l2: l2,
+            initiationScreenshot: initiationScreenshot,
             degraded: true,
             latencyS: Date().timeIntervalSince(started),
             modelUsed: nil

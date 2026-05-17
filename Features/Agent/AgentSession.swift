@@ -60,7 +60,8 @@ public final class AgentSession {
         let input = ComputerUseHarness.Input(
             transcript: transcript,
             contextSummary: result.brief,
-            resolvedIntent: legacyIntent
+            resolvedIntent: legacyIntent,
+            initiationScreenshot: result.initiationScreenshot
         )
         await ComputerUseHarness.shared.run(input)
     }

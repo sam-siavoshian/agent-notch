@@ -25,7 +25,13 @@ public enum L2Snapshotter {
     /// Build the L2 snapshot synchronously (from the caller's perspective). The
     /// `overallDeadline` parameter is informational — the actual ceiling comes
     /// from the per-component deadlines below.
-    public static func snapshot(overallDeadline: TimeInterval = 0.4) async -> CL2Snapshot {
+    ///
+    /// Returns both the CL2Snapshot (text payload) AND the raw JPEG bytes of
+    /// the screenshot used for OCR. The JPEG is kept OUT of CL2Snapshot to
+    /// avoid bloating the Mercury 2 (text-only) selector prompt by hundreds
+    /// of KB — callers that want the image (e.g. AgentSession passing the
+    /// initiation screenshot through to Claude) read it from the tuple.
+    public static func snapshot(overallDeadline: TimeInterval = 0.4) async -> (l2: CL2Snapshot, screenshotJPEG: Data?) {
         _ = overallDeadline // reserved for future use (e.g. Dev Tools timing assertions)
 
         // Frontmost app
@@ -37,11 +43,13 @@ public enum L2Snapshotter {
         let (windowID, displayID, displayBounds) = readWindowAndDisplay(pid: pid)
 
         // Parallel: screenshot+OCR, AX dump, app_specific adapter.
-        async let ocrLinesTask = captureAndOCR(deadline: 0.25)
+        async let captureTask = captureScreenshotAndOCR(deadline: 0.25)
         async let axElementsTask = dumpAXElements(pid: pid, deadline: 0.15)
         async let appSpecificTask = AdapterRegistry.shared.snapshot(bundleID: bundleID, timeout: 0.2)
 
-        let ocrLines = await ocrLinesTask
+        let capture = await captureTask
+        let ocrLines = capture.ocrLines
+        let screenshotJPEG = capture.jpegData
         let axElements = await axElementsTask
         let appSpecific = await appSpecificTask
 
@@ -50,7 +58,7 @@ public enum L2Snapshotter {
         let clipboard = readClipboard()
         let cursor = readCursor()
 
-        return CL2Snapshot(
+        let l2 = CL2Snapshot(
             app: appName,
             bundleID: bundleID,
             pid: pid,
@@ -66,6 +74,7 @@ public enum L2Snapshotter {
             clipboard: clipboard,
             appSpecific: appSpecific
         )
+        return (l2: l2, screenshotJPEG: screenshotJPEG)
     }
 
     // MARK: - Window + display
@@ -99,44 +108,53 @@ public enum L2Snapshotter {
 
     // MARK: - Screenshot + OCR
 
+    /// Bundle returned from `captureScreenshotAndOCR`: the OCR text and the
+    /// JPEG bytes from the same capture. JPEG is the downsampled (≤1568 long
+    /// edge) version because that's what Anthropic auto-downsamples to anyway
+    /// — sending the full-res image just costs upload time.
+    private struct CaptureResult: Sendable {
+        let ocrLines: [String]
+        let jpegData: Data?
+    }
+
     /// Race the real screenshot+OCR pipeline against a wall-clock deadline.
     /// Whichever finishes first wins; the other task is cancelled.
-    private static func captureAndOCR(deadline: TimeInterval) async -> [String] {
-        return await withTaskGroup(of: [String].self) { group in
+    private static func captureScreenshotAndOCR(deadline: TimeInterval) async -> CaptureResult {
+        return await withTaskGroup(of: CaptureResult.self) { group in
             group.addTask {
-                return await Self.invokeExistingOCR()
+                return await Self.invokeCaptureAndOCR()
             }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
-                return []
+                return CaptureResult(ocrLines: [], jpegData: nil)
             }
-            let result = await group.next() ?? []
+            let result = await group.next() ?? CaptureResult(ocrLines: [], jpegData: nil)
             group.cancelAll()
             return result
         }
     }
 
     /// Bridge to the existing ScreenCapture + ContextOCRService stack.
-    /// Both are actors with async APIs that already handle their own errors.
-    /// On any failure we return [] — the Selector still works without OCR lines.
-    private static func invokeExistingOCR() async -> [String] {
+    /// One screenshot serves two purposes: full-res raw image for OCR (small
+    /// UI text stays legible) and a downsampled JPEG for the multimodal
+    /// model. ScreenCapture returns both in a single Snapshot.
+    private static func invokeCaptureAndOCR() async -> CaptureResult {
         do {
-            // Skip downsampling here — OCR wants the full-res CGImage so small
-            // UI text (menu bars, terminals) stays legible. The JPEG returned
-            // by ScreenCapture is downsampled, but `rawImage` is full res.
+            // Use the default maxLongEdge (1568) so jpegData is sized for
+            // Anthropic. rawImage is still the full-res capture.
             let snapshot = try await ScreenCapture.shared.snapshot(
                 displayId: nil,
                 quality: 0.7,
-                maxLongEdge: nil
+                maxLongEdge: 1568
             )
             guard let raw = snapshot.rawImage else {
                 // Shouldn't happen with the SCKit path, but be defensive.
-                return []
+                return CaptureResult(ocrLines: [], jpegData: snapshot.jpegData)
             }
             let recognized = await ContextOCRService.shared.recognizeText(in: raw, maxResults: 80)
-            return recognized.map(\.text)
+            return CaptureResult(ocrLines: recognized.map(\.text), jpegData: snapshot.jpegData)
         } catch {
-            return []
+            return CaptureResult(ocrLines: [], jpegData: nil)
         }
     }
 

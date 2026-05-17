@@ -52,14 +52,21 @@ public final class ComputerUseHarness {
         public var transcript: String
         public var contextSummary: String
         public var resolvedIntent: ContextResolvedIntent?
+        /// JPEG bytes of the screen at long-press time. When non-nil the
+        /// harness prepends an image block to the FIRST user message so
+        /// Claude sees the screen on turn 1 — eliminating the throwaway
+        /// `computer.screenshot` tool call most agent runs used to start with.
+        public var initiationScreenshot: Data?
         public init(
             transcript: String,
             contextSummary: String,
-            resolvedIntent: ContextResolvedIntent? = nil
+            resolvedIntent: ContextResolvedIntent? = nil,
+            initiationScreenshot: Data? = nil
         ) {
             self.transcript = transcript
             self.contextSummary = contextSummary
             self.resolvedIntent = resolvedIntent
+            self.initiationScreenshot = initiationScreenshot
         }
     }
 
@@ -151,8 +158,23 @@ public final class ComputerUseHarness {
             resolvedIntentVerb: input.resolvedIntent?.verb
         ))
 
+        // First user message: transcript + (optionally) the long-press
+        // screenshot as an image block. Including the screenshot here saves
+        // a full round-trip — Claude no longer needs to take a
+        // `computer.screenshot` tool call on turn 1 just to see the screen.
+        let firstUserContent: [ContentBlock]
+        if let jpeg = input.initiationScreenshot, !jpeg.isEmpty {
+            let base64 = jpeg.base64EncodedString()
+            firstUserContent = [
+                .text(input.transcript),
+                .image(mediaType: "image/jpeg", base64: base64, cache: false)
+            ]
+            log.info("harness.first_user has_image=true image_bytes=\(jpeg.count)")
+        } else {
+            firstUserContent = [.text(input.transcript)]
+        }
         var messages: [Message] = [
-            Message(role: "user", content: [.text(input.transcript)])
+            Message(role: "user", content: firstUserContent)
         ]
 
         var currentModel = modelID
