@@ -29,10 +29,11 @@ Core/                 — shared types and cross-feature contracts only
 Features/
   Notch/              — notch UI and settings panel
   Cursor/             — cursor companion, long-press, click hooks
-  Context/            — screenshot capture, OCR, Gemini, memory
-  Agent/              — Sonnet wiring, computer-use harness
+  Context/            — screenshot capture, OCR, Gemini observer, Mercury selector, event pipeline
+  Agent/              — Whisper, IntentRouter, Haiku 4.5 computer-use harness
+  Calendar/           — EventKit calendar tab
+  Music/              — Spotify tab
   Onboarding/         — first-launch permission prompts
-vendored/             — read-only reference code (do not edit, do not include in target)
 ```
 
 ---
@@ -43,12 +44,16 @@ Each feature owns its code. Keep related code together.
 
 ```txt
 Features/Notch/
-├── NotchContentView.swift      — root; open/closed (420×280); Home/Settings tabs; Cmd+D + swipe; tab persisted via @AppStorage
-├── NotchHomeView.swift         — Home tab: orb, transcript, activity log (logs completion entry on run done)
-├── AgentSettingsView.swift     — Settings tab: 4 knobs + Advanced section (system prompt, context diagnostics)
-├── ClosedNotchView.swift       — resting dot states in closed notch
+├── NotchContentView.swift      — root; open/closed (420×280); Home/Settings/Spotify/Calendar tabs; Cmd+D + swipe; tab persisted via @AppStorage
+├── NotchHomeView.swift         — Home tab: orb, transcript, activity feed, battery row
+├── NotchLiveActivityView.swift — compact live-activity bar in the closed notch during agent runs
+├── AgentSettingsView.swift     — Settings tab: knobs + Advanced section (system prompt, context diagnostics)
+├── ClosedNotchView.swift       — resting dot/waveform in closed notch; shows battery level
 ├── NotchShape.swift            — custom Shape for notch geometry
-└── AgentStateView.swift        — standalone status row (available, not in tabs)
+├── AgentStateView.swift        — standalone status row (available, not in current tab layout)
+├── BatteryService.swift        — IOKit battery level + charging state
+├── SoftPill.swift              — reusable pill-style UI component
+└── ToolCallStrip.swift         — chip row of live + recent computer-use tool calls in live-activity state
 
 Features/Cursor/
 ├── CursorCompanion.swift       — coordinator; implements CursorAppearanceSetting
@@ -60,36 +65,79 @@ Features/Cursor/
 └── LongPressEvents.swift       — notification name constants
 
 Features/Context/
-├── ContextCoordinator.swift    — entry point; implements RecentActivityContext
-├── ContextClickMonitor.swift   — debounced click hook (Accessibility API)
-├── ContextSnapshotStore.swift  — rolling buffer of screenshots (max 20)
-├── ContextMemoryStore.swift    — learned UI memory on disk
-├── ContextOCRService.swift     — native OCR via Vision framework
-├── ContextGeminiObservationService.swift
-├── ContextGeminiObservationModels.swift
-├── ContextActivationBuilder.swift  — buffer → compact prompt packet
-├── ContextMemoryRenderer.swift
-├── ContextModels.swift
+├── ContextCoordinator.swift        — entry point; implements RecentActivityContext; fires GeminiObserver on major-change captures
+├── ContextClickMonitor.swift       — debounced click hook (Accessibility API)
+├── ContextAppSwitchMonitor.swift   — capture trigger on app switch
+├── ContextSnapshotStore.swift      — rolling buffer of screenshots (max 20)
+├── ContextOCRService.swift         — native OCR via Vision framework
 ├── ContextWindowMetadataReader.swift
-├── ContextTextSignalFilter.swift
-├── ContextAIObservationLog.swift   — in-memory Gemini event log + ContextGeminiObservationGate (rate limiter)
-├── ContextDevToolsWindowController.swift — separate Dev Tools window for telemetry (Cmd+Option+D)
-├── ContextDebugView.swift          — Dev Tools console: pause/resume gathering, overview, injected packet, captures/OCR, Gemini I/O, learned memory, metrics
-└── ContextPerformanceReporter.swift
+├── ContextTextSignalFilter.swift   — cleans OCR output
+├── ContextDirtyDetector.swift      — dHash + pixel-diff classifier; gates Gemini calls
+├── ContextModels.swift             — ContextSnapshot, ContextDiagnostics, etc.
+├── ContextSchema.swift             — CEvent envelope + variants, L2/L3/L4/L5 types
+├── ContextDevToolsWindowController.swift — Dev Tools window; Cmd+Shift+I toggles it
+├── GeminiObserver.swift            — continuous throttled observer; gemini-3.1-flash-lite; ≥8s between calls
+├── GeminiVisionClient.swift        — single-call multimodal Gemini client
+├── SurfaceObservation.swift        — structured Codable observation (app, surface, controls, narrative)
+├── ScreenObservationLog.swift      — in-memory ring (100) + JSONL on disk
+├── SurfaceMemoryStore.swift        — persistent per-(app, surface) UI knowledge
+├── CaptureStoryLog.swift           — append-only story of observations; daily-rotated JSONL
+├── Selector.swift                  — long-press entry: assembles L2+L3+L4+L5+learned_surfaces, calls Mercury 2
+├── MercuryClient.swift             — OpenRouter Mercury 2 JSON-mode client (≤2.5s timeout)
+├── LocalBriefRenderer.swift        — deterministic offline fallback brief renderer
+├── L2Snapshotter.swift             — 0.4s-budget L2 snapshot (AX + OCR + adapters + screenshot JPEG)
+├── L5Store.swift                   — persists active_task.json + resources_index.json
+├── ActiveTaskUpdater.swift         — periodic Mercury synthesis of active_task (30s tick)
+├── ResourceIndex.swift             — LRU index of touched URIs/files/channels (capacity 100)
+├── AnchorRecorder.swift            — promotes repeated event sequences to L3 recipes at seenCount==3
+├── EventLog.swift                  — append-only ring (500) + per-day JSONL
+├── EventIngester.swift             — single ingest point; runs PrivacyGate; fills envelope
+├── PrivacyGate.swift               — 8-step redaction; drops neverLogApps; honours collectionPaused
+├── KeystrokeMonitor.swift          — CGEvent tap; burst-batches keystrokes into input events
+├── AXObserver.swift                — per-PID AX observer lifecycle; 1Hz polling fallback
+├── ClipboardWatcher.swift          — polls NSPasteboard; emits cross-app copy_paste events
+├── DwellTimer.swift                — per-(app,window) focus accounting; emits .dwell events
+├── AgentObservabilityLog.swift     — central in-memory ring capturing full user↔context↔agent timeline
+└── ContextDebugView.swift + extensions — Dev Tools tabs (NewSystem, LiveL2, ScreenObs, Memory, Mercury, ModelCalls, Intent, AgentRun, Harness, Captures, Dirty, Packet, Report, PaneBridge)
+
+Features/Context/Adapters/
+├── AppContextAdapter.swift     — protocol; each adapter claims bundle IDs + returns app_specific blob
+├── AdapterRegistry.swift       — bundle-ID lookup for registered adapters
+├── BrowserAdapter.swift        — Arc/Chrome/Safari/Brave; AppleScript URL+tab title; strips secrets
+├── TerminalAdapter.swift       — Terminal/iTerm2/Ghostty; OSC 7 cwd + AppleScript fallback
+└── IDEAdapter.swift            — VSCode/Cursor/Xcode/Zed; window-title parse + .git walk
 
 Features/Agent/
-├── VoiceRecordingService.swift — records mic on .longPressBegan; uploads to OpenAI Whisper API (whisper-1) on .longPressEnded; posts .transcriptReady
-├── AgentSession.swift          — subscribes to .transcriptReady; reads lastTranscript; fires one harness turn
-├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop (model: claude-sonnet-4-6)
+├── VoiceRecordingService.swift — records mic on .longPressBegan; Whisper API (language=en, vocab prompt) on .longPressEnded; posts .transcriptReady
+├── AgentSession.swift          — subscribes to .transcriptReady; runs IntentRouter fast-path, then Selector → harness
+├── IntentRouter.swift          — pre-model fast-path: open-URL, Spotify controls, Reminders — zero API calls
+├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop (model: claude-haiku-4-5-20251001)
 ├── ComputerUseModels.swift     — Codable API types
 ├── AnthropicClient.swift       — URLSession API client
-├── ToolDispatcher.swift        — tool calls → CGEvent actions; handles all computer-use actions incl. F-keys + emoji
-└── AgentRunMetrics.swift       — per-run metrics logging
+├── ToolDispatcher.swift        — tool calls → CGEvent/AX/AppleScript actions
+├── AXFastPath.swift            — AX element cache + fast-path helpers (ax_query/ax_press/ax_set_value)
+├── AppleScriptBridge.swift     — async AppleScript execution wrapper
+├── TextToSpeechService.swift   — streams PCM16 from OpenAI TTS; plays via AVAudioPlayerNode
+├── KillSwitch.swift            — emergency stop for in-progress agent runs
+└── AgentRunMetrics.swift       — AgentRunMetricsRecord + HarnessRunDetailStore for Dev Tools
+
+Features/Calendar/
+├── CalendarService.swift       — EventKit events for today + tomorrow; @ObservedObject by Calendar tab
+└── NotchCalendarView.swift     — Calendar tab: upcoming events list with time + title
+
+Features/Music/
+├── NotchMusicView.swift        — Spotify tab: now-playing card + lyrics scroll
+├── SpotifyController.swift     — reads Spotify state via AppleScript; subscribes to PlaybackStateChanged
+├── SpotifyNowPlayingView.swift — album art, track name, artist
+├── LyricsView.swift            — scrolling lyrics display
+├── LyricsService.swift         — fetches lyrics for current track
+└── AppleScriptHelper.swift     — thin AppleScript execution wrapper
 
 Features/Onboarding/
-├── OnboardingView.swift        — three permission cards
+├── OnboardingView.swift            — three permission cards (Accessibility, Screen Recording, Microphone)
 ├── OnboardingWindowController.swift
-└── PermissionChecker.swift     — live permission polling
+├── PermissionChecker.swift         — live permission polling
+└── LucideIcons.swift               — Lucide icon name constants used by onboarding cards
 ```
 
 Do not create:
@@ -206,7 +254,7 @@ Notification contracts (defined in `Features/Cursor/LongPressEvents.swift`):
 |---|---|---|
 | `.longPressBegan` | `LongPressDetector` | `VoiceRecordingService` (start recording) |
 | `.longPressEnded` | `LongPressDetector` | `VoiceRecordingService` (stop + transcribe), `CursorCompanion` |
-| `.transcriptReady` | `VoiceRecordingService` | `AgentSession` (fire harness turn) |
+| `.transcriptReady` | `VoiceRecordingService` | `AgentSession` (IntentRouter → Selector → harness) |
 | `.notchToggleRequested` | `NotchWindowController` (Cmd+D) | `NotchContentView` |
 
 Each module sets its `AgentInterfaces` slot in its `start()` method, called from `AppDelegate.bootAgent()`.
@@ -295,6 +343,8 @@ Before editing:
 | `Features/Cursor/` | Sam | ✅ done |
 | `Features/Context/` | Ashan | ✅ done |
 | `Features/Agent/` | Ashan | ✅ done |
+| `Features/Calendar/` | Wyatt | ✅ done |
+| `Features/Music/` | Wyatt | ✅ done |
 | `Features/Onboarding/` | shared | ✅ done |
 | `Core/` | shared | ✅ done |
 | `App/` | shared | ✅ done |

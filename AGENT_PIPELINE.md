@@ -9,7 +9,7 @@ End-to-end breakdown of how a long-press becomes computer-use actions.
 **Long-press on the cursor companion**
 - `LongPressDetector` (Features/Cursor/) fires `.longPressBegan` on press, `.longPressEnded` on release.
 - `VoiceRecordingService` (Features/Agent/VoiceRecordingService.swift:41) hears `longPressBegan` → starts `AVAudioEngine` recording into a temp WAV at `agentnotch_voice_<ts>.wav`.
-- On `longPressEnded` → uploads the WAV to **OpenAI Whisper** (`whisper-1`, multipart POST to `api.openai.com/v1/audio/transcriptions`). No prompt, no language pinning.
+- On `longPressEnded` → uploads the WAV to **OpenAI Whisper** (`whisper-1`, multipart POST to `api.openai.com/v1/audio/transcriptions`). `language=en` (skips auto-detection); `prompt="Computer command for a Mac agent. App names, URLs, system actions."` (primes vocabulary).
 - Result is written to `AgentState.shared.lastTranscript`; posts `.transcriptReady`.
 - Demo fallback: if no audio captured AND `ANTHROPIC_NOTCH_DEMO_PROMPT` is set, that string is used as the transcript.
 
@@ -140,7 +140,7 @@ For each turn (up to `maxTurns=100`):
 
 ## 6. What gets recorded along the way
 
-- `AgentObservabilityLog.shared` — single ring buffer of `longPressTranscript / l2Snapshot / selectorRun / mercuryCall / harnessTurn` for the Dev Tools timeline (Cmd+Option+D).
+- `AgentObservabilityLog.shared` — single ring buffer of `longPressTranscript / l2Snapshot / selectorRun / mercuryCall / harnessTurn` for the Dev Tools timeline (Cmd+Shift+I).
 - `HarnessRunDetailStore.shared` — per-run rollup: system block summaries, every turn's request/response timestamps, token counts, tool calls, result previews.
 - `AgentRunMetricsRecord` printed at end of run (durationMs, turnCount, toolCallCount, screenshotToolCallCount, time-to-first-non-screenshot-action, finalStatus).
 

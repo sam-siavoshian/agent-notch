@@ -39,10 +39,6 @@ targets:
       - path: .env
         buildPhase: resources
         optional: true
-      - path: Config
-        type: folder
-        buildPhase: resources
-        optional: true
     info:
       path: App/Info.plist
       properties:

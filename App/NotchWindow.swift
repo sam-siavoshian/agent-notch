@@ -6,8 +6,6 @@
 //  hosts the NotchContentView. Doesn't take focus, doesn't appear in the
 //  cycle, rides across all spaces.
 //
-//  Reference: vendored/boring.notch/boringNotch/components/Notch/BoringNotchWindow.swift
-//
 
 import Cocoa
 

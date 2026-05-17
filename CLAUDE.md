@@ -22,7 +22,26 @@ After pulling changes that touch `Project.yml` or source layout, re-run `xcodege
 
 Requires macOS 14+ with a notch (M-series MacBook). Microphone, automation, and screen capture entitlements live in `App/AgentNotch.entitlements`.
 
-The app **is not** a fork of boring.notch. The boring.notch source is checked in under `vendored/boring.notch/` as read-only reference material. Read it, learn from it — **do not modify it** and do not include any of its files in our app target.
+---
+
+## CLI Tools
+
+Prefer modern tools over POSIX fallbacks:
+
+| Task | Use | Instead of |
+|---|---|---|
+| Search text in files | `rg` (ripgrep) | `grep -r` |
+| Find files by name/path | `fd` | `find` |
+| Search by AST / code structure | `ast-grep` | `grep` for symbol patterns |
+| Interactive fuzzy selection | `fzf` | manual `grep` pipelines |
+| In-place text substitution | `sd` or the Edit tool | `sed` |
+
+```bash
+rg "AgentState" --type swift                        # search Swift files for a symbol
+fd -e swift ContextDebug                            # find files matching a name
+ast-grep --lang swift -p 'func $NAME($_$$)'         # structural pattern search
+fd -e swift | fzf                                   # interactive file picker
+```
 
 ---
 
@@ -37,7 +56,7 @@ No keys are hardcoded. Resolution order: environment variable → Keychain (per-
 | `OPENROUTER_API_KEY` | `MercuryClient` → Mercury 2 (`inception/mercury-2`) for the long-press Selector + `ActiveTaskUpdater` |
 | `GEMINI_API_KEY` | `GeminiObserver` → continuous background screen understanding via `gemini-3.1-flash-lite` (feeds `SurfaceMemoryStore`; long-press never calls Gemini directly) |
 
-Set these in your Xcode scheme's environment or your shell before launching.
+Set these in `.env` at the repo root (gitignored, bundled as a resource at build time by `Project.yml`). `EnvLoader.swift` loads it at launch — no Xcode scheme vars needed.
 
 **Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `VoiceRecordingService` will use it as the transcript when the model is still initializing or no mic input was captured.
 
@@ -139,7 +158,7 @@ All features should use these — never duplicate them.
 | `ContextDirtyDetector.swift` | dHash + downscaled pixel-diff classifier; gates whether a frame is `.majorChange` and warrants a Gemini call |
 | `ContextModels.swift` | Data types: `ContextSnapshot`, `ContextDiagnostics`, etc. |
 | `ContextSchema.swift` | New-system event schema (`CEvent` envelope + variants, L2/L3/L4/L5 types, recipes, resources, active_task) |
-| `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Option+D toggles it |
+| `ContextDevToolsWindowController.swift` | Separate Dev Tools window for context telemetry; Cmd+Shift+I toggles it |
 
 **Path 1: continuous background observer (Gemini)**
 
@@ -188,7 +207,7 @@ All features should use these — never duplicate them.
 | `TerminalAdapter.swift` | Terminal.app / iTerm2 / Ghostty — OSC 7-style cwd reporter (installed by `scripts/install-cwd-reporter.sh`) read from `~/.cache/agentnotch/term-cwd-<ttyname>`; AppleScript buffer-scrape fallback |
 | `IDEAdapter.swift` | VSCode / Cursor / Xcode / Zed — window-title parsing + filesystem walk for `.git`, AppleScript for Xcode |
 
-**Dev Tools UI (separate window, Cmd+Option+D)**
+**Dev Tools UI (separate window, Cmd+Shift+I)**
 
 | File | What it is |
 |---|---|
@@ -279,7 +298,7 @@ AppDelegate.applicationDidFinishLaunching
       → bootAgent()
           → CursorCompanion.shared.start()                // AgentInterfaces.cursor
           → ContextCoordinator.shared.start()             // AgentInterfaces.context (drives GeminiObserver on major-change captures)
-          → ContextDevToolsWindowController.shared.install()  // Cmd+Option+D toggle only; window does NOT open automatically
+          → ContextDevToolsWindowController.shared.install()  // Cmd+Shift+I toggle only; window does NOT open automatically
           → VoiceRecordingService.shared.start()          // mic; flushes to OpenAI Whisper
           → AgentSession.shared.start()                   // subscribes to .transcriptReady; IntentRouter → Selector → harness
           → AdapterRegistry.register(BrowserAdapter / TerminalAdapter / IDEAdapter)

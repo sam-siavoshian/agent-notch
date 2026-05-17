@@ -12,22 +12,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app && xcodebuild -version
 
-      - name: Resolve packages
-        working-directory: vendored/boring.notch
-        run: xcodebuild -resolvePackageDependencies -project boringNotch.xcodeproj
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
 
       - name: Build
-        working-directory: vendored/boring.notch
         run: |
           xcodebuild build \
-            -project boringNotch.xcodeproj \
-            -scheme boringNotch \
+            -project AgentNotch.xcodeproj \
+            -scheme AgentNotch \
             -destination "platform=macOS" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \

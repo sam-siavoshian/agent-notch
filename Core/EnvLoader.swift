@@ -2,12 +2,12 @@
 //  EnvLoader.swift
 //  Agent in the Notch
 //
-//  Loads Config/agentnotch.env into the process environment at launch so every
-//  consumer (Secrets, Gemini service, demo prompt) sees the same values via
+//  Loads .env into the process environment at launch so every consumer
+//  (Secrets, Gemini service, demo prompt) sees the same values via
 //  ProcessInfo.processInfo.environment or Env.value(_:).
 //
-//  Search order: bundle Resources (built copy) → repo root next to the .app →
-//  ~/.agentnotch.env. First hit wins; missing file is not fatal.
+//  Search order: bundle Resources (built copy of repo-root .env) → directory
+//  containing the .app bundle. First hit wins; missing file is not fatal.
 //
 //  Format: KEY=VALUE per line. Blank lines and lines starting with '#' ignored.
 //  Surrounding quotes on the value stripped. No interpolation, no multiline.
@@ -25,7 +25,7 @@ public enum Env {
         guard overrides.isEmpty else { return }
 
         guard let url = locateEnvFile() else {
-            print("[INFO]  [env] no agentnotch.env found — using process environment only")
+            print("[INFO]  [env] no .env found — using process environment only")
             return
         }
 
@@ -55,26 +55,11 @@ public enum Env {
     // MARK: - Private
 
     private static func locateEnvFile() -> URL? {
-        var candidates: [URL] = []
-
-        if let resourceURL = Bundle.main.resourceURL {
-            candidates.append(resourceURL.appendingPathComponent(".env"))
-        }
-        if let bundled = Bundle.main.url(forResource: "agentnotch", withExtension: "env", subdirectory: "Config") {
-            candidates.append(bundled)
-        } else if let bundled = Bundle.main.url(forResource: "agentnotch", withExtension: "env") {
-            candidates.append(bundled)
-        }
-
-        let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent()
-        candidates.append(bundleParent.appendingPathComponent("agentnotch.env"))
-        candidates.append(bundleParent.appendingPathComponent("Config/agentnotch.env"))
-
-        if let home = ProcessInfo.processInfo.environment["HOME"] {
-            candidates.append(URL(fileURLWithPath: home).appendingPathComponent(".agentnotch.env"))
-        }
-
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+        let candidates: [URL?] = [
+            Bundle.main.resourceURL?.appendingPathComponent(".env"),
+            Optional(Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(".env")),
+        ]
+        return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private static func parse(_ contents: String) -> [String: String] {

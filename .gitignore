@@ -24,7 +24,6 @@ Package.resolved
 
 # Local secrets — bundled at build time, never committed.
 .env
-Config/agentnotch.env
 
 # ArshanTesting sandbox
 ArshanTesting/.env

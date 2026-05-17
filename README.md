@@ -2,7 +2,7 @@
 
 macOS computer-use agent that lives in the notch.
 
-Long-press the cursor companion, talk, Claude Sonnet drives the mouse. The notch shows what it is doing. Screen context (OCR + Gemini) gets fed in so it knows where it is.
+Long-press the cursor companion, talk, Claude Haiku 4.5 drives the mouse. The notch shows what it is doing. Screen context (OCR + Gemini) builds a persistent UI map; Mercury 2 distills it into a brief before every agent turn.
 
 > Requires an M-series MacBook with a physical notch. macOS 14+.
 
@@ -17,7 +17,7 @@ xcodegen generate
 open AgentNotch.xcodeproj
 ```
 
-Set `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `OPENAI_API_KEY` in the Xcode scheme env. Build, run, grant the three permissions, long-press the cursor.
+Set `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, and `OPENROUTER_API_KEY` in the Xcode scheme env. Build, run, grant the three permissions, long-press the cursor.
 
 ---
 
@@ -25,9 +25,10 @@ Set `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `OPENAI_API_KEY` in the Xcode sch
 
 | Var | Used by |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude Sonnet agent |
-| `GEMINI_API_KEY` | Screen context observer |
-| `OPENAI_API_KEY` | Voice transcription (OpenAI Whisper API) |
+| `ANTHROPIC_API_KEY` | Claude Haiku 4.5 computer-use agent |
+| `GEMINI_API_KEY` | Continuous background screen observer (Gemini Flash Lite) |
+| `OPENAI_API_KEY` | Voice transcription (Whisper) + TTS |
+| `OPENROUTER_API_KEY` | Mercury 2 context selector + ActiveTaskUpdater |
 | `ANTHROPIC_NOTCH_DEMO_PROMPT` | Optional. Hardcoded transcript for mic-less demos. |
 
 Never committed. Set via Xcode scheme env or enter in the in-app Settings UI — keys are stored in the macOS Keychain (`com.agentnotch.app`). Env var wins over Keychain if both are set.
@@ -50,7 +51,8 @@ Onboarding asks for three:
 - Drag down to open, drag up to close
 - `⌘D` toggles open/closed
 - Long-press cursor companion, talk, release, agent fires
-- Tabs: Home (status), Settings (reasoning, color, prefs), Spotify
+- Tabs: Home (status), Settings (reasoning, color, prefs), Spotify, Calendar
+- `⌘⇧I` opens the Dev Tools window
 
 ---
 
@@ -69,18 +71,19 @@ App/                  app entry, entitlements
 Core/                 shared types, settings, secrets
 Features/Notch/       notch UI + tabs
 Features/Cursor/      cursor companion + long-press
-Features/Context/     screen capture, OCR, Gemini
-Features/Agent/       Whisper + Claude computer-use loop
+Features/Context/     screen capture, OCR, Gemini observer, Mercury selector, event pipeline
+Features/Agent/       Whisper + IntentRouter + Claude Haiku 4.5 computer-use loop
+Features/Calendar/    EventKit calendar tab
 Features/Music/       Spotify tab
 Features/Onboarding/  first-launch permissions
 ```
 
-Details in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md). Product spec in [`PRD.md`](PRD.md).
+Details in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md). Product spec in [`PRD.md`](PRD.md). Pipeline walkthrough in [`AGENT_PIPELINE.md`](AGENT_PIPELINE.md).
 
 ---
 
 ## Stack
 
-Swift, SwiftUI, Claude Sonnet 4.6 (computer-use), Gemini, OpenAI Whisper API, Vision OCR, CGEvent, ScreenCaptureKit, XcodeGen.
+Swift, SwiftUI, Claude Haiku 4.5 (computer-use), Mercury 2 via OpenRouter (context selector), Gemini Flash Lite (background screen observer), OpenAI Whisper + TTS, Vision OCR, CGEvent, ScreenCaptureKit, XcodeGen.
 
 Built at TritonHacks 2026.
