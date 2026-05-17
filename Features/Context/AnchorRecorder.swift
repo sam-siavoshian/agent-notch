@@ -356,10 +356,13 @@ public final class AnchorRecorder {
 
     // MARK: - Per-app storage
 
+    private static let collectionDecoder = JSONDecoder()
+    private static let collectionEncoder = JSONEncoder()
+
     private func loadCollection(for bundleID: String) -> CAppRecipes {
         let url = Self.storageRoot.appendingPathComponent("\(bundleID).json")
         if let data = try? Data(contentsOf: url),
-           let coll = try? JSONDecoder().decode(CAppRecipes.self, from: data) {
+           let coll = try? Self.collectionDecoder.decode(CAppRecipes.self, from: data) {
             return coll
         }
         return CAppRecipes(appBundleID: bundleID, recipes: [], candidates: [], shortcuts: [], menuPaths: [])
@@ -367,7 +370,7 @@ public final class AnchorRecorder {
 
     private func saveCollection(_ collection: CAppRecipes, for bundleID: String) throws {
         let url = Self.storageRoot.appendingPathComponent("\(bundleID).json")
-        let data = try JSONEncoder().encode(collection)
+        let data = try Self.collectionEncoder.encode(collection)
         try data.write(to: url, options: [.atomic])
     }
 
