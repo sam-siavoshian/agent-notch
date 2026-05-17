@@ -9,7 +9,6 @@
 
 import AppKit
 import Combine
-import Foundation
 
 @MainActor
 public final class CursorCompanion: CursorAppearanceSetting {
