@@ -187,7 +187,7 @@ public final class ContextCoordinator: RecentActivityContext {
             } else {
                 recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
             }
-            let previousSnapshot = await store.recentSnapshots().last
+            let previousSnapshot = await store.lastSnapshot()
             let previousSignature = await store.lastSignature()
             let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
