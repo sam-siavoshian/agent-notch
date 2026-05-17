@@ -749,7 +749,7 @@ public final class ComputerUseHarness {
             let jsonSlice = String(raw[start...end])
             struct Parsed: Decodable { let complete: Bool; let missing: String? }
             guard let data = jsonSlice.data(using: .utf8),
-                  let parsed = try? JSONDecoder().decode(Parsed.self, from: data) else {
+                  let parsed = try? Self.verifierDecoder.decode(Parsed.self, from: data) else {
                 log.warning("harness.verifier_decode_fail json=\(jsonSlice.prefix(200))")
                 return CompletionVerdict(complete: true, missing: "")
             }
@@ -845,6 +845,8 @@ public final class ComputerUseHarness {
 
     /// Compact JSON representation of a tool input. Used for the Dev Tools
     /// per-turn drill-in — small enough to render inline, big enough to debug.
+    private static let verifierDecoder = JSONDecoder()
+
     private static let compactJSONEncoder: JSONEncoder = {
         let e = JSONEncoder()
         e.outputFormatting = [.sortedKeys]
