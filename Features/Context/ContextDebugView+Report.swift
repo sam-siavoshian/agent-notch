@@ -262,6 +262,8 @@ private struct ReportData {
     /// Walk every per-app json under AnchorRecorder.storageRoot and sum
     /// `recipes.count` + `candidates.count`. Best-effort: skip files that
     /// don't decode.
+    private static let recipeDecoder = JSONDecoder()
+
     private static func countRecipesOnDisk() -> (promoted: Int, candidates: Int) {
         let fm = FileManager.default
         let root = AnchorRecorder.storageRoot
@@ -270,10 +272,9 @@ private struct ReportData {
         }
         var promoted = 0
         var candidates = 0
-        let decoder = JSONDecoder()
         for url in entries where url.pathExtension == "json" {
             guard let data = try? Data(contentsOf: url),
-                  let coll = try? decoder.decode(CAppRecipes.self, from: data) else { continue }
+                  let coll = try? recipeDecoder.decode(CAppRecipes.self, from: data) else { continue }
             promoted += coll.recipes.count
             candidates += coll.candidates.count
         }
