@@ -37,17 +37,10 @@ public enum LocalBriefRenderer {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let target = trimmed.isEmpty ? nil : trimmed
         // Lightweight resource resolution: if the transcript mentions "PR", look for a github.com pull URL.
-        var resolved: String? = nil
-        for ref in recentResources {
-            if let label = ref.label?.lowercased(), trimmed.contains(label) {
-                resolved = ref.uri
-                break
-            }
-            if ref.uri.lowercased().contains(trimmed) {
-                resolved = ref.uri
-                break
-            }
-        }
+        let resolved: String? = recentResources.first(where: { ref in
+            if let label = ref.label?.lowercased(), trimmed.contains(label) { return true }
+            return ref.uri.lowercased().contains(trimmed)
+        })?.uri
         // Entities: pull any active_task entities the transcript also mentions.
         let entities: [CIntent.Entity] = activeTask?.entities?
             .filter { lower.contains($0.label.lowercased()) } ?? []
