@@ -27,6 +27,9 @@ public final class VoiceRecordingService {
     private var beganObserver: NSObjectProtocol?
     private var endedObserver: NSObjectProtocol?
 
+    // swiftlint:disable:next force_unwrapping — hardcoded literal
+    private static let whisperEndpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+
     private init() {}
 
     public func start() {
@@ -191,7 +194,7 @@ public final class VoiceRecordingService {
         body.append(audioData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/transcriptions")!)
+        var request = URLRequest(url: Self.whisperEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
