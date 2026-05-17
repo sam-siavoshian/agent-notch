@@ -361,13 +361,18 @@ public final class ActiveTaskUpdater {
         case archiveAndStartNew(ended: CArchivedTask, new: CActiveTask)
     }
 
+    private static let responseDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
     static func parseResponse(_ raw: String, fallback: CActiveTask?) -> Result? {
         guard let data = raw.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let decoder = responseDecoder
 
         if let updateAny = obj["update"], let updateData = try? JSONSerialization.data(withJSONObject: updateAny) {
             if let updated = try? decoder.decode(CActiveTask.self, from: updateData) {
