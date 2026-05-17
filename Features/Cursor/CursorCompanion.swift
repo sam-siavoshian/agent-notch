@@ -45,8 +45,9 @@ public final class CursorCompanion: CursorAppearanceSetting {
         tracker.stop()
         longPress.stop()
         window.hide()
-        if let listeningObserver { NotificationCenter.default.removeObserver(listeningObserver) }
-        if let endedObserver { NotificationCenter.default.removeObserver(endedObserver) }
+        let center = NotificationCenter.default
+        if let listeningObserver { center.removeObserver(listeningObserver) }
+        if let endedObserver { center.removeObserver(endedObserver) }
         listeningObserver = nil
         endedObserver = nil
         settingsCancellable = nil
@@ -67,7 +68,8 @@ public final class CursorCompanion: CursorAppearanceSetting {
     // MARK: - Wiring
 
     private func wireNotifications() {
-        listeningObserver = NotificationCenter.default.addObserver(
+        let center = NotificationCenter.default
+        listeningObserver = center.addObserver(
             forName: .longPressBegan,
             object: nil,
             queue: .main
@@ -76,7 +78,7 @@ public final class CursorCompanion: CursorAppearanceSetting {
             AgentState.shared.set(.listening)
         }
 
-        endedObserver = NotificationCenter.default.addObserver(
+        endedObserver = center.addObserver(
             forName: .longPressEnded,
             object: nil,
             queue: .main
