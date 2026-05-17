@@ -17,9 +17,9 @@ final class OpenRouterClientTests: XCTestCase {
         let captured = ExpectationBox<URLRequest>()
         MockURLProtocol.requestHandler = { req in
             captured.value = req
-            let body = """
+            let body = Data("""
             {"id":"x","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}
-            """.data(using: .utf8)!
+            """.utf8)
             return (HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, body)
         }
         let client = OpenRouterClient(apiKey: "sk-test", session: Self.mockSession())
