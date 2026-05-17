@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 extension ContextDebugView {
     var capturesPane: some View {
@@ -105,5 +106,27 @@ extension ContextDebugView {
         if joined.count <= 200 { return joined }
         let idx = joined.index(joined.startIndex, offsetBy: 200)
         return String(joined[..<idx]) + "…"
+    }
+
+    func snapshotThumbnail(_ snapshot: ContextSnapshot, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
+        Group {
+            if let image = NSImage(data: snapshot.jpegData) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(0.1))
+                    .frame(maxWidth: maxWidth, maxHeight: maxHeight)
+                    .overlay(Text("No image").font(.caption).foregroundStyle(.secondary))
+            }
+        }
     }
 }
