@@ -13,7 +13,7 @@ public enum Keychain {
 
     @discardableResult
     public static func set(_ value: String, account: String) -> Bool {
-        guard let data = value.data(using: .utf8) else { return false }
+        guard !account.isEmpty, let data = value.data(using: .utf8) else { return false }
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
