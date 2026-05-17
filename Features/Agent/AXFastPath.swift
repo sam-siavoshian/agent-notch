@@ -111,7 +111,7 @@ public actor AXFastPath {
     /// as "fall through to CGEvent click". Never throws: the agent driver
     /// uses this as a best-effort optimization, not a hard requirement.
     public func tryPressAtPoint(_ point: CGPoint, pid: pid_t) -> Bool {
-        guard Self.isTrusted() else { return false }
+        guard AXIsProcessTrusted() else { return false }
         let app = AXUIElementCreateApplication(pid)
         var elementRef: AXUIElement?
         let err = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &elementRef)
@@ -141,7 +141,7 @@ public actor AXFastPath {
         direction: AXScrollDirection,
         clicks: Int
     ) -> Bool {
-        guard Self.isTrusted() else { return false }
+        guard AXIsProcessTrusted() else { return false }
         let app = AXUIElementCreateApplication(pid)
         var elementRef: AXUIElement?
         let hitErr = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &elementRef)
