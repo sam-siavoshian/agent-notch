@@ -19,6 +19,10 @@ enum ContextWindowMetadataReader {
         return ContextWindowMetadata(appName: appName, windowTitle: windowTitle)
     }
 
+    private static let ownerPIDKey = kCGWindowOwnerPID as String
+    private static let layerKey = kCGWindowLayer as String
+    private static let nameKey = kCGWindowName as String
+
     private static func frontmostWindowTitle(processIdentifier: pid_t) -> String? {
         guard let windowInfo = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
@@ -28,9 +32,9 @@ enum ContextWindowMetadataReader {
         }
 
         return windowInfo.first { info in
-            let ownerPID = info[kCGWindowOwnerPID as String] as? pid_t
-            let layer = info[kCGWindowLayer as String] as? Int
+            let ownerPID = info[ownerPIDKey] as? pid_t
+            let layer = info[layerKey] as? Int
             return ownerPID == processIdentifier && layer == 0
-        }?[kCGWindowName as String] as? String
+        }?[nameKey] as? String
     }
 }
