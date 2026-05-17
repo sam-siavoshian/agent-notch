@@ -25,7 +25,7 @@ LOCAL_XCCONFIG="Local.xcconfig"
 TEAM_LINE=$(security find-identity -v -p codesigning 2>/dev/null \
     | grep -E '"Apple Development:' | head -1 || true)
 
-if [ -z "$TEAM_LINE" ]; then
+if [[ -z "$TEAM_LINE" ]]; then
     cat <<EOF
 ✗ No Apple Development cert found on this machine.
 
