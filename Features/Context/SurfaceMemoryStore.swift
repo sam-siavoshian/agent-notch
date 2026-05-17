@@ -197,11 +197,17 @@ public final class SurfaceMemoryStore {
         return try? JSONDecoder.iso8601.decode(SurfaceMemory.self, from: data)
     }
 
+    private static let memoryEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return e
+    }()
+
     private func saveMemory(_ memory: SurfaceMemory) throws {
         let url = pathFor(app: memory.app, surface: memory.surface)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(memory)
+        let data = try Self.memoryEncoder.encode(memory)
         try data.write(to: url, options: [.atomic])
     }
 
