@@ -6,6 +6,14 @@
 
 ---
 
+## Update log
+
+- **2026-05-17 (S7):** Reverted long-press Gemini call. Gemini is now observer-only — runs continuously in the background via `GeminiObserver`, feeds `SurfaceMemoryStore`, which the Selector reads as `learned_surfaces` at long-press time. The long-press path stays text-only with a 0.4s L2 deadline. Claude Haiku 4.5 receives the L2 initiation screenshot as image content but never waits on a fresh Gemini call.
+- **2026-05-17 (S6):** Added the continuous `GeminiObserver` and `SurfaceMemoryStore` — the "agent learning UI without being told" path.
+- **2026-05-17 (S8):** Tuned observer: 60s timeout, 4000 max output tokens, MEDIA_RESOLUTION_HIGH, thinking_budget=0, PNG encoding, image-before-text part order, system-prompt context caching (when token minimums allow).
+
+---
+
 ## 1. Problem
 
 AgentNotch's Context subsystem was designed as a passive watcher that learns how the user works. In its current form it produces a richly worded *autobiography* of the user — markdown sections on Habits, Visits, Time-of-day, Entities In Play, semantic Affordances — but it is not a usable **manual for the agent**. Three concrete failures:
