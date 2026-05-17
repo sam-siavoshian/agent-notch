@@ -93,37 +93,76 @@ public final class AnchorRecorder {
             pendingSeq.removeAll()
             pendingApp = nil
         }
-        guard pendingSeq.count >= 2 else { return }                  // singletons aren't recipes
         guard let bundleID = pendingApp, !bundleID.isEmpty else { return }
 
         let steps = pendingSeq.compactMap(Self.stepFor)
         guard !steps.isEmpty else { return }
-        let signature = Self.signature(of: steps)
 
         var collection = loadCollection(for: bundleID)
         defer { try? saveCollection(collection, for: bundleID) }
 
-        // Match against existing recipes (already promoted) by signature.
+        // (1) Instant shortcut learning: any .shortcut step bumps the per-app
+        //     shortcuts tally immediately. No threshold — single keypress
+        //     shortcuts are inherently generalizable.
+        for step in steps {
+            if case let .shortcut(keys) = step {
+                if let idx = collection.shortcuts.firstIndex(where: { $0.keys == keys }) {
+                    collection.shortcuts[idx].seenCount += 1
+                } else {
+                    collection.shortcuts.append(
+                        CAppRecipes.Shortcut(keys: keys, label: nil, seenCount: 1)
+                    )
+                }
+            }
+        }
+
+        // Singletons aren't multi-step recipes — done after shortcut tally.
+        guard steps.count >= 2 else { return }
+
+        let signature = Self.signature(of: steps)
+
+        // (2) Match against existing promoted recipes — bump confidence.
         if let idx = collection.recipes.firstIndex(where: { Self.signature(of: $0.steps) == signature }) {
             collection.recipes[idx].seenCount += 1
             collection.recipes[idx].lastSeen = Date()
             collection.recipes[idx].confidence = min(1.0, collection.recipes[idx].confidence + 0.02)
             return
         }
-        // Match candidates.
+
+        // (3) Auto-promote on first observation if all type-step values are already generalized.
+        //     "Generalized" = wrapped in <...> (e.g. <url>, <person.name>, <query>).
+        //     Such sequences carry no literal user-specific text that needs 3 examples to abstract.
+        let isFullyGeneralized = steps.allSatisfy { step in
+            if case .type(let value) = step {
+                return value.hasPrefix("<") && value.hasSuffix(">")
+            }
+            return true   // non-type steps (shortcut/key/menu/url/etc) are always generalized
+        }
+        if isFullyGeneralized {
+            let recipe = CRecipe(
+                name: "auto-\(signature.prefix(8))",
+                triggerPattern: "",
+                steps: steps,
+                seenCount: 1,
+                lastSeen: Date(),
+                confidence: 0.5   // medium — generalized but only 1 observation so far
+            )
+            collection.recipes.append(recipe)
+            return
+        }
+
+        // (4) Multi-step with literal text — use the 3-occurrence candidate→promote flow.
         if let idx = collection.candidates.firstIndex(where: { Self.signature(of: $0.steps) == signature }) {
             collection.candidates[idx].seenCount += 1
             collection.candidates[idx].lastSeen = Date()
             if collection.candidates[idx].seenCount >= Self.promotionThreshold {
                 let promoted = collection.candidates.remove(at: idx)
-                // Confidence at promotion: seenCount/(seenCount+2) heuristic → ~0.6 at 3.
                 var r = promoted
                 r.confidence = Double(promoted.seenCount) / Double(promoted.seenCount + 2)
                 collection.recipes.append(r)
             }
             return
         }
-        // New candidate.
         let candidate = CRecipe(
             name: "candidate-\(signature.prefix(8))",
             triggerPattern: "",
