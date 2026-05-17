@@ -89,6 +89,8 @@ public final class ComputerUseHarness {
         var firstNonScreenshotActionAt: Date?
         var usedFallback = false
         var completedTurns = 0
+        var verifierRetries = 0
+        let maxVerifierRetries = 2
 
         let settings = AgentSettingsStore.shared.settings
 
@@ -315,7 +317,32 @@ public final class ComputerUseHarness {
                 let text = response.content.compactMap { block -> String? in
                     if case .text(let t) = block { return t } else { return nil }
                 }.joined(separator: " ")
-                log.info("harness.done run_id=\(runID.uuidString) status=completed_without_tool turns=\(turn)")
+
+                // Pre-stop verification — catch the "opened Spotify, said done,
+                // never played Taylor Swift" failure mode. Verifier diffs the
+                // user's original transcript against the model's final claim
+                // and rejects stop if any explicit sub-goal is unfulfilled.
+                if verifierRetries < maxVerifierRetries {
+                    let verdict = await verifyCompletion(
+                        transcript: input.transcript,
+                        finalText: text,
+                        client: client
+                    )
+                    if !verdict.complete {
+                        verifierRetries += 1
+                        log.info("harness.verifier_rejected run_id=\(runID.uuidString) retry=\(verifierRetries) missing=\(verdict.missing.prefix(200))")
+                        let nudge = """
+                        [Harness verification] You stopped but the task is NOT complete. Outstanding sub-goal(s): \(verdict.missing)
+
+                        Take a screenshot right now to see the current state, then continue executing until EVERY explicit part of the original request — "\(input.transcript)" — is satisfied. Do not declare done again until that is true.
+                        """
+                        messages.append(Message(role: "user", content: [.text(nudge)]))
+                        AgentState.shared.set(.thinking, detail: "Verifying…")
+                        continue
+                    }
+                }
+
+                log.info("harness.done run_id=\(runID.uuidString) status=completed_without_tool turns=\(turn) verifier_retries=\(verifierRetries)")
                 TextToSpeechService.shared.speak(capped(text))
                 await HarnessRunDetailStore.shared.appendTurn(
                     runID: runID,
@@ -593,6 +620,8 @@ public final class ComputerUseHarness {
 
         Every assistant message MUST contain at least one tool call OR a final stop_task declaration. Pure prose messages without a tool call are a protocol violation — the harness counts them as a failed turn. If you have nothing to act on, call stop_task with a one-sentence result; do not narrate.
 
+        Completion discipline (NON-NEGOTIABLE). Before you stop, break the user's request into every explicit sub-goal joined by "and" / commas / sequencing words ("then", "also", "after"). Execute EACH one. Opening an app is NOT the same as performing the action inside it — "open Spotify and play Taylor Swift" requires (1) Spotify open AND (2) a Taylor Swift track actually playing. "Email Marcus and tell him I'm running late" requires the message composed AND sent. If any sub-goal is incomplete, you MUST continue acting. A harness-side verifier audits your final claim against the original request; if you stop early it will reject your stop and force you to resume, costing turns and tokens. Stop ONLY when every part is observably done.
+
         Typing: for entering text > 4 chars into a normal field, the computer.type action pastes via the pasteboard automatically — no extra steps needed. For text fields you can address via AX, prefer ax_set_value.
 
         Refuse irreversible destructive actions (delete files, format drives, send payments, send messages to people you cannot confirm) without explicit user confirmation. If a fast-path tool would cause one of these, decline and ask first.
@@ -647,6 +676,72 @@ public final class ComputerUseHarness {
                 if case .toolResult = block { return block.withCache(shouldMark) }
                 return block
             }
+        }
+    }
+
+    // MARK: - Completion verifier
+
+    private struct CompletionVerdict {
+        let complete: Bool
+        let missing: String
+    }
+
+    /// Single fast Haiku call that grades whether the agent's final claim
+    /// actually satisfies every explicit sub-goal in the user's voice
+    /// transcript. Returns `complete=true` on any parse failure so the verifier
+    /// fails open — we don't want to trap the harness in a verification loop
+    /// because the grader misbehaved. The harness caps total retries above.
+    private func verifyCompletion(
+        transcript: String,
+        finalText: String,
+        client: AnthropicClient
+    ) async -> CompletionVerdict {
+        let userTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let agentClaim = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty transcript → nothing to verify against.
+        guard !userTranscript.isEmpty else { return CompletionVerdict(complete: true, missing: "") }
+
+        let system = """
+        You grade whether an on-screen computer-use agent completed every part of the user's spoken request, based ONLY on the agent's own final claim. Be strict. If the request has multiple conjoined sub-goals (e.g. "open X AND play Y" / "find A and reply with B"), every sub-goal must be explicitly confirmed in the agent's claim. Opening an app is NOT the same as performing the action inside the app.
+
+        Reply with exactly one JSON object, no prose:
+        {"complete": true|false, "missing": "short description of what is still undone, or empty string if complete"}
+        """
+        let userMsg = """
+        User's spoken request: "\(userTranscript)"
+
+        Agent's final claim: "\(agentClaim.isEmpty ? "(no final claim provided)" : agentClaim)"
+
+        Did the agent satisfy EVERY explicit sub-goal? Output JSON only.
+        """
+        do {
+            let raw = try await client.sendPlainText(
+                model: AnthropicModel.haiku45,
+                system: system,
+                userText: userMsg,
+                maxTokens: 200
+            )
+            // Extract the first {...} JSON object in case the model wraps it.
+            guard let start = raw.firstIndex(of: "{"),
+                  let end = raw.lastIndex(of: "}"),
+                  start <= end else {
+                log.warning("harness.verifier_parse_fail raw=\(raw.prefix(120))")
+                return CompletionVerdict(complete: true, missing: "")
+            }
+            let jsonSlice = String(raw[start...end])
+            struct Parsed: Decodable { let complete: Bool; let missing: String? }
+            guard let data = jsonSlice.data(using: .utf8),
+                  let parsed = try? JSONDecoder().decode(Parsed.self, from: data) else {
+                log.warning("harness.verifier_decode_fail json=\(jsonSlice.prefix(200))")
+                return CompletionVerdict(complete: true, missing: "")
+            }
+            return CompletionVerdict(
+                complete: parsed.complete,
+                missing: parsed.missing?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            )
+        } catch {
+            log.warning("harness.verifier_error error=\(error)")
+            return CompletionVerdict(complete: true, missing: "")
         }
     }
 
