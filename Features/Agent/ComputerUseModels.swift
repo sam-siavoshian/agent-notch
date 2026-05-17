@@ -38,6 +38,19 @@ public struct SystemBlock: Codable, Sendable {
     }
 }
 
+public struct ThinkingConfig: Codable, Sendable {
+    public var type: String
+    public var budgetTokens: Int
+    public init(budgetTokens: Int) {
+        self.type = "enabled"
+        self.budgetTokens = budgetTokens
+    }
+    enum CodingKeys: String, CodingKey {
+        case type
+        case budgetTokens = "budget_tokens"
+    }
+}
+
 public struct AnthropicMessageRequest: Codable, Sendable {
     public var model: String
     public var maxTokens: Int
@@ -45,6 +58,7 @@ public struct AnthropicMessageRequest: Codable, Sendable {
     public var messages: [Message]
     public var tools: [Tool]
     public var toolChoice: ToolChoice?
+    public var thinking: ThinkingConfig?
 
     public init(
         model: String,
@@ -52,7 +66,8 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         system: [SystemBlock]?,
         messages: [Message],
         tools: [Tool],
-        toolChoice: ToolChoice? = nil
+        toolChoice: ToolChoice? = nil,
+        thinking: ThinkingConfig? = nil
     ) {
         self.model = model
         self.maxTokens = maxTokens
@@ -60,6 +75,7 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         self.messages = messages
         self.tools = tools
         self.toolChoice = toolChoice
+        self.thinking = thinking
     }
 
     enum CodingKeys: String, CodingKey {
@@ -69,6 +85,7 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         case messages
         case tools
         case toolChoice = "tool_choice"
+        case thinking
     }
 
     public struct ToolChoice: Codable, Sendable {
@@ -150,6 +167,8 @@ public enum ContentBlock: Codable, Sendable {
     case image(mediaType: String, base64: String, cache: Bool = false)
     case toolUse(id: String, name: String, input: JSON)
     case toolResult(toolUseId: String, content: [ContentBlock], isError: Bool, cache: Bool = false)
+    case thinking(thinking: String, signature: String)
+    case redactedThinking(data: String)
 
     private enum Keys: String, CodingKey {
         case type, text
@@ -159,6 +178,7 @@ public enum ContentBlock: Codable, Sendable {
         case content
         case isError = "is_error"
         case cacheControl = "cache_control"
+        case thinking, signature, data
     }
 
     private enum SourceKeys: String, CodingKey {
@@ -189,6 +209,13 @@ public enum ContentBlock: Codable, Sendable {
             try c.encode(content, forKey: .content)
             if isError { try c.encode(true, forKey: .isError) }
             if cache { try c.encode(CacheControl(), forKey: .cacheControl) }
+        case .thinking(let t, let sig):
+            try c.encode("thinking", forKey: .type)
+            try c.encode(t, forKey: .thinking)
+            try c.encode(sig, forKey: .signature)
+        case .redactedThinking(let data):
+            try c.encode("redacted_thinking", forKey: .type)
+            try c.encode(data, forKey: .data)
         }
     }
 
@@ -213,6 +240,13 @@ public enum ContentBlock: Codable, Sendable {
             let content = (try? c.decode([ContentBlock].self, forKey: .content)) ?? []
             let isError = (try? c.decode(Bool.self, forKey: .isError)) ?? false
             self = .toolResult(toolUseId: tid, content: content, isError: isError, cache: false)
+        case "thinking":
+            let t = (try? c.decode(String.self, forKey: .thinking)) ?? ""
+            let sig = (try? c.decode(String.self, forKey: .signature)) ?? ""
+            self = .thinking(thinking: t, signature: sig)
+        case "redacted_thinking":
+            let d = (try? c.decode(String.self, forKey: .data)) ?? ""
+            self = .redactedThinking(data: d)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,

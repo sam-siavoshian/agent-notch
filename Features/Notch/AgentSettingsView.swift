@@ -56,11 +56,7 @@ struct AgentSettingsView: View {
     }
 
     private func effortIcon(_ effort: AgentReasoningEffort) -> String {
-        switch effort {
-        case .low:    return "bolt.fill"
-        case .medium: return "scalemass.fill"
-        case .high:   return "brain.head.profile"
-        }
+        effort.iconName
     }
 
     private var cursorColorRow: some View {

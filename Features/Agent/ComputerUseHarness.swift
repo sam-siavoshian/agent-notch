@@ -251,13 +251,22 @@ public final class ComputerUseHarness {
             // breakpoints get stripped to stay within Anthropic's 4-marker cap.
             applyRollingCacheMarker(to: &messages)
 
+            let effort = AgentSettingsStore.shared.reasoningEffort
+            let thinkingConfig: ThinkingConfig? = effort.thinkingBudgetTokens.map { ThinkingConfig(budgetTokens: $0) }
+            // max_tokens must exceed budget_tokens; leave headroom for the actual
+            // tool-call output that follows reasoning.
+            let effectiveMaxTokens: Int = {
+                guard let budget = effort.thinkingBudgetTokens else { return maxOutputTokens }
+                return max(maxOutputTokens, budget + 2048)
+            }()
             let request = AnthropicMessageRequest(
                 model: currentModel,
-                maxTokens: maxOutputTokens,
+                maxTokens: effectiveMaxTokens,
                 system: system,
                 messages: messages,
                 tools: tools,
-                toolChoice: nil
+                toolChoice: nil,
+                thinking: thinkingConfig
             )
 
             let requestedAt = Date()
@@ -741,6 +750,13 @@ public final class ComputerUseHarness {
                 pieces.append("<tool_use>")
             case .toolResult:
                 pieces.append("<tool_result>")
+            case .thinking(let t, _):
+                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    pieces.append("thinking: \(String(trimmed.prefix(120)))")
+                }
+            case .redactedThinking:
+                pieces.append("<redacted_thinking>")
             }
             if pieces.joined(separator: " · ").count > 200 { break }
         }
