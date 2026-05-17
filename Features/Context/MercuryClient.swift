@@ -13,6 +13,9 @@ public final class MercuryClient {
     public static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
     public static let defaultModel = "inception/mercury-2"
 
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
     public let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -140,7 +143,7 @@ public final class MercuryClient {
             response_format: responseFormat == .jsonObject ? .init(type: "json_object") : nil,
             max_tokens: maxTokens
         )
-        req.httpBody = try JSONEncoder().encode(body)
+        req.httpBody = try Self.encoder.encode(body)
 
         // Race the request against an explicit timeout to make the deadline tight.
         return try await withThrowingTaskGroup(of: String.self) { group in
@@ -156,7 +159,7 @@ public final class MercuryClient {
                     let choices: [Choice]
                     struct Choice: Decodable { let message: Message }
                 }
-                let env = try JSONDecoder().decode(Envelope.self, from: data)
+                let env = try Self.decoder.decode(Envelope.self, from: data)
                 return env.choices.first?.message.content ?? ""
             }
             group.addTask {
