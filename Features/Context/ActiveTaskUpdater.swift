@@ -278,9 +278,10 @@ public final class ActiveTaskUpdater {
         // Now newest-first; cap to `limit` then map.
         return picked.prefix(max(0, limit)).map { entry in
             let snap = entry.snapshot
-            let lines = snap.recognizedText
-                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            let lines = snap.recognizedText.compactMap { rec -> String? in
+                let trimmed = rec.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
             let joined = lines.joined(separator: "\n")
             let excerpt: String
             if joined.count > 600 {
