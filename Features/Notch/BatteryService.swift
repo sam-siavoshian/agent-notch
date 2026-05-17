@@ -17,7 +17,7 @@ final class BatteryService: ObservableObject {
     private init() {
         refresh()
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.refresh() }
+            Task { @MainActor in self?.refresh() }
         }
     }
 
