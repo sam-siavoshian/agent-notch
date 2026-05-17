@@ -357,7 +357,7 @@ enum PromptCategoryCommands {
             openRouter: OpenRouterClient(apiKey: apiKey),
             model: model,
             systemPrompt: ActiveTaskUpdaterSystemPrompt.text,
-            maxTokens: 1200
+            maxTokens: 8000
         )
         let (passed, total) = try await runCategory(
             category: "active_task_updater",

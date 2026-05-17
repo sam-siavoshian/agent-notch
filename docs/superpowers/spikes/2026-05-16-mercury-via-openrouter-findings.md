@@ -207,3 +207,25 @@ The new categories use **ad-hoc per-command scorers** (`PromptCategoryCommands.s
 - (b) Keep ad-hoc per-category scoring. Cheaper, more flexible for fast prompt iteration.
 
 The active_task_updater system prompt is currently duplicated between `Features/Context/ActiveTaskUpdater.swift` (production) and `tools/MercurySpike/Sources/EvalHarness/ActiveTaskUpdaterSystemPrompt.swift` (eval). Phase 4 should make production import the eval-validated constant, same pattern as `SelectorSystemPrompt`.
+
+---
+
+## Phase 4 follow-up F2 — active_task_updater prompt iteration
+
+Date: 2026-05-17. Live runs against `inception/mercury-2` via OpenRouter. Fixtures = `cold-start`, `continuation`, `archive-and-new`.
+
+| Revision | Date | Change | cold-start | continuation | archive-and-new | Notes |
+|---|---|---|---|---|---|---|
+| v1 (Phase 3 baseline) | 2026-05-17 | Short prompt — bare shape contract, no grounding rules | FAIL (empty CActiveTask) | n/a (not run live) | FAIL (label hallucinated, kind out of taxonomy) | Initial Phase-3 live run. |
+| v2 (F2 attempt 1) | 2026-05-17 | Added CRITICAL RULES section: cold-start synth from events, ground new_task in events, app-name specificity | FAIL (JSON truncated @ 1200 tok) | FAIL (truncated) | FAIL (truncated) | maxTokens=1200 was clipping mid-JSON. Bumped to 8000. |
+| v3 (F2 attempt 2) | 2026-05-17 | Same prompt as v2, maxTokens=8000 | PASS | PASS | FAIL: missing "VSCode" in narrative, missing "Figma" in ended_outcome, label missing "agent-notch" | maxTokens fix unblocked parsing; archive-and-new still paraphrased. |
+| v4 (F2 attempt 3) | 2026-05-17 | Added rule 5 (archive-and-new specifics: ended_outcome names departing app verbatim; new_task.label includes repo/folder name) + tightened narrative rule | PASS | PASS | FAIL: narrative still missing literal "VSCode" | Model wrote "Visual Studio Code" or "the editor" instead of "VSCode". |
+| v5 (F2 attempt 4) | 2026-05-17 | Added explicit APP-NAME NORMALIZATION table mapping `app: "Visual Studio Code"` → must emit literal "VSCode" (plus Figma, iTerm2, Slack, Chrome, Arc) | PASS | PASS | PASS | 3/3 ✓ — final F2 prompt. Also bumped production `MercuryClient.complete` maxTokens 800 → 8000 to match. |
+
+**Final live latencies (v5):** archive-and-new 2.21s · cold-start 1.40s · continuation 1.79s.
+
+**Key lessons:**
+
+1. Mercury truncated at maxTokens=1200 — the full active_task JSON is ~600-1200 tokens by itself and the response_format=jsonObject path doesn't reserve headroom. Treat maxTokens as a runaway guard (8000), not a size target.
+2. Free-form natural-language constraints ("be specific", "reference concrete details") don't bind tightly enough. Mercury paraphrases. To pin a specific token in the output, the prompt has to literally say *"if input has X, output must contain the literal substring Y"* — a deterministic mapping rule.
+3. Cold-start `resources: []` regression in v3→v4 was a side effect of overloading the narrative rule — fixed by adding an explicit "copy every `uri` from RECENT resources into the resources array verbatim" sub-rule under cold-start.
