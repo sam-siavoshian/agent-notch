@@ -97,7 +97,44 @@ struct NotchContentView: View {
         return liveActive ? 16 : 10
     }
 
+    /// Strip is the live-activity extension only — hidden when the notch is
+    /// open because the home tab already surfaces the activity feed there.
+    private var showToolStrip: Bool { liveActive && !isOpen }
+
     var body: some View {
+        ZStack(alignment: .top) {
+            notchBody
+
+            // Tucked 8px behind the notch's bottom curve so the two shapes
+            // read as one surface. Matches the notch's current bottom radius
+            // and width so the seam vanishes.
+            ToolCallStrip(bottomCornerRadius: cornerRadius)
+                .frame(width: width, height: 40)
+                .offset(y: max(height, 0) - 8)
+                .opacity(showToolStrip ? 1 : 0)
+                .scaleEffect(showToolStrip ? 1 : 0.96, anchor: .top)
+                .allowsHitTesting(false)
+                .zIndex(-1)
+                .animation(.spring(response: 0.34, dampingFraction: 0.82), value: showToolStrip)
+                .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0), value: height)
+                .animation(.spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0), value: width)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .preferredColorScheme(.dark)
+        .onChange(of: isOpen) { _, _ in
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
+            if isOpen {
+                close()
+            } else {
+                openViaShortcut()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var notchBody: some View {
         ZStack(alignment: .top) {
             // One compositing group below shape + shadow so the shadow
             // rasterizes against the shape once per frame, not separately.
@@ -199,18 +236,6 @@ struct NotchContentView: View {
                   abs(newHeight - measuredOpenHeight) > 0.5 else { return }
             measuredOpenHeight = newHeight
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .preferredColorScheme(.dark)
-        .onChange(of: isOpen) { _, _ in
-            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .notchToggleRequested)) { _ in
-            if isOpen {
-                close()
-            } else {
-                openViaShortcut()
-            }
-        }
     }
 
     @ViewBuilder
@@ -231,10 +256,8 @@ struct NotchContentView: View {
                     NotchCalendarView()
                         .padding(.bottom, 4)
                 case .settings:
-                    ScrollView(.vertical, showsIndicators: false) {
-                        AgentSettingsView()
-                            .padding(.bottom, 4)
-                    }
+                    AgentSettingsView()
+                        .padding(.bottom, 4)
                 }
             }
             .id(selectedTabRaw)
