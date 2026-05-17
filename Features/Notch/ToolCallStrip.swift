@@ -29,18 +29,7 @@ struct ToolCallStrip: View {
             }
 
             if let live = liveEntry {
-                LiveLabel(name: displayName(for: live))
-            }
-
-            if !recent.isEmpty {
-                if liveEntry != nil {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.10))
-                        .frame(width: 0.5, height: 12)
-                        .padding(.horizontal, 9)
-                }
-
-                GhostTrail(names: recent.map(displayName(for:)))
+                LiveLabel(name: self.displayName(for: live))
             }
 
             Spacer(minLength: 0)
@@ -63,27 +52,6 @@ struct ToolCallStrip: View {
             return Entry(name: name, detail: state.detail)
         }
         return nil
-    }
-
-    /// Recent tool calls with adjacent + live duplicates collapsed by their
-    /// rendered display name. The harness fires the same Anthropic `computer`
-    /// tool many times with different `action` values (screenshot, click,
-    /// type) — comparing raw names would treat them all as duplicates and
-    /// drop the trail to a single chip. Comparing display names treats the
-    /// action as the identity, which is what the user actually reads.
-    private var recent: [Entry] {
-        var out: [Entry] = []
-        var lastDisplay: String? = liveEntry.map(displayName(for:))
-        for log in state.activityLog {
-            guard case .toolCall(let name) = log.activity else { continue }
-            let candidate = Entry(name: name, detail: log.detail)
-            let display = displayName(for: candidate)
-            if display == lastDisplay { continue }
-            out.append(candidate)
-            lastDisplay = display
-            if out.count >= 5 { break }
-        }
-        return out
     }
 
     /// Maps a raw `(toolName, action)` pair onto the label the user reads in
@@ -194,44 +162,3 @@ struct ShiningText: View {
     }
 }
 
-// MARK: - Ghost trail (recent calls, dot-separated)
-
-private struct GhostTrail: View {
-    let names: [String]
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(names.enumerated()), id: \.offset) { idx, name in
-                if idx > 0 {
-                    Text("·")
-                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.22))
-                        .padding(.horizontal, 6)
-                }
-                Text(name)
-                    .font(.system(size: 10.5, weight: .regular, design: .monospaced))
-                    .foregroundStyle(fade(for: idx))
-                    .lineLimit(1)
-            }
-        }
-        .mask(
-            LinearGradient(
-                stops: [
-                    .init(color: .black, location: 0.0),
-                    .init(color: .black, location: 0.75),
-                    .init(color: .clear, location: 1.0)
-                ],
-                startPoint: .leading, endPoint: .trailing
-            )
-        )
-    }
-
-    /// Older entries fade toward the #404040 base used by the live shimmer's
-    /// flanks, so the live label is the only thing that catches the eye.
-    private func fade(for idx: Int) -> Color {
-        let base = Color(red: 0x40 / 255, green: 0x40 / 255, blue: 0x40 / 255)
-        let steps: [Double] = [1.0, 0.85, 0.72, 0.60, 0.50]
-        let a = idx < steps.count ? steps[idx] : 0.45
-        return base.opacity(a)
-    }
-}

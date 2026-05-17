@@ -91,19 +91,15 @@ struct NotchContentView: View {
         if liveActive { return liveWidth }
         return closedWidth
     }
-    /// True when there is at least one tool call in the live activity or the
-    /// recent log — gates the inline chip strip.
-    private var hasToolCalls: Bool {
+    /// True when a computer-use tool is firing right now. Strip only ever
+    /// shows the live action — past tool calls disappear the moment the
+    /// next one starts.
+    private var isToolCallLive: Bool {
         if case .toolCall = agentState.activity { return true }
-        return agentState.activityLog.contains { entry in
-            if case .toolCall = entry.activity { return true }
-            return false
-        }
+        return false
     }
 
-    /// Inline chip strip is part of the live-activity surface — only shown
-    /// when the notch is in its live state and there's something to display.
-    private var liveStripActive: Bool { liveActive && !isOpen && hasToolCalls }
+    private var liveStripActive: Bool { liveActive && !isOpen && isToolCallLive }
     private let liveStripHeight: CGFloat = 40
 
     private var height: CGFloat {
