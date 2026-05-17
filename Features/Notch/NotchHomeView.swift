@@ -32,6 +32,9 @@ struct NotchHomeView: View {
                 permissionBanner
             }
             statusHero
+            if battery.hasBattery {
+                batteryRow
+            }
             if !state.lastTranscript.isEmpty {
                 lastRequestCard
             }
@@ -119,9 +122,6 @@ struct NotchHomeView: View {
                 DraggableAgentIcon(size: 26)
                     .help("Drag onto the privacy list in System Settings to add AgentNotch")
                 GrantPermissionButton(target: fix)
-            }
-            if battery.hasBattery {
-                BatteryArcView(percentage: battery.percentage, isCharging: battery.isCharging)
             }
             QuitIconButton()
         }
@@ -509,62 +509,93 @@ private struct AgentNotchBadge: View {
     }
 }
 
-// MARK: - Battery arc gauge
+// MARK: - Battery widget
 
-private struct BatteryArcView: View {
+extension NotchHomeView {
+    private var batteryColor: Color {
+        if battery.isCharging      { return SoftPill.Status.green }
+        if battery.percentage > 50 { return SoftPill.Status.green }
+        if battery.percentage > 20 { return SoftPill.Status.amber }
+        return SoftPill.Status.red
+    }
+
+    var batteryRow: some View {
+        HStack(spacing: 8) {
+            Text("Battery")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(SoftPill.Text.secondary)
+
+            BatteryBodyView(percentage: battery.percentage, isCharging: battery.isCharging)
+
+            Text("\(battery.percentage)%")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(batteryColor)
+                .frame(minWidth: 30, alignment: .trailing)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            PillBackground(fill: AnyShapeStyle(SoftPill.Surface.inset), cornerRadius: 10)
+        )
+    }
+}
+
+private struct BatteryBodyView: View {
     let percentage: Int
     let isCharging: Bool
 
-    private var fraction: Double { Double(min(max(percentage, 0), 100)) / 100.0 }
-
+    private var fraction: CGFloat { CGFloat(min(max(percentage, 0), 100)) / 100.0 }
     private var color: Color {
-        if isCharging    { return SoftPill.Status.green }
+        if isCharging      { return SoftPill.Status.green }
         if percentage > 50 { return SoftPill.Status.green }
         if percentage > 20 { return SoftPill.Status.amber }
         return SoftPill.Status.red
     }
 
-    @State private var lowPulse = false
+    private let bodyH: CGFloat  = 12
+    private let inset: CGFloat  = 2
+    private let corner: CGFloat = 3
 
     var body: some View {
-        ZStack {
-            // Dim track — 270° arc
-            Circle()
-                .trim(from: 0, to: 0.75)
-                .stroke(color.opacity(0.14), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(135))
+        HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
+                // Shell
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .stroke(color.opacity(0.35), lineWidth: 1)
 
-            // Filled arc
-            Circle()
-                .trim(from: 0, to: 0.75 * fraction)
-                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(135))
-                .shadow(color: color.opacity(0.55), radius: 3)
-                .opacity(lowPulse ? 0.35 : 1.0)
-                .animation(
-                    lowPulse
-                        ? .easeInOut(duration: 0.85).repeatForever(autoreverses: true)
-                        : .default,
-                    value: lowPulse
-                )
+                // Proportional fill
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: max(1.5, corner - inset), style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.65), color],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(
+                            width: max(0, (geo.size.width - inset * 2) * fraction),
+                            height: bodyH - inset * 2
+                        )
+                        .padding(.leading, inset)
+                        .frame(maxHeight: .infinity)
+                        .animation(.easeInOut(duration: 0.45), value: fraction)
+                }
 
-            // Center glyph
-            Group {
+                // Charging bolt
                 if isCharging {
                     Image(systemName: "bolt.fill")
-                        .font(.system(size: 6.5, weight: .bold))
-                } else {
-                    Text("\(percentage)")
-                        .font(.system(size: 6.5, weight: .bold, design: .monospaced))
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .frame(maxWidth: .infinity)
                 }
             }
-            .foregroundStyle(color)
+            .frame(height: bodyH)
+
+            // Terminal nub
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(color.opacity(0.35))
+                .frame(width: 3, height: 6)
         }
-        .frame(width: 22, height: 22)
-        .animation(.easeInOut(duration: 0.4), value: percentage)
-        .onAppear      { lowPulse = percentage <= 20 && !isCharging }
-        .onChange(of: percentage)  { _, v  in lowPulse = v  <= 20 && !isCharging }
-        .onChange(of: isCharging)  { _, ch in lowPulse = percentage <= 20 && !ch }
     }
 }
 
