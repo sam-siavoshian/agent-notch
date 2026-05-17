@@ -14,7 +14,6 @@ public final class EventLog {
     private var buffer: [CEvent]
     private let queue = DispatchQueue(label: "AgentNotch.EventLog.queue")
     private var seqCounter: Int
-    private let isoFormatter: ISO8601DateFormatter
     private let encoder: JSONEncoder
 
     public init(inMemoryCapacity: Int = 500) {
@@ -22,9 +21,6 @@ public final class EventLog {
         self.buffer = []
         self.buffer.reserveCapacity(inMemoryCapacity)
         self.seqCounter = 0
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        self.isoFormatter = f
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         self.encoder = e
