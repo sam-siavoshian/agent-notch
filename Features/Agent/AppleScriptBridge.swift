@@ -36,6 +36,8 @@ public enum AppleScriptBridge {
     public static let allowedTargets: Set<String> = [
         "Safari",
         "Google Chrome",
+        "Arc",
+        "Brave Browser",
         "Spotify",
         "Music",
         "Messages",
