@@ -25,7 +25,10 @@ KEYCHAIN_ACCOUNT="anthropic"
 GEMINI_KEYCHAIN_ACCOUNT="gemini"
 SCHEME="AgentNotch"
 PROJECT="${REPO_ROOT}/AgentNotch.xcodeproj"
-DERIVED="${REPO_ROOT}/.build/DerivedData"
+# Keep DerivedData outside iCloud Drive (repo lives on ~/Desktop which is synced).
+# File Provider re-applies com.apple.FinderInfo to directories inside iCloud, which
+# breaks codesign with "resource fork, Finder information, or similar detritus not allowed".
+DERIVED="${HOME}/Library/Caches/AgentNotch/DerivedData"
 
 # ---------- args ----------
 CLEAN=0

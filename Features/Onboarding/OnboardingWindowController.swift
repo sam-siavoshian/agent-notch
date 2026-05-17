@@ -25,6 +25,12 @@ public final class OnboardingWindowController {
     private let skipKey = "AgentNotch.onboardingDismissed"
 
     public func presentIfNeeded(_ onCompletion: @escaping () -> Void) {
+        let forced = ProcessInfo.processInfo.environment["AGENTNOTCH_FORCE_ONBOARDING"] == "1"
+        if forced {
+            UserDefaults.standard.removeObject(forKey: skipKey)
+            present(onCompletion: onCompletion)
+            return
+        }
         checker.refresh()
         if checker.allGranted {
             onCompletion()
