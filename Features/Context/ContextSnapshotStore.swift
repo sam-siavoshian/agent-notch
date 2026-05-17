@@ -25,11 +25,10 @@ public actor ContextSnapshotStore {
         }
         if snapshots.count > maxSnapshots {
             let trimCount = snapshots.count - maxSnapshots
-            let dropped = snapshots.prefix(trimCount).map(\.id)
-            snapshots.removeFirst(trimCount)
-            for id in dropped {
-                signatures.removeValue(forKey: id)
+            for snap in snapshots.prefix(trimCount) {
+                signatures.removeValue(forKey: snap.id)
             }
+            snapshots.removeFirst(trimCount)
         }
     }
 
