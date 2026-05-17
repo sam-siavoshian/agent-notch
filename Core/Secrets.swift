@@ -13,6 +13,7 @@ public enum Secrets {
         public static let anthropic = "ANTHROPIC_API_KEY"
         public static let openai = "OPENAI_API_KEY"
         public static let gemini = "GEMINI_API_KEY"
+        public static let openRouter = "OPENROUTER_API_KEY"
     }
 
     public static var anthropicAPIKey: String? {
@@ -27,6 +28,11 @@ public enum Secrets {
         resolve(env: "GEMINI_API_KEY", account: Account.gemini)
     }
 
+    // Mercury 2 (via OpenRouter) — context-layer LLM
+    public static var openRouterAPIKey: String? {
+        resolve(env: "OPENROUTER_API_KEY", account: Account.openRouter)
+    }
+
     public static func setOpenAIAPIKey(_ key: String) {
         Keychain.set(key, account: Account.openai)
     }
@@ -37,6 +43,10 @@ public enum Secrets {
 
     public static func setGeminiAPIKey(_ key: String) {
         Keychain.set(key, account: Account.gemini)
+    }
+
+    public static func setOpenRouterAPIKey(_ key: String) {
+        Keychain.set(key, account: Account.openRouter)
     }
 
     /// One-shot seed: stores a default OpenAI key only if Keychain has none.
