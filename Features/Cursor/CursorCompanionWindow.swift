@@ -69,4 +69,12 @@ final class CursorCompanionWindow {
         let origin = CGPoint(x: center.x - Self.halfPanelSize, y: center.y - Self.halfPanelSize)
         panel.setFrameOrigin(origin)
     }
+
+    /// Center the sprite at `point` directly. Bypasses the user-cursor offset
+    /// so the agent driver can place the sprite exactly on its click target
+    /// rather than 28pt off to the side. AppKit screen space (bottom-left).
+    func setSpriteCenter(_ point: NSPoint) {
+        let origin = CGPoint(x: point.x - Self.halfPanelSize, y: point.y - Self.halfPanelSize)
+        panel.setFrameOrigin(origin)
+    }
 }

@@ -121,6 +121,82 @@ public actor AXFastPath {
         if err != .success { throw AXFastPathError.axError(err) }
     }
 
+    // MARK: - Coordinate-based AX fast path (used by AgentCursorDriver)
+
+    /// Resolve the AX element under `point` (top-left CGEvent coords) and
+    /// attempt AXPress on it. Returns true on success — caller treats false
+    /// as "fall through to CGEvent click". Never throws: the agent driver
+    /// uses this as a best-effort optimization, not a hard requirement.
+    public func tryPressAtPoint(_ point: CGPoint, pid: pid_t) -> Bool {
+        guard Self.isTrusted() else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        var elementRef: AXUIElement?
+        let err = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &elementRef)
+        guard err == .success, let element = elementRef else { return false }
+
+        // Require that the element actually advertises Press as an action
+        // before we attempt it. Some elements return .success on a synthesis
+        // call but do nothing visible; gating on action names cuts that.
+        var actionsRef: CFArray?
+        let actionErr = AXUIElementCopyActionNames(element, &actionsRef)
+        guard actionErr == .success,
+              let actions = actionsRef as? [String],
+              actions.contains(kAXPressAction as String) else { return false }
+
+        let pressErr = AXUIElementPerformAction(element, kAXPressAction as CFString)
+        return pressErr == .success
+    }
+
+    /// Resolve the nearest AX scroll-area ancestor at `point` and adjust its
+    /// scroll position by `clicks` notches in `direction`. Returns true on
+    /// success. Best-effort: many apps do not expose AXScrollArea or do not
+    /// honor SetAttributeValue on kAXValueAttribute for scrolling, in which
+    /// case the caller falls through to CGEvent scroll wheel.
+    public func tryScrollAtPoint(
+        _ point: CGPoint,
+        pid: pid_t,
+        direction: AXScrollDirection,
+        clicks: Int
+    ) -> Bool {
+        guard Self.isTrusted() else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        var elementRef: AXUIElement?
+        let hitErr = AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &elementRef)
+        guard hitErr == .success, var element = elementRef else { return false }
+
+        // Walk up to find an AXScrollArea ancestor.
+        var depth = 0
+        while depth < 10, stringAttr(element, kAXRoleAttribute) != "AXScrollArea" {
+            var parentRef: CFTypeRef?
+            let pErr = AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentRef)
+            guard pErr == .success, let parent = parentRef as! AXUIElement? else { return false }
+            element = parent
+            depth += 1
+        }
+        guard stringAttr(element, kAXRoleAttribute) == "AXScrollArea" else { return false }
+
+        // AXScrollArea exposes a kAXValueAttribute that is a CGPoint(0..1, 0..1)
+        // representing scroll position. Read, mutate, write.
+        var valueRef: CFTypeRef?
+        let getErr = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
+        guard getErr == .success, let v = valueRef, CFGetTypeID(v) == AXValueGetTypeID() else { return false }
+        var current = CGPoint.zero
+        guard AXValueGetValue(v as! AXValue, .cgPoint, &current) else { return false }
+
+        // ~5% of the viewport per click in AX scroll-position space.
+        let step: CGFloat = CGFloat(max(1, clicks)) * 0.05
+        var next = current
+        switch direction {
+        case .up:    next.y = max(0, current.y - step)
+        case .down:  next.y = min(1, current.y + step)
+        case .left:  next.x = max(0, current.x - step)
+        case .right: next.x = min(1, current.x + step)
+        }
+        guard let axValue = AXValueCreate(.cgPoint, &next) else { return false }
+        let setErr = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, axValue)
+        return setErr == .success
+    }
+
     /// Walk the menu bar of the frontmost app and return the keyboard
     /// shortcut for a menu item whose title contains `title` (case-insensitive
     /// substring). Returns (CGKeyCode, CGEventFlags) when found.

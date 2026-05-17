@@ -71,6 +71,10 @@ public struct AgentSettings: Equatable, Sendable {
     /// Global panic-button shortcut. First press soft-stops the harness;
     /// a second press within 2s SIGKILLs the app.
     public var killSwitchShortcut: KillSwitchShortcut
+    /// Master switch for the private SkyLight SPI used as Tier-3 dispatch
+    /// (clicks on Chromium web content). Default on. Disable to force the
+    /// agent driver onto the all-public-API path (postToPid + AX only).
+    public var allowPrivateSkyLight: Bool
 
     public static let defaultNeverLogApps: [String] = [
         "com.1password.1password7",
@@ -93,7 +97,8 @@ public struct AgentSettings: Equatable, Sendable {
         neverLogApps: AgentSettings.defaultNeverLogApps,
         mercuryEnabled: true,
         geminiObserverEnabled: true,
-        killSwitchShortcut: .default
+        killSwitchShortcut: .default,
+        allowPrivateSkyLight: true
     )
 }
 
@@ -106,6 +111,7 @@ extension AgentSettings: Codable {
         case collectionPaused, neverLogApps, mercuryEnabled
         case geminiObserverEnabled
         case killSwitchShortcut
+        case allowPrivateSkyLight
     }
 
     public init(from decoder: Decoder) throws {
@@ -123,6 +129,7 @@ extension AgentSettings: Codable {
         mercuryEnabled       = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))       ?? true
         geminiObserverEnabled = (try? c.decode(Bool.self,                forKey: .geminiObserverEnabled)) ?? true
         killSwitchShortcut   = (try? c.decode(KillSwitchShortcut.self,   forKey: .killSwitchShortcut))   ?? .default
+        allowPrivateSkyLight = (try? c.decode(Bool.self,                 forKey: .allowPrivateSkyLight)) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -140,6 +147,7 @@ extension AgentSettings: Codable {
         try c.encode(mercuryEnabled,       forKey: .mercuryEnabled)
         try c.encode(geminiObserverEnabled, forKey: .geminiObserverEnabled)
         try c.encode(killSwitchShortcut,   forKey: .killSwitchShortcut)
+        try c.encode(allowPrivateSkyLight, forKey: .allowPrivateSkyLight)
     }
 }
 
@@ -250,6 +258,11 @@ public final class AgentSettingsStore: ObservableObject {
     public var killSwitchShortcut: KillSwitchShortcut {
         get { settings.killSwitchShortcut }
         set { update { $0.killSwitchShortcut = newValue } }
+    }
+
+    public var allowPrivateSkyLight: Bool {
+        get { settings.allowPrivateSkyLight }
+        set { update { $0.allowPrivateSkyLight = newValue } }
     }
 
     public func update(_ mutate: (inout AgentSettings) -> Void) {

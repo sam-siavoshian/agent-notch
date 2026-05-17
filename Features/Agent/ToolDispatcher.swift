@@ -113,34 +113,38 @@ public actor ToolDispatcher {
 
         case "left_click":
             let p = try requireCoordinate(input)
-            postMouseClick(at: p, button: .left)
+            await AgentCursorDriver.shared.click(at: p, button: .left, count: 1)
             return ok(toolUseId, "clicked at \(Int(p.x)),\(Int(p.y))")
 
         case "right_click":
             let p = try requireCoordinate(input)
-            postMouseClick(at: p, button: .right)
+            await AgentCursorDriver.shared.click(at: p, button: .right, count: 1)
             return ok(toolUseId, "right-clicked at \(Int(p.x)),\(Int(p.y))")
 
         case "middle_click":
             let p = try requireCoordinate(input)
-            postMouseClick(at: p, button: .center)
+            await AgentCursorDriver.shared.click(at: p, button: .center, count: 1)
             return ok(toolUseId, "middle-clicked at \(Int(p.x)),\(Int(p.y))")
 
         case "double_click":
             let p = try requireCoordinate(input)
-            postMouseClick(at: p, button: .left, clickCount: 2)
+            await AgentCursorDriver.shared.click(at: p, button: .left, count: 2)
             return ok(toolUseId, "double-clicked at \(Int(p.x)),\(Int(p.y))")
+
+        case "triple_click":
+            let p = try requireCoordinate(input)
+            await AgentCursorDriver.shared.click(at: p, button: .left, count: 3)
+            return ok(toolUseId, "triple-clicked at \(Int(p.x)),\(Int(p.y))")
 
         case "left_click_drag":
             let from = NSEvent.mouseLocationFlipped(displayHeight: logicalDisplaySize.height)
             let to = try requireCoordinate(input)
-            postDrag(from: from, to: to)
+            await AgentCursorDriver.shared.drag(from: from, to: to)
             return ok(toolUseId, "dragged to \(Int(to.x)),\(Int(to.y))")
 
         case "mouse_move":
             let p = try requireCoordinate(input)
-            CGWarpMouseCursorPosition(p)
-            CGAssociateMouseAndMouseCursorPosition(1)
+            await AgentCursorDriver.shared.move(to: p)
             return ok(toolUseId, "moved to \(Int(p.x)),\(Int(p.y))")
 
         case "cursor_position":
@@ -159,17 +163,25 @@ public actor ToolDispatcher {
             guard let combo = input.objectValue?["text"]?.stringValue else {
                 throw DispatchError("Missing 'text' for key action")
             }
-            try postKeyCombo(combo)
+            try await postKeyCombo(combo)
             return ok(toolUseId, "pressed \(combo)")
 
         case "scroll":
             let p = try requireCoordinate(input)
             let requested = input.objectValue?["scroll_amount"]?.intValue ?? 3
-            let direction = input.objectValue?["scroll_direction"]?.stringValue ?? "down"
+            let directionStr = input.objectValue?["scroll_direction"]?.stringValue ?? "down"
             let clicks = max(1, requested)
-            postScroll(at: p, direction: direction, amount: clicks)
+            let direction: AXScrollDirection = {
+                switch directionStr {
+                case "up": return .up
+                case "left": return .left
+                case "right": return .right
+                default: return .down
+                }
+            }()
+            await AgentCursorDriver.shared.scroll(at: p, direction: direction, clicks: clicks)
             let pixels = clicks * Self.pixelsPerScrollClick
-            return ok(toolUseId, "scrolled \(direction) \(clicks) click(s) ≈ \(pixels)px. If you need to move further, use scroll_amount=5+ (each click ≈ 100px).")
+            return ok(toolUseId, "scrolled \(directionStr) \(clicks) click(s) ≈ \(pixels)px. If you need to move further, use scroll_amount=5+ (each click ≈ 100px).")
 
         case "wait":
             let ms = input.objectValue?["duration"]?.intValue ?? 250
@@ -314,7 +326,7 @@ public actor ToolDispatcher {
         guard let combo = try await AXFastPath.shared.menuBarShortcut(forTitle: title) else {
             throw DispatchError("No menu item matched '\(title)' or no shortcut registered")
         }
-        postKeyCode(combo.keyCode, flags: combo.flags)
+        await postKeyCode(combo.keyCode, flags: combo.flags)
         return ok(toolUseId, "menu shortcut '\(title)' sent")
     }
 
@@ -348,79 +360,11 @@ public actor ToolDispatcher {
         DispatchedToolResult(toolUseId: id, content: [.text(text)], isError: true)
     }
 
-    // MARK: - CGEvent posting
+    // MARK: - CGEvent posting (driver-routed)
 
-    private func postMouseClick(at p: CGPoint, button: CGMouseButton, clickCount: Int = 1) {
-        let downType: CGEventType
-        let upType: CGEventType
-        switch button {
-        case .left:   downType = .leftMouseDown;  upType = .leftMouseUp
-        case .right:  downType = .rightMouseDown; upType = .rightMouseUp
-        default:      downType = .otherMouseDown; upType = .otherMouseUp
-        }
-
-        for n in 1...clickCount {
-            let down = CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: p, mouseButton: button)
-            let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: p, mouseButton: button)
-            down?.setIntegerValueField(.mouseEventClickState, value: Int64(n))
-            up?.setIntegerValueField(.mouseEventClickState, value: Int64(n))
-            down?.post(tap: .cghidEventTap)
-            up?.post(tap: .cghidEventTap)
-        }
-    }
-
-    private func postDrag(from: CGPoint, to: CGPoint) {
-        let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
-        if down == nil { log.error("CGEvent alloc failed for leftMouseDown") }
-        down?.post(tap: .cghidEventTap)
-        let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left)
-        if drag == nil { log.error("CGEvent alloc failed for leftMouseDragged") }
-        drag?.post(tap: .cghidEventTap)
-        let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
-        if up == nil { log.error("CGEvent alloc failed for leftMouseUp") }
-        up?.post(tap: .cghidEventTap)
-    }
-
-    /// Anthropic computer-use spec: `scroll_amount` is a count of wheel
-    /// "clicks" (notches), not pixels. Previous implementation multiplied by
-    /// 3 in `.pixel` units, so `amount=3` produced just 9px of travel — barely
-    /// visible, and the model would emit another tiny scroll and another,
-    /// getting stuck. macOS wheel notches translate to roughly 100px in most
-    /// apps (Safari, Chrome, native AppKit views), so use that as the multiplier
-    /// and chunk the emission so apps that throttle large single deltas still
-    /// see smooth, continuous scroll.
+    // Kept for the scroll status string; the actual scroll dispatch now flows
+    // through AgentCursorDriver (AX scroll → CGEvent wheel via postToPid).
     private static let pixelsPerScrollClick: Int = 100
-    private static let scrollChunkPixels: Int = 50
-
-    private func postScroll(at p: CGPoint, direction: String, amount: Int) {
-        CGWarpMouseCursorPosition(p)
-
-        let clicks = max(1, amount) // protect against amount=0 no-ops
-        let totalPixels = clicks * Self.pixelsPerScrollClick
-        let isVertical = (direction == "up" || direction == "down")
-        // CGEvent vertical wheel sign: positive y moves the content view UP
-        // (i.e. scrolls up). Horizontal: positive x scrolls left.
-        let sign: Int32 = (direction == "up" || direction == "left") ? 1 : -1
-
-        var remaining = totalPixels
-        while remaining > 0 {
-            let chunk = min(Self.scrollChunkPixels, remaining)
-            let y: Int32 = isVertical ? sign * Int32(chunk) : 0
-            let x: Int32 = isVertical ? 0 : sign * Int32(chunk)
-            if let event = CGEvent(
-                scrollWheelEvent2Source: nil,
-                units: .pixel,
-                wheelCount: 2,
-                wheel1: y,
-                wheel2: x,
-                wheel3: 0
-            ) {
-                event.post(tap: .cghidEventTap)
-            }
-            remaining -= chunk
-        }
-        log.info("scroll dir=\(direction) clicks=\(clicks) pixels=\(totalPixels) at=\(Int(p.x)),\(Int(p.y))")
-    }
 
     /// Type text. For strings > 4 chars with only ASCII OR `viaPaste == true`,
     /// use the pasteboard (one Cmd+V event total) instead of posting one
@@ -435,7 +379,7 @@ public actor ToolDispatcher {
             await pasteText(text)
         } else {
             for scalar in text.unicodeScalars {
-                postUnicode(scalar)
+                await postUnicode(scalar)
             }
         }
     }
@@ -455,7 +399,7 @@ public actor ToolDispatcher {
         }
         pb.clearContents()
         pb.setString(text, forType: .string)
-        do { try postKeyCombo("cmd+v") } catch { NSLog("[ToolDispatcher] paste cmd+v failed: \(error)") }
+        do { try await postKeyCombo("cmd+v") } catch { NSLog("[ToolDispatcher] paste cmd+v failed: \(error)") }
         try? await Task.sleep(for: .milliseconds(200))
         if let snapshot {
             pb.clearContents()
@@ -463,29 +407,11 @@ public actor ToolDispatcher {
         }
     }
 
-    private func postUnicode(_ scalar: Unicode.Scalar) {
-        let chars: [UniChar]
-        if scalar.value <= 0xFFFF {
-            chars = [UniChar(scalar.value)]
-        } else {
-            let offset = scalar.value - 0x10000
-            chars = [UniChar(0xD800 + (offset >> 10)), UniChar(0xDC00 + (offset & 0x3FF))]
-        }
-        if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) {
-            chars.withUnsafeBufferPointer { ptr in
-                down.keyboardSetUnicodeString(stringLength: ptr.count, unicodeString: ptr.baseAddress)
-            }
-            down.post(tap: .cghidEventTap)
-        }
-        if let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
-            chars.withUnsafeBufferPointer { ptr in
-                up.keyboardSetUnicodeString(stringLength: ptr.count, unicodeString: ptr.baseAddress)
-            }
-            up.post(tap: .cghidEventTap)
-        }
+    private func postUnicode(_ scalar: Unicode.Scalar) async {
+        await AgentCursorDriver.shared.typeUnicode(scalar)
     }
 
-    private func postKeyCombo(_ combo: String) throws {
+    private func postKeyCombo(_ combo: String) async throws {
         let parts = combo.split(separator: "+").map { String($0).lowercased().trimmingCharacters(in: .whitespaces) }
         var flags: CGEventFlags = []
         var keyCode: CGKeyCode?
@@ -506,18 +432,11 @@ public actor ToolDispatcher {
         guard let kc = keyCode else {
             throw DispatchError("No key code in combo: \(combo)")
         }
-        postKeyCode(kc, flags: flags)
+        await postKeyCode(kc, flags: flags)
     }
 
-    private func postKeyCode(_ kc: CGKeyCode, flags: CGEventFlags) {
-        if let down = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: true) {
-            down.flags = flags
-            down.post(tap: .cghidEventTap)
-        }
-        if let up = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: false) {
-            up.flags = flags
-            up.post(tap: .cghidEventTap)
-        }
+    private func postKeyCode(_ kc: CGKeyCode, flags: CGEventFlags) async {
+        await AgentCursorDriver.shared.key(keyCode: kc, flags: flags)
     }
 
     private func postHoldKey(_ combo: String, durationMs: Int) async throws {
@@ -538,15 +457,7 @@ public actor ToolDispatcher {
             }
         }
         guard let kc = keyCode else { throw DispatchError("No key in hold combo: \(combo)") }
-        if let down = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: true) {
-            down.flags = flags
-            down.post(tap: .cghidEventTap)
-        }
-        try await Task.sleep(for: .milliseconds(durationMs))
-        if let up = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: false) {
-            up.flags = flags
-            up.post(tap: .cghidEventTap)
-        }
+        await AgentCursorDriver.shared.holdKey(keyCode: kc, flags: flags, durationMs: durationMs)
     }
 
     private func keyCodeForName(_ name: String) -> CGKeyCode? {

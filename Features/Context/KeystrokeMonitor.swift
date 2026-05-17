@@ -82,6 +82,12 @@ public final class KeystrokeMonitor {
 
     private func handle(type: CGEventType, event: CGEvent) {
         guard type == .keyDown else { return }
+        // Skip the agent's own synthetic keystrokes. Without this filter,
+        // every key the agent types into a target app gets re-ingested as
+        // "user input", polluting EventLog and feeding back into the next
+        // agent turn's context. AgentEventSource stamps a stable state ID
+        // on every event it emits so we can identify and drop them here.
+        if AgentEventSource.isSelfEvent(event) { return }
 
         let chars = readChars(from: event)
         let flags = event.flags

@@ -59,6 +59,18 @@ final class CursorTracker {
         timer = nil
     }
 
+    /// Idempotent. Pauses the 120Hz follow-user loop so the agent driver can
+    /// own sprite position. Counterpart to `resume()`.
+    func pause() {
+        stop()
+    }
+
+    /// Resume tracking the real cursor. Safe to call multiple times — `start`
+    /// already cancels any in-flight timer first.
+    func resume() {
+        start()
+    }
+
     private func tick() {
         let visible = systemCursorVisible()
         if visible != lastVisible {

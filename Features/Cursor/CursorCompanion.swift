@@ -65,6 +65,29 @@ public final class CursorCompanion: CursorAppearanceSetting {
         viewModel.isThinking = thinking
     }
 
+    // MARK: - Agent-driven (detached) mode
+
+    /// Pause the 120Hz follow-user loop and park the sprite at
+    /// `initialTarget` (AppKit screen space, bottom-left origin). The agent
+    /// driver becomes the sole owner of sprite position until `reattach()`.
+    /// Idempotent — calling while already detached just re-parks the sprite.
+    public func detach(initialTarget: NSPoint) {
+        tracker.pause()
+        window.setSpriteCenter(initialTarget)
+    }
+
+    /// Resume tracking the real cursor. Idempotent.
+    public func reattach() {
+        tracker.resume()
+    }
+
+    /// Set the sprite center in AppKit screen space. Only meaningful while
+    /// detached; if the tracker is live it will overwrite the position on
+    /// the next tick. Used by `CursorAnimator` at 120Hz.
+    public func setSpriteOriginAbsolute(_ point: NSPoint) {
+        window.setSpriteCenter(point)
+    }
+
     // MARK: - Wiring
 
     private func wireNotifications() {

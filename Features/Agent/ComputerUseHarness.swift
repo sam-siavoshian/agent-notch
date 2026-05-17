@@ -98,10 +98,12 @@ public final class ComputerUseHarness {
 
         AgentState.shared.set(.thinking)
         CursorCompanion.shared.setThinking(true)
+        AgentCursorDriver.shared.beginRun()
         isRunning = true
         stopRequested = false
         await AXFastPath.shared.reset()
         defer {
+            AgentCursorDriver.shared.endRun()
             CursorCompanion.shared.setThinking(false)
             isRunning = false
             stopRequested = false
