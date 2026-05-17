@@ -96,7 +96,7 @@ extension Tool: Codable {
         var c = encoder.container(keyedBy: Keys.self)
         switch self {
         case .computer(let w, let h, let n, let cache):
-            try c.encode("computer_20251124", forKey: .type)
+            try c.encode("computer_20250124", forKey: .type)
             try c.encode("computer", forKey: .name)
             try c.encode(w, forKey: .displayWidth)
             try c.encode(h, forKey: .displayHeight)
