@@ -167,12 +167,6 @@ private struct IntentRow: View {
         return Self.timeFormatter.string(from: run.l2.capturedAt)
     }
 
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss"
-        return f
-    }()
-
     private var targetSummary: String {
         let target = run.intent.target?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = run.intent.resolvedTarget?.trimmingCharacters(in: .whitespacesAndNewlines)

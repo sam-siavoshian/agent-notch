@@ -59,15 +59,6 @@ enum ContextTextSignalFilter {
         return normalized(text)
     }
 
-    private static let redactionReplacements: [(String, String, String.CompareOptions)] = [
-        (#"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#, "[email]", [.regularExpression, .caseInsensitive]),
-        (#"AIza[0-9A-Za-z_-]{20,}"#, "[gemini-api-key]", [.regularExpression]),
-        (#"sk-ant-[0-9A-Za-z_-]{20,}"#, "[anthropic-api-key]", [.regularExpression]),
-        (#"sk-[A-Za-z0-9_-]{20,}"#, "[api-key]", [.regularExpression]),
-        (#"\.{3}[A-Za-z0-9_-]{4,}"#, "[masked-secret]", [.regularExpression]),
-        (#"[A-Za-z0-9._%+-]{6,}\.{3}"#, "[redacted-fragment]", [.regularExpression])
-    ]
-
     static func looksTransientState(_ value: String) -> Bool {
         let lower = normalized(value).lowercased()
         guard !lower.isEmpty else { return true }
