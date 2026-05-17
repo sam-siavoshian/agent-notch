@@ -13,7 +13,7 @@ public enum Secrets {
         public static let anthropic = "ANTHROPIC_API_KEY"
         public static let openai = "OPENAI_API_KEY"
         public static let openRouter = "OPENROUTER_API_KEY"
-        // Phase 5b: Account.gemini removed alongside the Gemini observation pipeline.
+        public static let gemini = "GEMINI_API_KEY"   // restored for vision pre-processing
     }
 
     public static var anthropicAPIKey: String? {
@@ -24,7 +24,15 @@ public enum Secrets {
         resolve(env: "OPENAI_API_KEY", account: Account.openai)
     }
 
-    // Phase 5b: geminiAPIKey removed alongside the Gemini observation pipeline.
+    /// Restored for vision pre-processing (single-call screenshot understanding
+    /// at long-press time). Not the old fan-out pipeline.
+    public static var geminiAPIKey: String? {
+        resolve(env: "GEMINI_API_KEY", account: Account.gemini)
+    }
+
+    public static func setGeminiAPIKey(_ key: String) {
+        Keychain.set(key, account: Account.gemini)
+    }
 
     // Mercury 2 (via OpenRouter) — context-layer LLM
     public static var openRouterAPIKey: String? {
