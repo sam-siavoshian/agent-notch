@@ -154,8 +154,10 @@ private func classify(_ events: [EKEvent], now: Date) -> EventBuckets {
     var later: [EKEvent] = []
     var past: [EKEvent] = []
 
-    let timed = events.filter { !$0.isAllDay }
-    let allDay = events.filter { $0.isAllDay }
+    var timed: [EKEvent] = []
+    var allDay: [EKEvent] = []
+    timed.reserveCapacity(events.count)
+    for e in events { if e.isAllDay { allDay.append(e) } else { timed.append(e) } }
 
     for e in timed {
         if e.startDate <= now && e.endDate > now {
