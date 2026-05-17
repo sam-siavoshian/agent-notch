@@ -63,7 +63,7 @@ struct GeminiPerceptionEvalCLI {
         report += "Fixtures: `\(fixturesURL.path)`  ·  Variants: `\(variants.map { $0.name }.joined(separator: ", "))`\n\n"
 
         do {
-            if apiKey == nil || apiKey?.isEmpty == true {
+            if apiKey?.isEmpty ?? true {
                 print("GEMINI_API_KEY not set — running prompt-only dry mode (no API calls, no scoring)")
                 let runner = EvalRunner(fixturesDir: fixturesURL, variants: variants, client: nil)
                 var body = ""
