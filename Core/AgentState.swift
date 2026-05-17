@@ -54,7 +54,9 @@ public final class AgentState: ObservableObject {
     @Published public var lastTranscript: String = ""
     @Published public var activityLog: [AgentLogEntry] = []
 
-    private init() {}
+    private init() {
+        activityLog.reserveCapacity(31)
+    }
 
     public func set(_ activity: AgentActivity, detail: String = "") {
         let shouldLog: Bool
