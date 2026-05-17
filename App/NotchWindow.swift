@@ -7,7 +7,7 @@
 //  cycle, rides across all spaces.
 //
 
-import Cocoa
+import AppKit
 
 final class NotchWindow: NSPanel {
     override init(
