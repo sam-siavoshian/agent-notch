@@ -73,8 +73,7 @@ public enum Env {
             let key = line[..<eq].trimmingCharacters(in: .whitespaces)
             var value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
 
-            if value.count >= 2,
-               let first = value.first, let last = value.last,
+            if let first = value.first, let last = value.last, value.count >= 2,
                (first == "\"" && last == "\"") || (first == "'" && last == "'") {
                 value = String(value.dropFirst().dropLast())
             }
