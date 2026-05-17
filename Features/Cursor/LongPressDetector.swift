@@ -115,8 +115,8 @@ final class LongPressDetector {
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            if let tap = eventTap {
-                CGEvent.tapEnable(tap: tap, enable: true)
+            if let eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
             }
             return Unmanaged.passUnretained(event)
 
