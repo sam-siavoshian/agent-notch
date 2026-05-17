@@ -1,12 +1,3 @@
-//
-//  ContextDebugView+Intent.swift
-//  Agent in the Notch
-//
-//  Intent History: walks ContextSelector.shared.recentRuns (newest first)
-//  and renders one row per selector run with verb, target → resolved_target,
-//  confidence, degraded flag, model, and latency. Polls every 1s.
-//
-
 import SwiftUI
 
 struct ContextDebugIntentView: View {
@@ -160,11 +151,7 @@ private struct IntentRow: View {
     }()
 
     private var timeLabel: String {
-        // recentRuns doesn't carry a wall-clock timestamp on the Result.
-        // The wall-clock for "now" is more useful than nothing — but to keep
-        // a stable display, show the L2 capturedAt time (which is the same
-        // instant the selector started, within ~400ms).
-        return Self.timeFormatter.string(from: run.l2.capturedAt)
+        Self.timeFormatter.string(from: run.l2.capturedAt)
     }
 
     private var targetSummary: String {

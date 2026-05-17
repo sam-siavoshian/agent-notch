@@ -105,9 +105,6 @@ public struct ContextDebugScreenObsView: View {
     @ViewBuilder
     private func expandedDetail(_ obs: SurfaceObservation) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            // S17: Capture Story fields — surfaced at the top because they
-            // describe what the USER is doing (the most useful telemetry
-            // when triaging a brief).
             if let narrative = obs.narrative, !narrative.isEmpty {
                 Text(narrative)
                     .font(.system(size: 11))

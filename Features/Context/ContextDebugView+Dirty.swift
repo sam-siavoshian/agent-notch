@@ -1,12 +1,3 @@
-//
-//  ContextDebugView+Dirty.swift
-//  Agent in the Notch
-//
-//  Dev Tools pane: dirty-detector visualization. Live counters, recent
-//  comparisons with thumbnails + bounding overlays, and a legend for the
-//  classification bands.
-//
-
 import AppKit
 import CoreGraphics
 import SwiftUI
@@ -131,10 +122,14 @@ private struct DirtyRow: View {
         }
     }
 
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     private func relativeTime(from date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

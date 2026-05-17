@@ -1,20 +1,7 @@
-//
-//  ContextDebugView+Memory.swift
-//  Agent in the Notch
-//
-//  Memory pane: per-app recipe drilldown over the L3 recipe collections
-//  AnchorRecorder persists at:
-//      ~/Library/Application Support/AgentNotch/ContextMemory/anchors/<bundleID>.json
-//
-//  Shows three sections per selected app — Promoted Recipes, Candidates
-//  (< 3 observations), and learned Shortcuts — plus a step preview that
-//  expands inline. Refreshes every 2 seconds.
-//
-
 import SwiftUI
 
 extension ContextDebugView {
-    public var memoryPane: some View {
+    var memoryPane: some View {
         MemoryDrilldownView()
     }
 }

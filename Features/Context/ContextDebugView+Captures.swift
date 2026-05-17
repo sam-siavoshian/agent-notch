@@ -1,11 +1,3 @@
-//
-//  ContextDebugView+Captures.swift
-//  Agent in the Notch
-//
-//  Rolling-buffer browser. Each snapshot becomes a card with thumbnail,
-//  metadata and an OCR preview so we can eyeball pipeline output.
-//
-
 import SwiftUI
 import AppKit
 
@@ -108,7 +100,7 @@ extension ContextDebugView {
         return String(joined[..<idx]) + "…"
     }
 
-    func snapshotThumbnail(_ snapshot: ContextSnapshot, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
+    private func snapshotThumbnail(_ snapshot: ContextSnapshot, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
         Group {
             if let image = NSImage(data: snapshot.jpegData) {
                 Image(nsImage: image)

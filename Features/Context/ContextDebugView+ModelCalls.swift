@@ -1,16 +1,3 @@
-//
-//  ContextDebugView+ModelCalls.swift
-//  Agent in the Notch
-//
-//  Unified view over every model call captured in `AgentObservabilityLog` —
-//  Mercury (selector / active_task_updater / recipe_naming) and Gemini
-//  (passive screen observer). Newest first, filterable by provider so the
-//  operator can isolate one channel at a time.
-//
-//  Each row exposes the full request + response previews so we can diff what
-//  we sent against what we got back, including HTTP error bodies.
-//
-
 import SwiftUI
 
 /// Every Mercury + Gemini call captured in the observability log, newest first.

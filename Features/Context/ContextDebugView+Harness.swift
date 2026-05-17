@@ -1,14 +1,3 @@
-//
-//  ContextDebugView+Harness.swift
-//  Agent in the Notch
-//
-//  Dev Tools "Harness Detail" pane: deep-dive into recent ComputerUseHarness
-//  runs. Shows the system blocks sent (with cache markers), the per-turn
-//  Anthropic request/response timeline, and per-turn tool calls + results.
-//  Prompt cache hit/miss is the headline signal — cache_read_input_tokens is
-//  called out prominently for every turn.
-//
-
 import SwiftUI
 
 struct ContextDebugHarnessPane: View {
