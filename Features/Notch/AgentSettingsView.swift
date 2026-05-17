@@ -12,7 +12,8 @@ struct AgentSettingsView: View {
     @State private var savedOpacity: Double = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 11) {
+            modelRow
             reasoningEffortRow
             cursorColorRow
             ttsVoiceRow
@@ -22,6 +23,7 @@ struct AgentSettingsView: View {
             quitRow
             savedBadge
         }
+        .frame(maxWidth: .infinity, minHeight: 360, alignment: .topLeading)
         .onChange(of: store.settings) { _, _ in
             savedOpacity = 1
             withAnimation(.easeOut(duration: 0.4).delay(1.0)) {
@@ -40,6 +42,22 @@ struct AgentSettingsView: View {
                     .foregroundStyle(SoftPill.Status.green)
             }
             .opacity(savedOpacity)
+        }
+    }
+
+    private var modelRow: some View {
+        SettingRow(title: "Model") {
+            PillToolbar {
+                ForEach(AgentModel.allCases) { model in
+                    ToolbarIconButton(
+                        systemImage: model.iconName,
+                        label: model.displayName,
+                        isActive: store.agentModel == model
+                    ) {
+                        store.agentModel = model
+                    }
+                }
+            }
         }
     }
 
