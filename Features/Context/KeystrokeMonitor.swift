@@ -2,14 +2,10 @@ import Foundation
 import AppKit
 import CoreGraphics
 
-/// Captures key events via CGEvent tap, burst-batches them into `input` CEvents.
-///
-/// Requires Input Monitoring TCC permission (separate from Accessibility on macOS 14+).
-/// If denied, the monitor runs in degraded mode: it doesn't install a tap and emits nothing.
-/// The user is prompted via the onboarding flow (PermissionChecker.inputMonitoring).
-///
-/// Burst-batching: keystrokes hitting the same focused element within 2s coalesce into a single
-/// `input` event. Finalization triggers: focus change, 1.5s idle, or a submit-key (return/tab/cmd+return).
+/// Captures key events via CGEvent tap and burst-batches them into `input` CEvents.
+/// Requires Input Monitoring TCC; if denied, runs in degraded mode (no tap installed).
+/// Keystrokes hitting the same focused element coalesce; bursts finalize on focus change,
+/// 1.5s idle, or a submit-key (return/tab/cmd+return).
 public final class KeystrokeMonitor {
 
     public static let shared = KeystrokeMonitor()
@@ -34,10 +30,7 @@ public final class KeystrokeMonitor {
     /// Start the CGEvent tap. Returns false if Input Monitoring permission is denied.
     @discardableResult
     public func start() -> Bool {
-        guard CGPreflightListenEventAccess() else {
-            // Permission not granted; degraded mode.
-            return false
-        }
+        guard CGPreflightListenEventAccess() else { return false }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in
@@ -98,16 +91,11 @@ public final class KeystrokeMonitor {
         let cmdHeld  = flags.contains(.maskCommand)
         let hasNonShiftModifier = flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate)
 
-        // Modifier-shortcut fast path.
-        // When a non-shift modifier is held, the OS often returns empty `chars`
-        // because the keystroke is interpreted as a shortcut, not text input.
-        // Synthesize the character from the keycode and emit as a single-keystroke
-        // input event with the modifier set. This is what AnchorRecorder needs to
-        // detect a "shortcut" step.
+        // Modifier-shortcut fast path: when a non-shift modifier is held, the OS often
+        // returns empty `chars`. Synthesize from keycode and emit as a single keystroke
+        // so AnchorRecorder can detect the shortcut step.
         if hasNonShiftModifier {
             if let synthChar = Self.characterForKeycode(keyCode) {
-                // Flush any pending prose burst first so the shortcut doesn't get
-                // appended to a typing sequence.
                 queue.sync { flushPending(reason: "shortcut") }
                 let element = focusedElementProvider?()
                 let payload: CEvent.Payload = .input(
@@ -122,8 +110,7 @@ public final class KeystrokeMonitor {
                 }
                 return
             }
-            // If we can't decode the keycode but a modifier is held, still skip the
-            // text-accumulation path — don't pollute prose with cmd-modified phantoms.
+            // Don't pollute prose with cmd-modified phantoms when keycode can't be decoded.
             return
         }
 
@@ -141,7 +128,6 @@ public final class KeystrokeMonitor {
         queue.sync {
             if let started = pendingStarted {
                 if Date().timeIntervalSince(started) > 2.0 {
-                    // Too old — flush before adding.
                     flushPending(reason: "idle_timeout")
                     pendingStarted = Date()
                     pendingFocusedElement = focusedElementProvider?()
@@ -157,10 +143,8 @@ public final class KeystrokeMonitor {
         }
     }
 
-    /// US QWERTY keycode → character. Covers letters, digits, common punctuation.
-    /// Returns nil for keycodes we don't recognize (function keys, modifier keys themselves).
-    static func characterForKeycode(_ keycode: Int) -> String? {
-        // Apple's HIToolbox virtual key codes — stable across macOS versions.
+    /// US QWERTY keycode → character. Returns nil for keycodes we don't recognize.
+    private static func characterForKeycode(_ keycode: Int) -> String? {
         switch keycode {
         // Letters
         case 0: return "a"
@@ -242,10 +226,8 @@ public final class KeystrokeMonitor {
             submitKey: reason,
             modifiers: pendingModifiers
         )
-        // Hop off the queue before ingest (ingest may touch other singletons).
-        let copy = payload
         DispatchQueue.main.async {
-            _ = EventIngester.shared.ingest(kind: .input, sourceMonitor: "KeystrokeMonitor", payload: copy)
+            _ = EventIngester.shared.ingest(kind: .input, sourceMonitor: "KeystrokeMonitor", payload: payload)
         }
         pendingText = ""
         pendingStarted = nil

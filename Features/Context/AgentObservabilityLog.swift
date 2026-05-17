@@ -1,18 +1,8 @@
 import Foundation
 
-/// Central in-memory ring buffer that captures the full back-and-forth between
-/// the user, the context system (Mercury), and the action agent (Claude). The
-/// DevTools timeline view reads from this.
-///
-/// Three categories of events are captured:
-///   - Long-press lifecycle: transcript ready, L2 snapshot captured, selector ran
-///   - Mercury calls: any role (selector / active_task_updater / recipe_naming)
-///   - Harness turns: each Claude round-trip with its system blocks, user content,
-///     assistant content, tool calls, and tool results
-///   - Memory mutations: active_task updated, recipe promoted, resource added,
-///     redaction applied
-///
-/// Capacity: 500 events (oldest evicted). Thread-safe via DispatchQueue.
+/// Central in-memory ring buffer (cap 500) capturing the full back-and-forth between
+/// the user, the context system (Mercury), and the action agent (Claude). The DevTools
+/// timeline view reads from this. Thread-safe via DispatchQueue.
 public final class AgentObservabilityLog {
 
     public static let shared = AgentObservabilityLog()
@@ -55,7 +45,7 @@ public final class AgentObservabilityLog {
 
     public enum MercuryRole: String { case selector, activeTaskUpdater, recipeNaming, other }
     public enum MutationKind: String {
-        case activeTaskUpdated, activeTaskArchived, recipePromoted, recipeCandidateAdded, shortcutLearned, resourceRecorded, redactionApplied
+        case activeTaskUpdated, activeTaskArchived, recipePromoted, recipeCandidateAdded, shortcutLearned, resourceRecorded
     }
 
     public struct ToolCallSummary {
@@ -76,7 +66,7 @@ public final class AgentObservabilityLog {
     private let capacity = 500
     private let queue = DispatchQueue(label: "AgentNotch.AgentObservabilityLog.queue")
 
-    public init() {}
+    private init() {}
 
     public func record(_ event: Event) {
         queue.sync {
@@ -87,12 +77,8 @@ public final class AgentObservabilityLog {
         }
     }
 
-    public func snapshot() -> [Event] {
-        queue.sync { Array(buffer) }
-    }
-
     /// Most recent agent run: the trailing slice from the most recent
-    /// `longPressTranscript` event onward. Useful for the "current run" view.
+    /// `longPressTranscript` event onward.
     public func currentRunEvents() -> [Event] {
         queue.sync {
             guard let startIdx = buffer.lastIndex(where: {
@@ -121,19 +107,5 @@ public final class AgentObservabilityLog {
                 return false
             }
         }
-    }
-
-    /// All memory mutations.
-    public func memoryMutations() -> [Event] {
-        queue.sync {
-            buffer.filter {
-                if case .memoryMutation = $0 { return true }
-                return false
-            }
-        }
-    }
-
-    public func clear() {
-        queue.sync { buffer.removeAll() }
     }
 }

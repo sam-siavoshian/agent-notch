@@ -2,18 +2,9 @@ import Foundation
 import AppKit
 import ApplicationServices
 
-/// Per-PID AX observer lifecycle. Tracks the frontmost app via NSWorkspace notifications,
-/// (re)creates an AXObserver each time it changes, and forwards focused-element changes
-/// + value/selection/menu events.
-///
-/// Listens for:
-///   kAXFocusedUIElementChangedNotification
-///   kAXValueChangedNotification
-///   kAXSelectedTextChangedNotification
-///   kAXMenuItemSelectedNotification
-///
-/// Falls back to focused-element polling at 1Hz when the frontmost app doesn't support
-/// kAXFocusedUIElementChangedNotification.
+/// Per-PID AX observer lifecycle. Tracks the frontmost app via NSWorkspace, (re)creates an
+/// AXObserver each time it changes, and forwards focus / value / selection / menu events.
+/// Falls back to focused-element polling at 1Hz when notifications aren't supported.
 public final class AXObserverManager {
 
     public static let shared = AXObserverManager()
@@ -32,11 +23,9 @@ public final class AXObserverManager {
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(handleAppActivated(_:)), name: NSWorkspace.didActivateApplicationNotification, object: nil)
         center.addObserver(self, selector: #selector(handleAppTerminated(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
-        // Bootstrap from current frontmost.
         if let app = NSWorkspace.shared.frontmostApplication {
             attachObserver(pid: app.processIdentifier)
         }
-        // Wire KeystrokeMonitor's focused-element provider to us.
         KeystrokeMonitor.shared.focusedElementProvider = { [weak self] in self?.focusedElementDescriptor }
     }
 
@@ -48,7 +37,6 @@ public final class AXObserverManager {
     @objc private func handleAppActivated(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
         let pid = app.processIdentifier
-        // App-switch event
         let from = currentPID.flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier }
         let to = app.bundleIdentifier ?? "<unknown>"
         DispatchQueue.main.async {
@@ -76,7 +64,7 @@ public final class AXObserverManager {
         var observer: AXObserver?
         let result = AXObserverCreate(pid, axCallback, &observer)
         guard result == .success, let observer else {
-            // Couldn't attach (likely missing AX permission for this PID). Fall back to polling.
+            // Likely missing AX permission for this PID. Fall back to polling.
             startPolling()
             return
         }
@@ -98,9 +86,8 @@ public final class AXObserverManager {
             .commonModes
         )
 
-        // Always start a slow poll alongside in case notifications are missed.
+        // Always run a slow poll alongside in case notifications are missed.
         startPolling()
-        // And refresh once now.
         refreshFocusedElement()
     }
 
@@ -140,13 +127,11 @@ public final class AXObserverManager {
     }
 
     fileprivate func handleAXNotification(_ notification: String, element: AXUIElement) {
-        // Update focused-element snapshot when focus or value changes
         switch notification {
         case kAXFocusedUIElementChangedNotification as String:
             focusedElementDescriptor = describe(element: element)
         case kAXMenuItemSelectedNotification as String:
             let label = (copyStringAttr(element, kAXTitleAttribute) ?? "<menu>")
-            // No deep menu path here; menu items expose only their immediate title via AX.
             DispatchQueue.main.async {
                 _ = EventIngester.shared.ingest(
                     kind: .click,
