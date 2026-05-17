@@ -45,7 +45,8 @@ struct AgentSettingsView: View {
     }
 
     private var cursorColorRow: some View {
-        SettingRow(title: "Cursor") {
+        let activeSwatch = store.cursorColor.swatch
+        return SettingRow(title: "Cursor") {
             HStack(spacing: 2) {
                 ForEach(CursorColor.allCases) { color in
                     SwatchPillButton(
@@ -60,8 +61,8 @@ struct AgentSettingsView: View {
                 Spacer(minLength: 4)
                 Image(systemName: "cursorarrow")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(store.cursorColor.swatch)
-                    .shadow(color: store.cursorColor.swatch.opacity(0.7), radius: 5)
+                    .foregroundStyle(activeSwatch)
+                    .shadow(color: activeSwatch.opacity(0.7), radius: 5)
                     .animation(.smooth(duration: 0.25), value: store.cursorColor)
             }
         }
