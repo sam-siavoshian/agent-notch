@@ -151,7 +151,7 @@ enum LRClibClient {
 
         do {
             let data = try await get(url)
-            let hits = try JSONDecoder().decode([Hit].self, from: data)
+            let hits = try Self.jsonDecoder.decode([Hit].self, from: data)
             let candidates = hits.filter {
                 ($0.syncedLyrics?.isEmpty == false) || ($0.plainLyrics?.isEmpty == false)
             }
@@ -189,7 +189,7 @@ enum LRClibClient {
         ]
         guard let url = comps.url else { return nil }
         guard let data = try? await get(url) else { return nil }
-        return try? JSONDecoder().decode(Hit.self, from: data)
+        return try? Self.jsonDecoder.decode(Hit.self, from: data)
     }
 
     private static func get(_ url: URL) async throws -> Data {
@@ -215,6 +215,8 @@ enum LRClibClient {
     static let lrcTagRegex = try! NSRegularExpression(
         pattern: #"\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]"#
     )
+
+    static let jsonDecoder = JSONDecoder()
 
     /// Parses `[mm:ss.xx]` or `[m:ss.xxx]` timestamped lines. Multi-tag lines
     /// like `[00:12.30][00:45.10]text` produce one LyricLine per tag.
