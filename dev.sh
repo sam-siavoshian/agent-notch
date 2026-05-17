@@ -10,6 +10,7 @@
 #   ./dev.sh --rotate-key sk-ant-...           # update keychain entry, then build + run
 #   ./dev.sh --rotate-gemini-key AIza...       # update optional Gemini key, then build + run
 #   ./dev.sh --rotate-openai-key sk-...        # update optional OpenAI (Whisper) key, then build + run
+#   ./dev.sh --rotate-openrouter-key sk-or-... # update optional OpenRouter (Mercury) key, then build + run
 #   ./dev.sh --install                         # build, copy to /Applications, launch from there
 #                                              # (stable path → TCC grants survive close+reopen
 #                                              #  as long as you don't rebuild)
@@ -26,6 +27,7 @@ KEYCHAIN_SERVICE="AgentNotch"
 KEYCHAIN_ACCOUNT="anthropic"
 GEMINI_KEYCHAIN_ACCOUNT="gemini"
 OPENAI_KEYCHAIN_ACCOUNT="openai"
+OPENROUTER_KEYCHAIN_ACCOUNT="openrouter"
 SCHEME="AgentNotch"
 PROJECT="${REPO_ROOT}/AgentNotch.xcodeproj"
 # Keep DerivedData outside iCloud Drive (repo lives on ~/Desktop which is synced).
@@ -82,6 +84,17 @@ while [[ $# -gt 0 ]]; do
         -U >/dev/null
       shift
       ;;
+    --rotate-openrouter-key)
+      shift
+      if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-openrouter-key needs the key as next arg"; exit 1; fi
+      echo "→ Updating keychain entry for ${KEYCHAIN_SERVICE}/${OPENROUTER_KEYCHAIN_ACCOUNT}"
+      security add-generic-password \
+        -s "$KEYCHAIN_SERVICE" \
+        -a "$OPENROUTER_KEYCHAIN_ACCOUNT" \
+        -w "$1" \
+        -U >/dev/null
+      shift
+      ;;
     -h|--help)
       sed -n '2,13p' "$0"; exit 0 ;;
     *)
@@ -115,6 +128,14 @@ if OPENAI_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$
   echo "→ Whisper transcription enabled"
 else
   echo "→ OpenAI key not configured; voice transcription will fail"
+fi
+
+echo "→ Fetching optional OPENROUTER_API_KEY from keychain"
+if OPENROUTER_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$OPENROUTER_KEYCHAIN_ACCOUNT" -w 2>/dev/null)"; then
+  export OPENROUTER_API_KEY
+  echo "→ Mercury selector + ActiveTaskUpdater enabled"
+else
+  echo "→ OpenRouter key not configured; Mercury will fall through to LocalBriefRenderer every long-press"
 fi
 
 # Recommended native screenshot-analysis baseline. The AGENTNOTCH_* names take
@@ -304,8 +325,34 @@ if [[ $SHOW_ONBOARDING -eq 1 ]]; then
   export AGENTNOTCH_FORCE_ONBOARDING=1
 fi
 
+# ---------- log capture ----------
+# Tee stdout+stderr to a timestamped file under /tmp/agentnotch-logs, and
+# keep /tmp/agentnotch.log as a symlink to the current run so external
+# tooling can always cat the latest without hunting for a filename.
+# AGENTNOTCH_DUMP_DIR tells AgentSession where to drop per-turn artifacts
+# (last-turn.md and turns.jsonl).
+LOG_DIR="/tmp/agentnotch-logs"
+mkdir -p "$LOG_DIR"
+RUN_TS="$(date +%Y%m%d-%H%M%S)"
+RUN_LOG="$LOG_DIR/run-$RUN_TS.log"
+LATEST_LINK="/tmp/agentnotch.log"
+ln -sf "$RUN_LOG" "$LATEST_LINK"
+export AGENTNOTCH_DUMP_DIR="/tmp"
+
+# Clear the per-turn artifacts so a fresh run doesn't show stale data.
+rm -f /tmp/agentnotch-last-turn.md /tmp/agentnotch-turns.jsonl
+
 echo ""
 echo "Running in foreground. Ctrl-C to quit."
+echo ""
+echo "Logs & artifacts:"
+echo "  • stdout/stderr → $RUN_LOG"
+echo "  • latest symlink → $LATEST_LINK"
+echo "  • per-turn brief (live) → /tmp/agentnotch-last-turn.md"
+echo "  • per-turn jsonl history → /tmp/agentnotch-turns.jsonl"
+echo "  • app state → ~/Library/Application Support/AgentNotch/ContextMemory/"
+echo "      events-*.jsonl   story-*.jsonl   active_task.json"
+echo "      surfaces/<bundleID>/<surface>.json   anchors/<bundleID>.json"
 echo ""
 echo "First-launch reminders:"
 echo "  - System Settings → Privacy & Security → Accessibility → enable AgentNotch"
@@ -313,4 +360,7 @@ echo "  - System Settings → Privacy & Security → Screen Recording → enable
 echo "  - System Settings → Privacy & Security → Microphone → enable AgentNotch"
 echo ""
 
-exec "$BIN"
+# Pipe-tee instead of exec: the script becomes tee, $BIN runs as a child.
+# Ctrl-C in the terminal forwards to both. `set -o pipefail` (already on)
+# means we exit with the binary's status, not tee's.
+"$BIN" 2>&1 | tee "$RUN_LOG"

@@ -96,7 +96,11 @@ public struct AnthropicMessageRequest: Codable, Sendable {
 }
 
 public enum Tool: Sendable {
-    case computer(displayWidth: Int, displayHeight: Int, displayNumber: Int?, cache: Bool = false)
+    /// `toolType` is the wire-protocol string Anthropic expects (e.g.
+    /// "computer_20250124" for Haiku 4.5, "computer_20251124" for Sonnet 4.6
+    /// and Opus 4.x). Must match the `computer-use-*` beta header on the
+    /// request — see `AgentModel.computerUseToolType`.
+    case computer(displayWidth: Int, displayHeight: Int, displayNumber: Int?, cache: Bool = false, toolType: String)
     case custom(name: String, description: String, inputSchema: JSON, cache: Bool = false)
 
     private enum Keys: String, CodingKey {
@@ -113,8 +117,8 @@ extension Tool: Codable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
         switch self {
-        case .computer(let w, let h, let n, let cache):
-            try c.encode("computer_20250124", forKey: .type)
+        case .computer(let w, let h, let n, let cache, let toolType):
+            try c.encode(toolType, forKey: .type)
             try c.encode("computer", forKey: .name)
             try c.encode(w, forKey: .displayWidth)
             try c.encode(h, forKey: .displayHeight)
@@ -137,7 +141,7 @@ extension Tool: Codable {
             let w = try c.decode(Int.self, forKey: .displayWidth)
             let h = try c.decode(Int.self, forKey: .displayHeight)
             let n = try? c.decode(Int.self, forKey: .displayNumber)
-            self = .computer(displayWidth: w, displayHeight: h, displayNumber: n, cache: false)
+            self = .computer(displayWidth: w, displayHeight: h, displayNumber: n, cache: false, toolType: type)
         case "custom":
             let name = try c.decode(String.self, forKey: .name)
             let desc = (try? c.decode(String.self, forKey: .description)) ?? ""

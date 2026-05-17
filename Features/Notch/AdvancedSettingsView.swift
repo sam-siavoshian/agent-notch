@@ -29,6 +29,22 @@ struct AdvancedSettingsView: View {
                         }
                     }
                 }
+                // Read-only indicator of which computer-use beta the harness
+                // will send with the currently-selected model. Two values
+                // exist (2025-01-24 for Haiku; 2025-11-24 for Sonnet 4.6 +
+                // Opus 4.x) and the wrong one produces HTTP 400 — surfacing
+                // it here makes the model/beta pairing visible at a glance.
+                SettingRow(title: "Computer-use") {
+                    HStack(spacing: 6) {
+                        Text(store.agentModel.computerUseBetaHeader
+                                .replacingOccurrences(of: "computer-use-", with: ""))
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        Text("(\(store.agentModel.computerUseToolType))")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
                 SettingRow(title: "Reasoning") {
                     PillToolbar {
                         ForEach(AgentReasoningEffort.allCases) { effort in

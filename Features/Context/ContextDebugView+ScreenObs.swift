@@ -134,13 +134,23 @@ public struct ContextDebugScreenObsView: View {
                     .font(.system(size: 11).italic())
                     .foregroundColor(.secondary)
             }
-            if let artifact = obs.artifact, !artifact.isEmpty {
-                DisclosureGroup("artifact") {
-                    Text(prettyJSONArtifact(artifact))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .textSelection(.enabled)
-                        .padding(.top, 2)
+            if let artifacts = obs.artifacts, !artifacts.isEmpty {
+                DisclosureGroup("artifacts (\(artifacts.count))") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(0..<artifacts.count, id: \.self) { i in
+                            let a = artifacts[i]
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(a.app) — \(a.contentType)")
+                                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                Text(prettyJSONArtifact(a.payload))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            .padding(.leading, 4)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
                 .font(.system(size: 11, weight: .semibold))
             }

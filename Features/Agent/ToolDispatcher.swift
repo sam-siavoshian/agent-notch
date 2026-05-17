@@ -68,6 +68,8 @@ public actor ToolDispatcher {
                 return try await dispatchComputer(toolUseId: toolUseId, input: input)
             case "open_url":
                 return try await dispatchOpenURL(toolUseId: toolUseId, input: input)
+            case "open_app":
+                return try await dispatchOpenApp(toolUseId: toolUseId, input: input)
             case "applescript":
                 return try await dispatchAppleScript(toolUseId: toolUseId, input: input)
             case "run_shortcut":
@@ -197,6 +199,37 @@ public actor ToolDispatcher {
         let opened = NSWorkspace.shared.open(url)
         if !opened { throw DispatchError("NSWorkspace.open returned false for \(urlString)") }
         return ok(toolUseId, "opened \(urlString)")
+    }
+
+    /// Launch a desktop app by NAME using exact-path resolution. Bypasses
+    /// `open_url <scheme>://`, which goes through macOS Launch Services'
+    /// default-handler resolution — when both Discord.app and Discord
+    /// Canary.app register the `discord:` scheme, Launch Services picks
+    /// the more-recently-registered one (Canary, in practice), giving the
+    /// user the wrong variant. Path-based lookup pins us to the exact
+    /// `/Applications/<Name>.app` bundle.
+    private func dispatchOpenApp(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let name = input.objectValue?["name"]?.stringValue, !name.isEmpty else {
+            throw DispatchError("Missing 'name'")
+        }
+        let candidates = [
+            "/Applications/\(name).app",
+            "/System/Applications/\(name).app",
+            "/System/Applications/Utilities/\(name).app",
+            "\(NSHomeDirectory())/Applications/\(name).app"
+        ]
+        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            throw DispatchError("No app named '\(name).app' found in /Applications, /System/Applications, /System/Applications/Utilities, or ~/Applications")
+        }
+        let url = URL(fileURLWithPath: path)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        do {
+            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        } catch {
+            throw DispatchError("Failed to open \(name): \(error.localizedDescription)")
+        }
+        return ok(toolUseId, "opened \(path)")
     }
 
     private func dispatchAppleScript(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {

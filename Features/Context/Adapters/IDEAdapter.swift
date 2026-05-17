@@ -128,15 +128,50 @@ public final class IDEAdapter: AppContextAdapter {
         if parts.count >= 2, let project = parts.dropFirst().first {
             dict["project_label"] = AnyCodable(project)
         }
-        // Best-effort: if filename is a path-like, walk to .git
+        // VSCode/Cursor only put the bare filename in the title (not a path),
+        // so the .git walk almost never triggered. Two passes now:
+        //   1. If filename happens to be path-like, walk up from it.
+        //   2. Otherwise, look up `project_label` against conventional repo
+        //      roots (~/Desktop, ~/Documents, ~/Projects, ~/Code, ~/src, ~).
+        //      Cheap — a handful of stat calls.
         if let filename = parts.first, filename.contains("/") {
             let root = walkToGit(from: filename)
             if !root.isEmpty {
                 dict["project_root"] = AnyCodable(root)
                 if let branch = readGitBranch(at: root) { dict["git_branch"] = AnyCodable(branch) }
             }
+        } else if let projectLabel = dict["project_label"]?.value as? String,
+                  let root = findRepoRoot(matching: projectLabel) {
+            dict["project_root"] = AnyCodable(root)
+            if let branch = readGitBranch(at: root) { dict["git_branch"] = AnyCodable(branch) }
         }
         return dict
+    }
+
+    /// Best-effort: locate a checkout whose directory name matches `label`
+    /// under one of the conventional project roots. Returns the repo path
+    /// (the directory containing `.git`) or nil. Used when an editor exposes
+    /// only the project name in its window title, not the full path.
+    private func findRepoRoot(matching label: String) -> String? {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+        let roots = [
+            "\(home)/Desktop",
+            "\(home)/Documents",
+            "\(home)/Projects",
+            "\(home)/Code",
+            "\(home)/src",
+            home
+        ]
+        for root in roots {
+            let candidate = "\(root)/\(trimmed)"
+            if fm.fileExists(atPath: "\(candidate)/.git") {
+                return candidate
+            }
+        }
+        return nil
     }
 
     // MARK: - Zed (window title only)

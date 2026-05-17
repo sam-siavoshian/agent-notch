@@ -35,7 +35,11 @@ public struct AnthropicClient: Sendable {
         apiKey: String,
         session: URLSession = .shared,
         endpoint: URL = AnthropicClient.defaultEndpoint,
-        betaHeaders: [String] = ["computer-use-2025-01-24", "prompt-caching-2024-07-31", "interleaved-thinking-2025-05-14"]
+        // No computer-use beta in the default — the harness picks it per
+        // current model (Haiku uses 2025-01-24, Sonnet 4.6 / Opus 4.x use
+        // 2025-11-24) and prepends it. Hardcoding it here would force a
+        // mismatch when the user picks a model from the other family.
+        betaHeaders: [String] = ["prompt-caching-2024-07-31", "interleaved-thinking-2025-05-14"]
     ) {
         self.apiKey = apiKey
         self.session = session

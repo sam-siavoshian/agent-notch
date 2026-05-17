@@ -1,14 +1,22 @@
 import Foundation
 
-/// Per-(app, surface) accumulated UI knowledge: every control we've ever
+/// Per-(bundleID, surface) accumulated UI knowledge: every control we've ever
 /// observed on this surface, with seen_count + last_seen. The Selector reads
 /// this at long-press time to give Claude a richer surface map than what a
 /// single screenshot snapshot would provide.
+///
+/// Storage is keyed on the **bundle identifier** (e.g. `com.apple.dt.Xcode`),
+/// not the localized app display name. Display names vary across language and
+/// app version ("Visual Studio Code" vs "Code"); using them as the key caused
+/// silent memory misses where the observer wrote under one name and the
+/// selector read under another. The `app` field on `SurfaceMemory` is kept
+/// as a denormalized display label only.
 public final class SurfaceMemoryStore {
     public static let shared = SurfaceMemoryStore()
 
     public struct SurfaceMemory: Codable {
-        public let app: String
+        public let bundleID: String        // canonical key
+        public var app: String             // display name (latest seen)
         public let surface: String         // e.g. "Slack #design composer"
         public var controls: [Control]
         public var lastSeen: Date
@@ -56,13 +64,18 @@ public final class SurfaceMemoryStore {
     }
 
     /// Merge an observation into per-surface memory. Bumps seen_count for known
-    /// controls, adds new ones, updates last_seen.
+    /// controls, adds new ones, updates last_seen. Skips observations that
+    /// arrive without a bundleID (e.g. older JSONL lines re-read after a
+    /// schema bump) — the key would be ambiguous.
     public func accumulate(_ obs: SurfaceObservation) {
-        guard let app = obs.frontmostApp, let surface = obs.currentSurface, !surface.isEmpty else { return }
+        guard let bundleID = obs.bundleID, !bundleID.isEmpty,
+              let surface = obs.currentSurface, !surface.isEmpty else { return }
+        let app = obs.frontmostApp ?? bundleID
         var shouldSchedulePrune = false
         queue.sync {
-            var memory = loadMemory(app: app, surface: surface)
-                ?? SurfaceMemory(app: app, surface: surface, controls: [], lastSeen: obs.t, observationCount: 0)
+            var memory = loadMemory(bundleID: bundleID, surface: surface)
+                ?? SurfaceMemory(bundleID: bundleID, app: app, surface: surface, controls: [], lastSeen: obs.t, observationCount: 0)
+            memory.app = app   // refresh display name from latest observation
             memory.lastSeen = obs.t
             memory.observationCount += 1
 
@@ -101,15 +114,15 @@ public final class SurfaceMemoryStore {
         }
     }
 
-    /// Look up accumulated memory for an (app, surface) pair. Returns nil if absent.
-    public func memory(for app: String, surface: String) -> SurfaceMemory? {
-        queue.sync { loadMemory(app: app, surface: surface) }
+    /// Look up accumulated memory for a (bundleID, surface) pair. Returns nil if absent.
+    public func memory(forBundle bundleID: String, surface: String) -> SurfaceMemory? {
+        queue.sync { loadMemory(bundleID: bundleID, surface: surface) }
     }
 
-    /// All surface memories for a given app (across all surfaces seen).
-    public func memories(for app: String) -> [SurfaceMemory] {
+    /// All surface memories for a given bundle ID (across all surfaces seen).
+    public func memories(forBundle bundleID: String) -> [SurfaceMemory] {
         queue.sync {
-            let appDir = Self.storageRoot.appendingPathComponent(safeFilename(app))
+            let appDir = Self.storageRoot.appendingPathComponent(safeFilename(bundleID))
             guard let files = try? FileManager.default.contentsOfDirectory(at: appDir, includingPropertiesForKeys: nil) else { return [] }
             return files.compactMap { url in
                 guard let data = try? Data(contentsOf: url) else { return nil }
@@ -118,8 +131,8 @@ public final class SurfaceMemoryStore {
         }
     }
 
-    /// All apps that have surface memory.
-    public func allApps() -> [String] {
+    /// All bundle IDs that have surface memory.
+    public func allBundleIDs() -> [String] {
         queue.sync {
             (try? FileManager.default.contentsOfDirectory(at: Self.storageRoot, includingPropertiesForKeys: nil))?
                 .map(\.lastPathComponent) ?? []
@@ -191,8 +204,8 @@ public final class SurfaceMemoryStore {
         return (scanned, deleted)
     }
 
-    private func loadMemory(app: String, surface: String) -> SurfaceMemory? {
-        let url = pathFor(app: app, surface: surface)
+    private func loadMemory(bundleID: String, surface: String) -> SurfaceMemory? {
+        let url = pathFor(bundleID: bundleID, surface: surface)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder.iso8601.decode(SurfaceMemory.self, from: data)
     }
@@ -205,15 +218,15 @@ public final class SurfaceMemoryStore {
     }()
 
     private func saveMemory(_ memory: SurfaceMemory) throws {
-        let url = pathFor(app: memory.app, surface: memory.surface)
+        let url = pathFor(bundleID: memory.bundleID, surface: memory.surface)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try Self.memoryEncoder.encode(memory)
         try data.write(to: url, options: [.atomic])
     }
 
-    private func pathFor(app: String, surface: String) -> URL {
+    private func pathFor(bundleID: String, surface: String) -> URL {
         Self.storageRoot
-            .appendingPathComponent(safeFilename(app))
+            .appendingPathComponent(safeFilename(bundleID))
             .appendingPathComponent(safeFilename(surface) + ".json")
     }
 

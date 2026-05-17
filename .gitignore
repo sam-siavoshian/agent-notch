@@ -24,6 +24,11 @@ Package.resolved
 
 # Local secrets — bundled at build time, never committed.
 .env
+# Legacy secrets dir from before `.env` consolidation (origin commit 461f0c0
+# removed the tracked Config/ dir but local copies with keys can linger).
+# Belt-and-suspenders so a stray `git add -A` never re-stages them.
+Config/
+Config/agentnotch.env
 
 # ArshanTesting sandbox
 ArshanTesting/.env

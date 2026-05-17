@@ -266,13 +266,15 @@ public final class ContextCoordinator: RecentActivityContext {
             // fails or the raw image is missing.
             if classification.classification == .majorChange, let rawImage = snapshot.rawImage,
                let png = ScreenCapture.shared.pngEncode(rawImage) {
+                let observerBundleID = bundleID
                 Task.detached(priority: .utility) {
                     let hint = await MainActor.run {
                         NSWorkspace.shared.frontmostApplication?.localizedName
                     }
                     await GeminiObserver.shared.observe(
                         screenshotPNG: png,
-                        frontmostHint: hint
+                        frontmostHint: hint,
+                        bundleID: observerBundleID.isEmpty ? nil : observerBundleID
                     )
                 }
             }

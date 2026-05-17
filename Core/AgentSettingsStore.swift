@@ -79,7 +79,7 @@ public struct AgentSettings: Equatable, Sendable {
     ]
 
     public static let `default` = AgentSettings(
-        agentModel: .sonnet,
+        agentModel: .haiku,
         reasoningEffort: .medium,
         preferences: "",
         systemPrompt: "",
@@ -108,7 +108,7 @@ extension AgentSettings: Codable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        agentModel           = (try? c.decode(AgentModel.self,           forKey: .agentModel))           ?? .sonnet
+        agentModel           = (try? c.decode(AgentModel.self,           forKey: .agentModel))           ?? .haiku
         reasoningEffort      = (try? c.decode(AgentReasoningEffort.self, forKey: .reasoningEffort))      ?? .medium
         preferences          = (try? c.decode(String.self,               forKey: .preferences))          ?? ""
         systemPrompt         = (try? c.decode(String.self,               forKey: .systemPrompt))         ?? ""

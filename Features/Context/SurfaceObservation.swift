@@ -14,6 +14,12 @@ public struct SurfaceObservation: Codable, Identifiable {
     public let id: UUID
     public let t: Date
     public let frontmostApp: String?
+    /// Bundle ID of the frontmost app at capture time. System-injected by the
+    /// observer caller, not produced by Gemini — the model has no way to know
+    /// it from pixels. The canonical key for `SurfaceMemoryStore`; `frontmostApp`
+    /// (localized display name) varies across language and version and is kept
+    /// only for display.
+    public let bundleID: String?
     public let allVisibleApps: [String]
     public let screenLayout: String?            // multi-app spatial description
     public let currentSurface: String?          // e.g. "Slack #design channel composer"
@@ -35,13 +41,18 @@ public struct SurfaceObservation: Codable, Identifiable {
     public let currentGoalGuess: String?
     /// One sentence linking to recent activity; nil if not inferable.
     public let continuityLink: String?
-    /// One of: document | form | chat | code | settings | browser_article |
-    /// email | media | other. String-typed to stay tolerant of future values.
+    /// Primary content type — the frontmost app's content. One of: document |
+    /// form | chat | code | settings | browser_article | email | media | other.
+    /// String-typed to stay tolerant of future values. A quick filter; the full
+    /// per-app set lives in `artifacts`.
     public let contentType: String?
-    /// Per-content-type structured payload. Heterogeneous — see GeminiObserver
-    /// prompt for the per-type schema. Kept as untyped JSON because Mercury
-    /// reads it as JSON anyway and we don't want to maintain nine typed variants.
-    public let artifact: [String: AnyCodable]?
+    /// Structured content extracted from each visible app that has useful
+    /// content (not just the frontmost). When a user has Slack + Brave +
+    /// Figma all visible, you get up to three entries — one per app — each
+    /// tagged with its own `app` and `content_type`. Lets the Selector
+    /// resolve deictic references like "the doc" against whichever visible
+    /// app actually contains a document.
+    public let artifacts: [Artifact]?
 
     public struct Control: Codable {
         public let label: String
@@ -50,10 +61,27 @@ public struct SurfaceObservation: Codable, Identifiable {
         public let iconHint: String?        // "paper plane" — useful when label is empty
     }
 
+    /// One structured-content extraction tagged to a specific visible app.
+    /// `payload` is heterogeneous because the per-content-type schemas vary
+    /// (a document has body_excerpt + headings; a chat has messages[]; code
+    /// has file_path, selection, focused_function, etc.) — see GeminiObserver's
+    /// system prompt for the per-type schema.
+    public struct Artifact: Codable {
+        public let app: String
+        public let contentType: String
+        public let payload: [String: AnyCodable]
+        enum CodingKeys: String, CodingKey {
+            case app
+            case contentType = "content_type"
+            case payload
+        }
+    }
+
     public init(
         id: UUID = UUID(),
         t: Date = Date(),
         frontmostApp: String?,
+        bundleID: String? = nil,
         allVisibleApps: [String],
         screenLayout: String?,
         currentSurface: String?,
@@ -65,10 +93,11 @@ public struct SurfaceObservation: Codable, Identifiable {
         currentGoalGuess: String? = nil,
         continuityLink: String? = nil,
         contentType: String? = nil,
-        artifact: [String: AnyCodable]? = nil
+        artifacts: [Artifact]? = nil
     ) {
         self.id = id; self.t = t
         self.frontmostApp = frontmostApp
+        self.bundleID = bundleID
         self.allVisibleApps = allVisibleApps
         self.screenLayout = screenLayout
         self.currentSurface = currentSurface
@@ -80,12 +109,13 @@ public struct SurfaceObservation: Codable, Identifiable {
         self.currentGoalGuess = currentGoalGuess
         self.continuityLink = continuityLink
         self.contentType = contentType
-        self.artifact = artifact
+        self.artifacts = artifacts
     }
 
     enum CodingKeys: String, CodingKey {
         case id, t
         case frontmostApp = "frontmost_app"
+        case bundleID = "bundle_id"
         case allVisibleApps = "all_visible_apps"
         case screenLayout = "screen_layout"
         case currentSurface = "current_surface"
@@ -97,6 +127,6 @@ public struct SurfaceObservation: Codable, Identifiable {
         case currentGoalGuess = "current_goal_guess"
         case continuityLink = "continuity_link"
         case contentType = "content_type"
-        case artifact
+        case artifacts
     }
 }

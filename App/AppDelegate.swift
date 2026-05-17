@@ -12,6 +12,13 @@ private let log = Log(category: "boot")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Force line-buffering on stdout so dev.sh's `tee` sees output live
+        // instead of waiting for the 4KB block buffer to fill. Default Swift
+        // behavior when stdout is a pipe (not a TTY) is fully buffered, which
+        // hides errors for minutes when the app is producing only a handful
+        // of log lines per second.
+        setvbuf(stdout, nil, _IOLBF, 0)
+
         NSApp.setActivationPolicy(.accessory)
         Env.load()
         NotchWindowController.shared.install()

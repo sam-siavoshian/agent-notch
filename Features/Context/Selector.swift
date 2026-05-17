@@ -12,7 +12,16 @@ public final class ContextSelector {
     /// emitted to the harness as a system block, plus diagnostics for Dev Tools.
     public struct Result {
         public let intent: CIntent
+        /// Markdown rendering of the brief, handed to the computer-use harness
+        /// verbatim. When Mercury succeeds this is rendered from `structuredBrief`
+        /// in Swift (deterministic shape); when we fall back to LocalBriefRenderer
+        /// it comes from there directly.
         public let brief: String
+        /// Typed brief object as returned by Mercury. Nil when degraded — the
+        /// LocalBriefRenderer path does not produce a structured shape today.
+        /// Consumers that want to render the brief differently (Dev Tools,
+        /// validation, future agents) should prefer this over `brief`.
+        public let structuredBrief: StructuredBrief?
         public let l2: CL2Snapshot
         /// JPEG bytes captured at long-press time (same frame OCR ran on).
         /// Forwarded to the harness as the first user-message image so Claude
@@ -51,10 +60,17 @@ public final class ContextSelector {
         let l2 = snap.l2
         let initiationScreenshot = snap.screenshotJPEG
 
-        // Ensure active_task isn't more than 30 s stale before bundling it.
+        // Refresh active_task when it's either time-stale OR doesn't cover the
+        // current app. The second trigger matters when the 30s/90s gates in
+        // ActiveTaskUpdater have blocked a recent app-switch tick: the user
+        // long-presses in VSCode but the on-disk task still describes Slack.
+        // Forcing a refresh here (tight 2s deadline) keeps Mercury from
+        // writing a brief grounded in the wrong context.
         let staleThreshold: TimeInterval = 30.0
         let currentTask = L5Store.shared.loadActiveTask()
-        let needsRefresh = currentTask.flatMap { $0.staleSince.map { Date().timeIntervalSince($0) > staleThreshold } } ?? false
+        let staleByTime = currentTask.flatMap { $0.staleSince.map { Date().timeIntervalSince($0) > staleThreshold } } ?? false
+        let staleByContext = !Self.currentTaskCoversBundle(currentTask, l2: l2)
+        let needsRefresh = staleByTime || staleByContext
         let activeTask: CActiveTask?
         if needsRefresh {
             activeTask = (await ActiveTaskUpdater.shared.refresh(timeout: 2.0)) ?? currentTask
@@ -84,9 +100,21 @@ public final class ContextSelector {
                     timeout: 2.5
                 )
                 if let parsed = Self.parseResponse(raw) {
+                    // Validation gate: if the user has a matching learned surface
+                    // with controls, Mercury MUST have cited them in
+                    // navigation_anchors. An empty anchors list when ground
+                    // truth was available means Mercury "decided" the anchors
+                    // weren't useful and dropped them — exactly the failure
+                    // mode the structured brief is meant to catch. Log but
+                    // proceed; the brief is still likely usable.
+                    let hadMatchingLearned = Self.hadMatchingLearnedSurface(l2: l2)
+                    if hadMatchingLearned && parsed.brief.navigationAnchors.isEmpty {
+                        NSLog("[Selector] WARN: Mercury returned empty navigation_anchors despite matching learned surface for \(l2.bundleID) / \(l2.windowTitle ?? "?")")
+                    }
                     let result = Result(
                         intent: parsed.intent,
-                        brief: parsed.brief,
+                        brief: Self.renderMarkdown(parsed.brief),
+                        structuredBrief: parsed.brief,
                         l2: l2,
                         initiationScreenshot: initiationScreenshot,
                         degraded: false,
@@ -113,6 +141,7 @@ public final class ContextSelector {
         let result = Result(
             intent: intent,
             brief: brief,
+            structuredBrief: nil,
             l2: l2,
             initiationScreenshot: initiationScreenshot,
             degraded: true,
@@ -158,78 +187,86 @@ public final class ContextSelector {
     // MARK: - System prompt (kept here; Phase 5 cleanup can move to a shared constant)
 
     static let systemPrompt: String = """
-    You are the context selector for an on-screen macOS computer-use agent.
+    You are the context selector for a macOS computer-use agent.
 
-    You receive a single JSON payload with: a voice transcript, the current screen
-    snapshot (AX elements, OCR, selection, clipboard, app-specific data), the user's
-    preferences, the user's active task and recent activity, and per-app operational
-    recipes the agent can use.
+    You receive a JSON payload describing what the user is doing right now:
+    a voice transcript, the current screen (AX elements, OCR, focused element,
+    selection, clipboard, app-specific data), the user's preferences, the
+    user's active task, recent events and resources, learned per-surface UI
+    knowledge, a recent chronological story of activity, and per-app recipes.
 
-    You may receive `learned_surfaces`: accumulated per-surface UI knowledge
-    built up over many prior passive observations of this app. Each entry has
-    {app, surface, controls[], observation_count, last_seen}. Treat this as the
-    canonical map of "how this app's surfaces actually work" — when the current
-    screen matches a learned surface, prefer its controls/locations over your own
-    inferences. Use it to write more confident, more specific steps in the brief
-    (e.g., "Send button bottom-right of composer — seen 47 times"). Don't dump
-    raw learned_surfaces into the brief; distill them into actionable guidance.
+    Your job is to convert this into a STRUCTURED brief the agent will use to
+    act. You MUST return a JSON object matching the schema below, filling
+    EVERY required field. The agent has NO MEMORY between turns and CANNOT
+    see the screen until it takes a screenshot. Every useful navigation
+    anchor, AX path, learned control, or recipe step MUST appear in the brief.
+    The cost of a redundant anchor is 5 tokens; the cost of an omitted one is
+    a wasted screenshot and a slow turn. Bias hard toward inclusion.
 
-    You may receive `recent_story`: a chronological strip of what the user has
-    been doing across the last few minutes, built from per-capture vision
-    observations. Each entry has {t, app, surface, narrative,
-    current_goal_guess, content_type, artifact}. Use this to:
-    - Resolve deictic references ("the letter", "her message", "that doc")
-      against the artifacts the user has actually been touching.
-    - Write briefs with real continuity ("you've been drafting a letter to
-      Marcus for the last 5 minutes" beats "you appear to be in TextEdit").
-    - Decide whether the user's current voice request is a CONTINUATION of
-      recent activity (most common) or a NEW task (less common).
-    Never reproduce raw artifact bodies into the brief verbatim — they may
-    be sensitive. Summarize them.
+    Important inputs:
+    - `learned_surfaces`: per-(app, surface) UI knowledge built from many
+      prior passive observations. Entries that match the current screen are
+      GROUND TRUTH about controls and locations. When an entry matches the
+      current surface, you MUST cite at least its top-3 controls by
+      `seen_count` in `navigation_anchors`, even if you think the agent
+      could find them on its own.
+    - `recent_story`: chronological story of recent activity with per-entry
+      `narrative`, `current_goal_guess`, `content_type`, `artifact`. Use it
+      to resolve deictic references ("the letter", "her", "that PR") against
+      what the user has actually been touching. Never reproduce raw artifact
+      bodies in the brief — summarize them.
+    - `active_task`: rolling task object with label, narrative, resources.
+      Use `resources[]` for "the X I was working on".
+    - `recipes_for_active_app`: promoted L3 recipes (sequences seen ≥3 times).
+      Prefer them over computer-vision steps when available.
 
-    Your job is two things in one call:
+    Output schema — return EXACTLY this JSON object:
 
-    (1) RESOLVE INTENT. Output {verb, target, resolved_target?, entities, confidence}.
-        Use active_task, recent_events, recent_resources, and clipboard to resolve
-        deictic references — "the draft", "her", "that PR", "this". Be specific. If
-        you cannot resolve a reference with high confidence, leave resolved_target
-        null and set confidence accordingly. **Indirect-object recipients (a person
-        a thing is being sent to) belong in `entities`, not `target` — `target` is
-        the thing being acted on.**
+    {
+      "intent": {
+        "verb":            string,
+        "target":          string | null,
+        "resolved_target": string | null,
+        "entities":        [{"label": string, "kind": string, "resolved_to": string | null}],
+        "confidence":      number
+      },
+      "brief": {
+        "goal":            string,                          // one sentence, all references resolved
+        "current_surface": {
+          "app":             string,
+          "surface":         string | null,
+          "focused_element": string | null
+        } | null,
+        "navigation_anchors": [
+          {"label": string, "ax_path": string | null, "source": string}
+        ],
+        "resolved_references": [
+          {"phrase": string, "resolved_to": string, "evidence": string | null}
+        ],
+        "steps": [
+          {"tool": string, "value": string, "note": string | null}
+        ],
+        "watch_out_for": [string]
+      }
+    }
 
-    (2) WRITE THE BRIEF. A markdown briefing for the computer-use agent, ≤600 tokens,
-        structured per the template below. The agent has these tools, in preference
-        order: open_url > applescript > run_shortcut > ax_query+ax_press >
-        menu_shortcut > computer (vision+click). ALWAYS lead with anchors above
-        "computer". Never include pixel coordinates — they are not reliable across
-        turns.
-
-    Brief template (omit any section with nothing concrete to say):
-
-    ## What the user wants
-    <one sentence with resolved references>
-
-    ## You are here
-    - App, window, focused element (AX path)
-    - Useful AX paths on this screen (≤5, role+label+ax_path)
-    - Active selection or recent clipboard if relevant
-
-    ## How to do it on <app>
-    <ordered steps, leading with the fastest tool — shortcut, url, menu, applescript>
-
-    ## What "<deictic>" means
-    <one entry per pronoun/reference that resolved to a specific resource>
-
-    ## Watch out for
-    <only if there's a real, evidenced gotcha>
-
-    Rules:
-    - Coordinate-free. Anchors only.
-    - Never invent recipes, AX paths, or resources. If you don't have it, say
-      "you'll need to look" and let the agent screenshot.
-    - Stay under 600 tokens. Density over completeness.
-
-    Return strictly one JSON object: { "intent": {...}, "brief": "..." }.
+    Field rules:
+    - `intent.target` is the thing being acted on. Indirect-object recipients
+      (a person something is being sent to) belong in `entities`, not `target`.
+    - `navigation_anchors`: REQUIRED whenever ANY UI signal is in the payload
+      (current AX elements, a matching learned_surfaces entry, or recipes).
+      Each `source` should be one of: "learned (Nx)", "L2 AX", "recipe:<name>",
+      "active_task", "resource_index". Use an empty array only when no UI
+      signal exists at all.
+    - `resolved_references`: include one entry per deictic phrase in the
+      transcript ("it", "her", "that", "this", "the X"). If unresolved,
+      set `resolved_to` to "" and lower `intent.confidence`.
+    - `steps.tool` MUST be one of: `open_url`, `applescript`, `run_shortcut`,
+      `menu_shortcut`, `ax_press`, `type`, `key`, `computer`. List in
+      preference order — fastest tool first.
+    - Never invent AX paths, URIs, or recipe steps you weren't shown.
+    - Coordinate-free. Never emit pixel coordinates.
+    - Strict JSON. No backticks. No prose outside the JSON.
     """
 
     // MARK: - Prompt builder
@@ -257,7 +294,11 @@ public final class ContextSelector {
             let narrative: String?
             let current_goal_guess: String?
             let content_type: String?
-            let artifact: [String: AnyCodable]?
+            /// Per-visible-app structured content from this observation.
+            /// Mercury reads it to resolve deictic references — "the doc"
+            /// pulls the entry whose content_type is document, "her message"
+            /// pulls a chat entry, etc.
+            let artifacts: [SurfaceObservation.Artifact]?
         }
 
         struct Payload: Encodable {
@@ -281,21 +322,40 @@ public final class ContextSelector {
             let recent_story: [StoryEntry]
         }
 
-        // Cap the per-surface control list to keep prompt size bounded; sort
-        // by frequency so the most-seen surfaces/controls surface first.
-        let learned: [SurfaceMemoryStore.SurfaceMemory] = Array(
-            SurfaceMemoryStore.shared
-                .memories(for: l2.app)
-                .sorted { $0.observationCount > $1.observationCount }
-                .prefix(6)
-                .map { mem -> SurfaceMemoryStore.SurfaceMemory in
-                    var trimmed = mem
-                    trimmed.controls = Array(
-                        mem.controls.sorted { $0.seenCount > $1.seenCount }.prefix(12)
-                    )
-                    return trimmed
-                }
-        )
+        // Rank surfaces with the CURRENT one first, then the rest by frequency.
+        // Ranking by raw observationCount alone meant a long-press in a niche
+        // surface (e.g. one specific Slack channel) could exclude that surface
+        // from the top-6 entirely, since busier channels dominate the count.
+        // Now any surface whose label shares a meaningful token with the live
+        // window title floats to the top, regardless of count.
+        //
+        // Within each surface, controls whose labels appear in the transcript
+        // are boosted ahead of high-frequency-but-irrelevant ones (e.g. asking
+        // "send" pulls the Send button forward over Channels/Settings).
+        let allMemories = SurfaceMemoryStore.shared.memories(forBundle: l2.bundleID)
+        let lowerTranscript = transcript.lowercased()
+        var matchesCurrent: [SurfaceMemoryStore.SurfaceMemory] = []
+        var others: [SurfaceMemoryStore.SurfaceMemory] = []
+        for mem in allMemories {
+            if Self.surfaceMatchesTitle(mem.surface, title: l2.windowTitle) {
+                matchesCurrent.append(mem)
+            } else {
+                others.append(mem)
+            }
+        }
+        let learned: [SurfaceMemoryStore.SurfaceMemory] = (
+            matchesCurrent.sorted { $0.observationCount > $1.observationCount } +
+            others.sorted { $0.observationCount > $1.observationCount }
+        ).prefix(6).map { mem -> SurfaceMemoryStore.SurfaceMemory in
+            var trimmed = mem
+            trimmed.controls = Array(mem.controls.sorted { lhs, rhs in
+                let lInTranscript = lowerTranscript.contains(lhs.label.lowercased())
+                let rInTranscript = lowerTranscript.contains(rhs.label.lowercased())
+                if lInTranscript != rInTranscript { return lInTranscript }
+                return lhs.seenCount > rhs.seenCount
+            }.prefix(12))
+            return trimmed
+        }
 
         // Pull the last 20 story entries, then keep only those within the last
         // 5 minutes. If fewer fit the window, that's fine — emit what's there.
@@ -311,7 +371,7 @@ public final class ContextSelector {
                     narrative: obs.narrative,
                     current_goal_guess: obs.currentGoalGuess,
                     content_type: obs.contentType,
-                    artifact: obs.artifact
+                    artifacts: obs.artifacts
                 )
             }
 
@@ -332,7 +392,12 @@ public final class ContextSelector {
 
     // MARK: - Response parser
 
+    // Hoisted JSON coders — upstream's optimization, kept here so both the
+    // typed brief decode and the prompt encode pay zero allocation cost
+    // per call. `briefDecoder` handles `StructuredBrief`; `intentDecoder`
+    // handles the inner `CIntent` payload.
     private static let intentDecoder = JSONDecoder()
+    private static let briefDecoder = JSONDecoder()
 
     private static let promptEncoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -341,23 +406,195 @@ public final class ContextSelector {
         return e
     }()
 
-    /// Robust parse: extract `brief` via JSONSerialization first (so it survives even when
-    /// Mercury's intent shape doesn't decode), then attempt typed intent decode.
-    static func parseResponse(_ raw: String) -> (intent: CIntent, brief: String)? {
+    /// Decode Mercury's `{intent, brief}` envelope where `brief` is a typed
+    /// `StructuredBrief` object (no longer a free-form markdown string).
+    /// Robust: when `intent` is malformed but `brief` is valid we still
+    /// return — the brief is the load-bearing artifact for the harness.
+    static func parseResponse(_ raw: String) -> (intent: CIntent, brief: StructuredBrief)? {
         guard let data = raw.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        guard let brief = obj["brief"] as? String, !brief.isEmpty else { return nil }
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let briefAny = obj["brief"],
+              let briefData = try? JSONSerialization.data(withJSONObject: briefAny),
+              let brief = try? Self.briefDecoder.decode(StructuredBrief.self, from: briefData)
+        else { return nil }
+
         var intent: CIntent
         if let intentAny = obj["intent"],
            let intentData = try? JSONSerialization.data(withJSONObject: intentAny),
            let parsed = try? Self.intentDecoder.decode(CIntent.self, from: intentData) {
             intent = parsed
         } else {
-            // Brief is valid but intent malformed — return a low-confidence default.
             intent = CIntent(verb: "do", target: nil, resolvedTarget: nil, entities: [], confidence: 0.2)
         }
         return (intent, brief)
+    }
+
+    // MARK: - Surface matching
+
+    /// Fuzzy match between a learned surface label and the live window title.
+    /// Tokenizes both into alphanumeric chunks ≥3 chars and returns true on
+    /// any shared token. Cheap, language-agnostic, and good enough to catch
+    /// "Slack #design composer" ↔ "Slack — design" without dragging in a
+    /// real string-similarity dependency.
+    static func surfaceMatchesTitle(_ surface: String, title: String?) -> Bool {
+        guard let title, !title.isEmpty else { return false }
+        return !tokens(surface).intersection(tokens(title)).isEmpty
+    }
+
+    private static func tokens(_ s: String) -> Set<String> {
+        Set(
+            s.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count >= 3 }
+        )
+    }
+
+    /// True when the on-disk active_task mentions the live app/bundleID
+    /// anywhere in its label, narrative, or resources. When false, the task
+    /// is "context-stale" relative to where the user is right now and the
+    /// Selector forces a refresh regardless of `staleSince`.
+    static func currentTaskCoversBundle(_ task: CActiveTask?, l2: CL2Snapshot) -> Bool {
+        guard let task else { return false }
+        let needles = [l2.bundleID.lowercased(), l2.app.lowercased()].filter { !$0.isEmpty }
+        guard !needles.isEmpty else { return false }
+        let haystack = ([
+            task.label,
+            task.narrative
+        ] + task.resources).joined(separator: " ").lowercased()
+        return needles.contains(where: { haystack.contains($0) })
+    }
+
+    /// True iff at least one learned surface for the live bundleID both
+    /// matches the live window title AND has any controls. Used by `select`
+    /// to detect when Mercury silently dropped anchors despite ground truth.
+    static func hadMatchingLearnedSurface(l2: CL2Snapshot) -> Bool {
+        SurfaceMemoryStore.shared
+            .memories(forBundle: l2.bundleID)
+            .contains { mem in
+                surfaceMatchesTitle(mem.surface, title: l2.windowTitle) && !mem.controls.isEmpty
+            }
+    }
+
+    // MARK: - Markdown renderer
+
+    /// Render a `StructuredBrief` into the markdown the harness has always
+    /// consumed via `Input.contextSummary`. The shape is deterministic and
+    /// driven entirely by what Mercury filled in — Swift never paraphrases,
+    /// reorders, or invents. Sections with empty arrays / nil fields are
+    /// omitted so the rendered prose stays tight.
+    static func renderMarkdown(_ b: StructuredBrief) -> String {
+        var lines: [String] = []
+        lines.append("## What the user wants")
+        lines.append(b.goal)
+        lines.append("")
+
+        if let cs = b.currentSurface {
+            lines.append("## You are here")
+            var loc = "- App: \(cs.app)"
+            if let s = cs.surface, !s.isEmpty { loc += " — \(s)" }
+            lines.append(loc)
+            if let f = cs.focusedElement, !f.isEmpty {
+                lines.append("- Focused: \(f)")
+            }
+            if !b.navigationAnchors.isEmpty {
+                lines.append("- Anchors:")
+                for a in b.navigationAnchors {
+                    let path = (a.axPath?.isEmpty == false) ? " — `\(a.axPath!)`" : ""
+                    lines.append("  - \(a.label)\(path) _(\(a.source))_")
+                }
+            }
+            lines.append("")
+        } else if !b.navigationAnchors.isEmpty {
+            lines.append("## Anchors")
+            for a in b.navigationAnchors {
+                let path = (a.axPath?.isEmpty == false) ? " — `\(a.axPath!)`" : ""
+                lines.append("- \(a.label)\(path) _(\(a.source))_")
+            }
+            lines.append("")
+        }
+
+        if !b.steps.isEmpty {
+            lines.append("## How to do it")
+            for (i, s) in b.steps.enumerated() {
+                let note = (s.note?.isEmpty == false) ? " — \(s.note!)" : ""
+                lines.append("\(i + 1). **\(s.tool)** `\(s.value)`\(note)")
+            }
+            lines.append("")
+        }
+
+        if !b.resolvedReferences.isEmpty {
+            lines.append("## What references mean")
+            for r in b.resolvedReferences where !r.resolvedTo.isEmpty {
+                let ev = (r.evidence?.isEmpty == false) ? " _(\(r.evidence!))_" : ""
+                lines.append("- **\"\(r.phrase)\"** → \(r.resolvedTo)\(ev)")
+            }
+            lines.append("")
+        }
+
+        if !b.watchOutFor.isEmpty {
+            lines.append("## Watch out for")
+            for w in b.watchOutFor { lines.append("- \(w)") }
+        }
+
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - StructuredBrief
+
+/// Typed shape Mercury must fill in. Driven by the system-prompt schema in
+/// `ContextSelector.systemPrompt`. Decoding-fail acts as the validation
+/// gate: if Mercury drops a required field, the selector falls through to
+/// `LocalBriefRenderer`.
+public struct StructuredBrief: Codable {
+    public let goal: String
+    public let currentSurface: CurrentSurface?
+    public let navigationAnchors: [NavigationAnchor]
+    public let resolvedReferences: [ResolvedReference]
+    public let steps: [Step]
+    public let watchOutFor: [String]
+
+    public struct CurrentSurface: Codable {
+        public let app: String
+        public let surface: String?
+        public let focusedElement: String?
+        enum CodingKeys: String, CodingKey {
+            case app, surface
+            case focusedElement = "focused_element"
+        }
+    }
+
+    public struct NavigationAnchor: Codable {
+        public let label: String
+        public let axPath: String?
+        public let source: String
+        enum CodingKeys: String, CodingKey {
+            case label, source
+            case axPath = "ax_path"
+        }
+    }
+
+    public struct ResolvedReference: Codable {
+        public let phrase: String
+        public let resolvedTo: String
+        public let evidence: String?
+        enum CodingKeys: String, CodingKey {
+            case phrase, evidence
+            case resolvedTo = "resolved_to"
+        }
+    }
+
+    public struct Step: Codable {
+        public let tool: String
+        public let value: String
+        public let note: String?
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case goal, steps
+        case currentSurface = "current_surface"
+        case navigationAnchors = "navigation_anchors"
+        case resolvedReferences = "resolved_references"
+        case watchOutFor = "watch_out_for"
     }
 }

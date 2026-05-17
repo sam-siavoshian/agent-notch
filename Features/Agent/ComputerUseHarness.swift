@@ -151,9 +151,22 @@ public final class ComputerUseHarness {
             logicalDisplaySize: logicalSize,
             screenshotLongEdge: agentScreenshotLongEdge
         )
-        let client = AnthropicClient(apiKey: apiKey)
 
-        let tools = buildTools(displaySize: agentTargetSize)
+        // Per-run model resolution. `currentAgentModel` is the typed selection
+        // — we derive the computer-use tool TYPE and beta HEADER from it,
+        // since those must match (e.g. Sonnet 4.6 requires computer_20251124
+        // + computer-use-2025-11-24; Haiku 4.5 requires computer_20250124 +
+        // computer-use-2025-01-24). Falls back to .haiku if the settings
+        // store is unreachable.
+        var currentAgentModel = AgentSettingsStore.shared.agentModel
+        // var, not let — `AnthropicClient` is a struct and we mutate its
+        // `betaHeaders` on the fallback path (the computer-use beta has to
+        // switch with the model family).
+        var client = AnthropicClient(
+            apiKey: apiKey,
+            betaHeaders: Self.betaHeaders(for: currentAgentModel)
+        )
+        var tools = buildTools(displaySize: agentTargetSize, toolType: currentAgentModel.computerUseToolType)
         let system = buildSystemBlocks(
             settings: settings,
             contextSummary: input.contextSummary
@@ -199,11 +212,8 @@ public final class ComputerUseHarness {
             Message(role: "user", content: firstUserContent)
         ]
 
-        // Per-run model resolution: prefer the user's saved selection over the
-        // hardcoded default. Falls back to `self.modelID` if the settings store
-        // can't be reached (shouldn't happen on @MainActor but cheap to guard).
-        let selectedModelID = AgentSettingsStore.shared.agentModel.modelID
-        var currentModel = selectedModelID.isEmpty ? modelID : selectedModelID
+        var currentModel = currentAgentModel.modelID
+        if currentModel.isEmpty { currentModel = modelID }
         var triedFallback = false
         var turn = 0
 
@@ -301,6 +311,14 @@ public final class ComputerUseHarness {
                     triedFallback = true
                     usedFallback = true
                     currentModel = fallbackModelID
+                    // The fallback model lives in a different computer-use
+                    // family than the original (Sonnet/Opus → Haiku), so the
+                    // tools array AND the beta header have to switch with it,
+                    // or the next request fails with the same 400 we're
+                    // recovering from.
+                    currentAgentModel = .haiku
+                    tools = buildTools(displaySize: agentTargetSize, toolType: currentAgentModel.computerUseToolType)
+                    client.betaHeaders = Self.betaHeaders(for: currentAgentModel)
                     continue
                 }
                 let status = err.status.map(String.init) ?? "nil"
@@ -521,16 +539,27 @@ public final class ComputerUseHarness {
 
     // MARK: - Tools
 
-    private func buildTools(displaySize: CGSize) -> [Tool] {
+    private func buildTools(displaySize: CGSize, toolType: String) -> [Tool] {
         let openURL: Tool = .custom(
             name: "open_url",
-            description: "Open a URL via NSWorkspace. Accepts https://, mailto:, sms:, spotify:, shortcuts://, raycast://, things:///add, etc. Zero-click intent dispatch — strongly preferred over clicking through a browser. Returns immediately.",
+            description: "Open a URL via NSWorkspace. Accepts https://, mailto:, sms:, spotify:, shortcuts://, raycast://, things:///add, etc. Zero-click intent dispatch. Use for web URLs and deep links (e.g. https://github.com/..., spotify:track:..., things:///add?title=...). For PLAIN 'open <DesktopApp>' goals (Discord, Slack, Notion, etc.) prefer `open_app` instead — `open_url <app-scheme>://` goes through macOS's default URL-scheme handler which may resolve to a beta/canary/dev variant of the app.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
                     "url": .object(["type": .string("string"), "description": .string("Fully-qualified URL or app-scheme URL.")])
                 ]),
                 "required": .array([.string("url")])
+            ])
+        )
+        let openApp: Tool = .custom(
+            name: "open_app",
+            description: "Launch (or activate) a desktop app BY NAME using exact-path resolution. Resolves to /Applications/<Name>.app (or /System/Applications, ~/Applications) — bypasses macOS's URL-scheme default-handler resolution, which on machines with both Discord.app + Discord Canary.app (or Slack + Slack Beta, etc.) would otherwise pick the canary/beta variant. Use this for any 'open <App>' goal; use open_url only for web URLs and true deep links.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string"), "description": .string("The .app folder name in /Applications, exact (e.g. 'Discord', not 'Discord Canary'; 'Slack', not 'Slack Beta'). Case-sensitive — match what shows in Finder.")])
+                ]),
+                "required": .array([.string("name")])
             ])
         )
         let applescript: Tool = .custom(
@@ -607,10 +636,22 @@ public final class ComputerUseHarness {
             displayWidth: Int(displaySize.width),
             displayHeight: Int(displaySize.height),
             displayNumber: 1,
-            cache: true
+            cache: true,
+            toolType: toolType
         )
 
-        return [openURL, applescript, runShortcut, axQuery, axPress, axSetValue, menuShortcut, computer]
+        return [openApp, openURL, applescript, runShortcut, axQuery, axPress, axSetValue, menuShortcut, computer]
+    }
+
+    /// Beta headers for a given user-selected model. The computer-use header
+    /// is model-family-specific (see `AgentModel.computerUseBetaHeader`);
+    /// the others (prompt-caching, interleaved-thinking) are constant.
+    private static func betaHeaders(for model: AgentModel) -> [String] {
+        return [
+            model.computerUseBetaHeader,
+            "prompt-caching-2024-07-31",
+            "interleaved-thinking-2025-05-14"
+        ]
     }
 
     // MARK: - System prompt (split for caching)
@@ -623,17 +664,19 @@ public final class ComputerUseHarness {
         You are an on-screen macOS computer-use ACTOR — not a chatbot, not an assistant. Your only outputs are tool calls and (on turn 1) a 9-word spoken affirmation read aloud to the user.
 
         ALWAYS prefer tools in this order, falling back only when the prior tool cannot do the task:
-          1. open_url — for any URL (https, mailto, sms, spotify, shortcuts, raycast, things). Zero clicks. Use this FIRST whenever the goal is "go to / open <thing>".
-          2. applescript — for Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. One call, no UI traversal.
-          3. run_shortcut — for user-installed macOS Shortcuts.
-          4. ax_query + ax_press / ax_set_value — for buttons, links, and text fields you can name. Faster and more reliable than clicking pixels.
-          5. menu_shortcut — for any menu item; sends the registered keyboard shortcut instead of clicking the menu.
-          6. computer — vision + click/type/scroll. ONLY when nothing above applies.
+          1. open_app — for any plain "open <DesktopApp>" goal (Discord, Slack, Notion, Spotify, etc.). Path-resolved so it ALWAYS opens the canonical /Applications/<Name>.app, never a Canary/Beta/Dev variant. Use this BEFORE open_url for desktop apps.
+          2. open_url — for web URLs (https, mailto, sms) and true deep links (spotify:track:..., things:///add?title=..., shortcuts://, raycast://). Do NOT use `open_url <app>://` to launch a bare app — that goes through Launch Services' default-handler and may resolve to a beta variant; use open_app instead.
+          3. applescript — for Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. One call, no UI traversal.
+          4. run_shortcut — for user-installed macOS Shortcuts.
+          5. ax_query + ax_press / ax_set_value — for buttons, links, and text fields you can name. Faster and more reliable than clicking pixels.
+          6. menu_shortcut — for any menu item; sends the registered keyboard shortcut instead of clicking the menu.
+          7. computer — vision + click/type/scroll. ONLY when nothing above applies.
 
         Plan-then-act: on turn 1, output one short sentence stating the goal and your first concrete action, THEN your spoken affirmation, THEN call the tool. Keep the spoken affirmation under 9 words — it will be read aloud (e.g. "Opening that now." or "On it."). After turn 1, do NOT write user-facing prose — your work product is tool calls, not commentary. A teammate auditing the trace later reads tool calls and outcomes, not your inner monologue.
 
-        Screenshots are your eyes. You start every turn with a current visual of the screen — the initiation screenshot is in your first user message and tool results provide updated screenshots after every computer.* action. If you ever feel unsure what's on screen, take a computer.screenshot as your FIRST action that turn. Acting blindly is worse than spending one screenshot.
-        Secondary rule: do not screenshot purely to "verify" before calling a fast-path tool (open_url, applescript, run_shortcut, ax_press, menu_shortcut) that you already know how to invoke. Those tools either succeed or fail loudly — no preview needed.
+        Screenshots are your eyes. CRITICAL TURN-1 RULE: the initiation screenshot is ALREADY attached to your first user message — it captures the screen exactly as the user saw it when they spoke. On turn 1 you MUST NOT call computer.screenshot; doing so is redundant, wastes ~1 second of latency, and burns tokens. Read the initiation screenshot and act. The ONLY time you'd take a screenshot on turn 1 is if there's literally no initiation image attached (rare — only when capture failed).
+        On turn 2+, tool results from computer.* actions return updated screenshots automatically. After a non-computer tool succeeds (open_app, open_url, applescript, run_shortcut, ax_press, ax_set_value, menu_shortcut) the screen has likely changed but you do NOT get a fresh screenshot in the tool_result — if you genuinely need to see the new state to decide the next action, take a computer.screenshot then. If your next action does not depend on the new state (e.g. you're done, or you know the next keystroke regardless), skip the screenshot.
+        Secondary rule: do not screenshot purely to "verify" before calling a fast-path tool (open_app, open_url, applescript, run_shortcut, ax_press, menu_shortcut) that you already know how to invoke. Those tools either succeed or fail loudly — no preview needed.
 
         NEVER ask the user a clarifying question. If the goal is ambiguous, pick the most-likely interpretation given the brief, the user prefs, the initiation screenshot, and recent_resources — then execute. The user told you what to do via voice; they're not at the keyboard to type a clarification. If you truly cannot resolve, take a screenshot, infer from what's visible, and proceed.
 

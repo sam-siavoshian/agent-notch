@@ -158,9 +158,9 @@ public final class GeminiVisionClient {
             generationConfig: GenerationConfig(
                 responseMimeType: "application/json",
                 maxOutputTokens: 4000,
-                mediaResolution: "MEDIA_RESOLUTION_HIGH"
-            ),
-            thinkingConfig: ThinkingConfig(thinkingBudget: 0)
+                mediaResolution: "MEDIA_RESOLUTION_HIGH",
+                thinkingConfig: ThinkingConfig(thinkingBudget: 0)
+            )
         )
         req.httpBody = try Self.bodyEncoder.encode(body)
 
@@ -204,11 +204,9 @@ public final class GeminiVisionClient {
     private struct RequestBody: Encodable {
         let contents: [Content]
         let generationConfig: GenerationConfig
-        let thinkingConfig: ThinkingConfig
         enum CodingKeys: String, CodingKey {
             case contents
             case generationConfig = "generation_config"
-            case thinkingConfig = "thinking_config"
         }
     }
     private struct Content: Encodable {
@@ -235,10 +233,15 @@ public final class GeminiVisionClient {
         let responseMimeType: String
         let maxOutputTokens: Int
         let mediaResolution: String
+        /// `thinking_config` lives INSIDE `generation_config` per Google's
+        /// v1beta API schema, not at the top level. Sending it at the top
+        /// level produces HTTP 400 "Unknown name 'thinking_config'".
+        let thinkingConfig: ThinkingConfig
         enum CodingKeys: String, CodingKey {
             case responseMimeType = "response_mime_type"
             case maxOutputTokens = "max_output_tokens"
             case mediaResolution = "media_resolution"
+            case thinkingConfig = "thinking_config"
         }
     }
     private struct ThinkingConfig: Encodable {
