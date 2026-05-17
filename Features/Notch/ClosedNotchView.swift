@@ -59,9 +59,9 @@ struct ClosedNotchView: View {
         case .thinking:
             ThinkingDot(color: SoftPill.activityHue(.thinking))
         case .toolCall:
-            GlowDot(color: SoftPill.activityHue(.toolCall(name: "")))
+            GlowDot(color: SoftPill.activityHue(state.activity))
         case .error:
-            GlowDot(color: SoftPill.activityHue(.error(message: "")))
+            GlowDot(color: SoftPill.activityHue(state.activity))
         }
     }
 }
