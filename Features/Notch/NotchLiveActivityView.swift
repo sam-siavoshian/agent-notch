@@ -67,6 +67,10 @@ final class FrontmostAppObserver: ObservableObject {
     @Published var icon: NSImage?
     private var observer: NSObjectProtocol?
 
+    /// Cache own bundle id once — Bundle.main lookup is non-trivial and
+    /// runs on every frontmost-app change otherwise.
+    private static let ownBundleID = Bundle.main.bundleIdentifier
+
     init() {
         refresh()
         observer = NSWorkspace.shared.notificationCenter.addObserver(
@@ -86,7 +90,7 @@ final class FrontmostAppObserver: ObservableObject {
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
         // Skip ourselves so the badge reflects the user's actual target app,
         // not AgentNotch when the notch panel briefly takes focus.
-        if app.bundleIdentifier == Bundle.main.bundleIdentifier { return }
+        if app.bundleIdentifier == Self.ownBundleID { return }
         icon = app.icon
     }
 }
