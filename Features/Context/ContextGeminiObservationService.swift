@@ -734,7 +734,26 @@ public actor ContextGeminiObservationService {
         )
     }
 
+    /// Public entrypoint with built-in retry on transient failures (network
+    /// errors, 5xx). Tries up to 3 times with exponential backoff (1s, 3s).
+    /// 4xx client errors (bad API key, malformed request, cache-too-small)
+    /// propagate immediately since they don't self-heal.
     private func send(_ request: GeminiGenerateContentRequest, apiKey: String, timeoutSeconds: TimeInterval) async throws -> GeminiSendResult {
+        let backoffsSeconds: [Double] = [1, 3]
+        var attempt = 0
+        while true {
+            do {
+                return try await sendOnce(request, apiKey: apiKey, timeoutSeconds: timeoutSeconds)
+            } catch let error as Error where error.isRetryable && attempt < backoffsSeconds.count {
+                let delay = backoffsSeconds[attempt]
+                attempt += 1
+                NSLog("[ContextGeminiObservationService] Transient error (status=\(error.status.map(String.init) ?? "nil")), retry \(attempt)/\(backoffsSeconds.count) in \(Int(delay))s")
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+        }
+    }
+
+    private func sendOnce(_ request: GeminiGenerateContentRequest, apiKey: String, timeoutSeconds: TimeInterval) async throws -> GeminiSendResult {
         let base = endpointBaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(base)/\(model):generateContent") else {
             throw Error(status: nil, body: "Invalid Gemini endpoint URL.", underlying: nil)
@@ -1782,6 +1801,14 @@ extension ContextGeminiObservationService {
 
         public var description: String {
             "ContextGeminiObservationService.Error(status: \(status.map(String.init) ?? "nil"), body: \(body ?? "nil"), underlying: \(underlying.map { "\($0)" } ?? "nil"))"
+        }
+
+        /// True for transient failures worth retrying: URLSession errors (nil
+        /// status) and 5xx server errors (overload, 503, 502). 4xx client
+        /// errors (bad API key, malformed request) propagate immediately.
+        var isRetryable: Bool {
+            guard let status else { return true }
+            return status >= 500
         }
     }
 }
