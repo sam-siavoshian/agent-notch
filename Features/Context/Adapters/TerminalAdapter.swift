@@ -36,7 +36,12 @@ public final class TerminalAdapter: AppContextAdapter {
     public init() {}
 
     public func snapshot(bundleID: String) async throws -> [String: AnyCodable] {
-        let cwd = readCwdViaOSC7() ?? (try? await readCwdViaAppleScript(bundleID: bundleID)) ?? nil
+        let cwd: String?
+        if let osc7 = readCwdViaOSC7() {
+            cwd = osc7
+        } else {
+            cwd = try? await readCwdViaAppleScript(bundleID: bundleID)
+        }
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 
         var dict: [String: AnyCodable] = [

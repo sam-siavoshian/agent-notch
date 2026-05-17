@@ -6,7 +6,7 @@ import AppKit
 /// `LocalBriefRenderer` when Mercury times out or returns malformed JSON.
 public final class Selector {
 
-    public static let shared = Selector()
+    public static let shared = ContextSelector()
 
     /// Result returned to `AgentSession`: the resolved intent + the markdown brief
     /// emitted to the harness as a system block, plus diagnostics for Dev Tools.
