@@ -45,7 +45,8 @@ public enum AppleScriptBridge {
         "Notes",
         "Reminders",
         "Calendar",
-        "Finder"
+        "Finder",
+        "Xcode"
     ]
 
     /// Run a script. Caller must ensure the script's tell-application targets
