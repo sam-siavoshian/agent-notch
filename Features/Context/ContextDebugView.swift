@@ -9,7 +9,7 @@
 import SwiftUI
 
 public enum ContextDebugMode: String, CaseIterable, Identifiable {
-    case newSystem, overview, packet, captures, memory, ai, intent, dirty, cache, report, harness
+    case newSystem, overview, packet, captures, memory, intent, dirty, report, harness
 
     public var id: String { rawValue }
 
@@ -20,10 +20,8 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
         case .packet:   return "Activation Packet"
         case .captures: return "Captures"
         case .memory:   return "Memory"
-        case .ai:       return "Gemini Events"
         case .intent:   return "Intent Resolver"
         case .dirty:    return "Dirty Detector"
-        case .cache:    return "Gemini Cache"
         case .report:   return "Run Metrics"
         case .harness:  return "Harness Detail"
         }
@@ -36,10 +34,8 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
         case .packet:   return "text.badge.checkmark"
         case .captures: return "camera.viewfinder"
         case .memory:   return "rectangle.stack.badge.person.crop"
-        case .ai:       return "brain.head.profile"
         case .intent:   return "wand.and.stars"
         case .dirty:    return "viewfinder.circle"
-        case .cache:    return "externaldrive.badge.checkmark"
         case .report:   return "chart.bar.doc.horizontal"
         case .harness:  return "bubble.left.and.bubble.right"
         }
@@ -154,10 +150,8 @@ public struct ContextDebugView: View {
         case .packet:   packetPane
         case .captures: capturesPane
         case .memory:   memoryPane
-        case .ai:       aiPane
         case .intent:   intentPane
         case .dirty:    dirtyPane
-        case .cache:    cachePane
         case .report:   reportPane
         case .harness:  harnessPane
         }
