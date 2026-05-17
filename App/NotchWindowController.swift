@@ -139,7 +139,7 @@ enum NotchSizing {
     static let openHeight: CGFloat = openHeightMax  // legacy alias
     static let shadowPadding: CGFloat = 24
 
-    static func windowSize(for screen: NSScreen?) -> CGSize {
+    static func windowSize(for _: NSScreen?) -> CGSize {
         CGSize(width: openWidth + shadowPadding * 2,
                height: openHeightMax + shadowPadding)
     }
