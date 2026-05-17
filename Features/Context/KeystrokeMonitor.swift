@@ -86,15 +86,43 @@ public final class KeystrokeMonitor {
         let chars = readChars(from: event)
         let flags = event.flags
         let modifiers = readableModifiers(flags)
-
-        // Submit keys finalize a burst.
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let isReturn = (keyCode == 36)      // kVK_Return
         let isTab    = (keyCode == 48)      // kVK_Tab
         let cmdHeld  = flags.contains(.maskCommand)
+        let hasNonShiftModifier = flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate)
 
-        if isReturn || isTab || (isReturn && cmdHeld) {
-            // Append the submit key's text contribution if any, then flush.
+        // Modifier-shortcut fast path.
+        // When a non-shift modifier is held, the OS often returns empty `chars`
+        // because the keystroke is interpreted as a shortcut, not text input.
+        // Synthesize the character from the keycode and emit as a single-keystroke
+        // input event with the modifier set. This is what AnchorRecorder needs to
+        // detect a "shortcut" step.
+        if hasNonShiftModifier {
+            if let synthChar = Self.characterForKeycode(keyCode) {
+                // Flush any pending prose burst first so the shortcut doesn't get
+                // appended to a typing sequence.
+                queue.sync { flushPending(reason: "shortcut") }
+                let element = focusedElementProvider?()
+                let payload: CEvent.Payload = .input(
+                    element: element,
+                    text: synthChar,
+                    context: nil,
+                    submitKey: "shortcut",
+                    modifiers: modifiers
+                )
+                DispatchQueue.main.async {
+                    _ = EventIngester.shared.ingest(kind: .input, sourceMonitor: "KeystrokeMonitor", payload: payload)
+                }
+                return
+            }
+            // If we can't decode the keycode but a modifier is held, still skip the
+            // text-accumulation path — don't pollute prose with cmd-modified phantoms.
+            return
+        }
+
+        // Submit keys finalize a burst.
+        if isReturn || isTab {
             queue.sync {
                 if !chars.isEmpty { pendingText.append(chars) }
                 let submitKey = isReturn ? (cmdHeld ? "cmd+return" : "return") : "tab"
@@ -118,6 +146,69 @@ public final class KeystrokeMonitor {
             }
             pendingText.append(chars)
             resetIdleTimer()
+        }
+    }
+
+    /// US QWERTY keycode → character. Covers letters, digits, common punctuation.
+    /// Returns nil for keycodes we don't recognize (function keys, modifier keys themselves).
+    static func characterForKeycode(_ keycode: Int) -> String? {
+        // Apple's HIToolbox virtual key codes — stable across macOS versions.
+        switch keycode {
+        // Letters
+        case 0: return "a"
+        case 1: return "s"
+        case 2: return "d"
+        case 3: return "f"
+        case 4: return "h"
+        case 5: return "g"
+        case 6: return "z"
+        case 7: return "x"
+        case 8: return "c"
+        case 9: return "v"
+        case 11: return "b"
+        case 12: return "q"
+        case 13: return "w"
+        case 14: return "e"
+        case 15: return "r"
+        case 16: return "y"
+        case 17: return "t"
+        case 31: return "o"
+        case 32: return "u"
+        case 34: return "i"
+        case 35: return "p"
+        case 37: return "l"
+        case 38: return "j"
+        case 40: return "k"
+        case 45: return "n"
+        case 46: return "m"
+        // Digits
+        case 18: return "1"
+        case 19: return "2"
+        case 20: return "3"
+        case 21: return "4"
+        case 22: return "6"
+        case 23: return "5"
+        case 25: return "9"
+        case 26: return "7"
+        case 28: return "8"
+        case 29: return "0"
+        // Punctuation
+        case 27: return "-"
+        case 24: return "="
+        case 33: return "["
+        case 30: return "]"
+        case 39: return "'"
+        case 41: return ";"
+        case 42: return "\\"
+        case 43: return ","
+        case 44: return "/"
+        case 47: return "."
+        case 50: return "`"
+        // Special
+        case 49: return "space"
+        case 51: return "delete"
+        case 53: return "esc"
+        default: return nil
         }
     }
 
