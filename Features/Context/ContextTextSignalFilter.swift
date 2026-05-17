@@ -61,39 +61,6 @@ enum ContextTextSignalFilter {
         let lower = normalized(value).lowercased()
         guard !lower.isEmpty else { return true }
 
-        let transientMarkers = [
-            "currently",
-            "current ",
-            "visible ",
-            "cursor",
-            "hover",
-            "usage remaining",
-            "weekly limit",
-            "pro account",
-            "subscription active",
-            "thinking/loading",
-            "loading indicator",
-            "notification active",
-            "system notification",
-            "request timed out",
-            "nsurlerrordomain",
-            "kcferrordomaincfnetwork",
-            "code -1001",
-            "file system error",
-            "log output",
-            "chat discusses",
-            "chat content",
-            "the screen shows",
-            "screen shows",
-            "viewing and managing",
-            "user is viewing",
-            "user is interacting",
-            "user is engaged",
-            "the user is",
-            "selected",
-            "active"
-        ]
-
         if transientMarkers.contains(where: { lower.contains($0) }) {
             return true
         }
@@ -187,6 +154,39 @@ enum ContextTextSignalFilter {
         guard lower.contains(":") else { return false }
         return lower.hasSuffix("am") || lower.hasSuffix("pm") || lower.contains(" am") || lower.contains(" pm")
     }
+
+    private static let transientMarkers: [String] = [
+        "currently",
+        "current ",
+        "visible ",
+        "cursor",
+        "hover",
+        "usage remaining",
+        "weekly limit",
+        "pro account",
+        "subscription active",
+        "thinking/loading",
+        "loading indicator",
+        "notification active",
+        "system notification",
+        "request timed out",
+        "nsurlerrordomain",
+        "kcferrordomaincfnetwork",
+        "code -1001",
+        "file system error",
+        "log output",
+        "chat discusses",
+        "chat content",
+        "the screen shows",
+        "screen shows",
+        "viewing and managing",
+        "user is viewing",
+        "user is interacting",
+        "user is engaged",
+        "the user is",
+        "selected",
+        "active"
+    ]
 
     private static let dayPrefixes: [String] = [
         "sat ", "sun ", "mon ", "tue ", "wed ", "thu ", "fri "
