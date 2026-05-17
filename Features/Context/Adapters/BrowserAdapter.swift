@@ -169,6 +169,11 @@ public final class BrowserAdapter: AppContextAdapter {
 
     // MARK: - URL sanitation
 
+    private static let blockedQueryParams: Set<String> = [
+        "token", "key", "secret", "password", "auth",
+        "api_key", "access_token", "sig", "signature"
+    ]
+
     /// Strip user:pass@ userinfo and credential-bearing query params before any
     /// URL leaves the adapter.
     public static func cleanURL(_ raw: String) -> String {
@@ -176,10 +181,8 @@ public final class BrowserAdapter: AppContextAdapter {
         comps.user = nil
         comps.password = nil
         if let items = comps.queryItems {
-            let blocked: Set<String> = ["token", "key", "secret", "password", "auth",
-                                        "api_key", "access_token", "sig", "signature"]
-            comps.queryItems = items.filter { !blocked.contains($0.name.lowercased()) }
-            if comps.queryItems?.isEmpty == true { comps.queryItems = nil }
+            comps.queryItems = items.filter { !Self.blockedQueryParams.contains($0.name.lowercased()) }
+            if comps.queryItems?.isEmpty ?? false { comps.queryItems = nil }
         }
         return comps.string ?? raw
     }
