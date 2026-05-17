@@ -217,13 +217,13 @@ final class ChatCompletionsModelsTests: XCTestCase {
 
     func testRequestEncodesMinimalShape() throws {
         let req = ChatCompletionRequest(
-            model: "inception/mercury-coder",
+            model: "inception/mercury-2",
             messages: [.init(role: "user", content: "hello")]
         )
         let data = try JSONEncoder().encode(req)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-        XCTAssertEqual(json["model"] as? String, "inception/mercury-coder")
+        XCTAssertEqual(json["model"] as? String, "inception/mercury-2")
         let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
         XCTAssertEqual(messages.count, 1)
         XCTAssertEqual(messages[0]["role"] as? String, "user")
@@ -246,7 +246,7 @@ final class ChatCompletionsModelsTests: XCTestCase {
         let json = """
         {
           "id": "gen-123",
-          "model": "inception/mercury-coder",
+          "model": "inception/mercury-2",
           "choices": [
             { "index": 0,
               "message": { "role": "assistant", "content": "hi back" },
@@ -408,7 +408,7 @@ final class OpenRouterClientTests: XCTestCase {
         }
         let client = OpenRouterClient(apiKey: "sk-test", session: Self.mockSession())
         _ = try await client.chatCompletion(request: ChatCompletionRequest(
-            model: "inception/mercury-coder",
+            model: "inception/mercury-2",
             messages: [.init(role: "user", content: "hi")]
         ))
         let req = try XCTUnwrap(captured.value)
@@ -590,7 +590,7 @@ struct MercurySpikeCLI {
         do {
             switch command {
             case "ping":
-                try await ProbeCommands.ping(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+                try await ProbeCommands.ping(client: client, model: args.dropFirst().first ?? "inception/mercury-2")
             case "help", "--help", "-h":
                 printUsage()
             default:
@@ -609,7 +609,7 @@ struct MercurySpikeCLI {
         Usage: mercury-spike <command> [args]
 
         Commands:
-          ping [model]       Send a tiny round-trip; default model: inception/mercury-coder
+          ping [model]       Send a tiny round-trip; default model: inception/mercury-2
           jsonMode [model]   Validate response_format=json_object behavior
           latency [model]    Measure p50/p95 at representative payload sizes (10 runs)
           all                Run ping, jsonMode, latency in sequence
@@ -693,7 +693,7 @@ curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" \
   | grep -iE '"id"[^,]*mercury' | head -20
 ```
 
-Expected: a JSON-ish list of strings like `"id": "inception/mercury-coder"`. If you see multiple Mercury variants (e.g. `mercury-coder`, `mercury-coder-small`), note all of them.
+Expected: a JSON-ish list of strings like `"id": "inception/mercury-2"`. If you see multiple Mercury variants (e.g. `mercury-coder`, `mercury-coder-small`), note all of them.
 
 If `grep` returns nothing, the slug doesn't include the literal word "mercury" — broaden the search:
 ```bash
@@ -724,7 +724,7 @@ Create `docs/superpowers/spikes/2026-05-16-mercury-via-openrouter-findings.md`:
 
 | Slug | Works? | Sample latency | Notes |
 |---|---|---|---|
-| `inception/mercury-coder` | ✓/✗ | XX s | ... |
+| `inception/mercury-2` | ✓/✗ | XX s | ... |
 | `inception/...` | ... | ... | ... |
 
 ## Selected slug for AgentNotch context pipeline
@@ -814,7 +814,7 @@ In `Sources/MercurySpike/main.swift`, find the `switch command` block and add a 
 
 ```swift
             case "jsonMode":
-                try await ProbeCommands.jsonMode(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+                try await ProbeCommands.jsonMode(client: client, model: args.dropFirst().first ?? "inception/mercury-2")
 ```
 
 - [ ] **Step 3: Build + run**
@@ -827,7 +827,7 @@ swift run mercury-spike jsonMode <slug-from-task-5>
 
 Expected output (target — actual numbers will vary):
 ```
-→ jsonMode model=inception/mercury-coder runs=5
+→ jsonMode model=inception/mercury-2 runs=5
   run 1: 1.XXs ✓
   run 2: 1.XXs ✓
   ...
@@ -927,14 +927,14 @@ Add a `case "latency":` next to `jsonMode`:
 
 ```swift
             case "latency":
-                try await ProbeCommands.latency(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+                try await ProbeCommands.latency(client: client, model: args.dropFirst().first ?? "inception/mercury-2")
 ```
 
 Also add `case "all":` that runs all three:
 
 ```swift
             case "all":
-                let model = args.dropFirst().first ?? "inception/mercury-coder"
+                let model = args.dropFirst().first ?? "inception/mercury-2"
                 try await ProbeCommands.ping(client: client, model: model)
                 print()
                 try await ProbeCommands.jsonMode(client: client, model: model)
@@ -2386,7 +2386,7 @@ enum RunnerCommands {
         guard let apiKey = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], !apiKey.isEmpty else {
             throw OpenRouterError.missingAPIKey
         }
-        let model = ProcessInfo.processInfo.environment["MERCURY_MODEL"] ?? "inception/mercury-coder"
+        let model = ProcessInfo.processInfo.environment["MERCURY_MODEL"] ?? "inception/mercury-2"
         let systemPrompt = SelectorSystemPrompt.text
 
         let liveClient = LiveMercuryClient(
@@ -3137,7 +3137,7 @@ If no edits needed, skip.
 Run:
 ```bash
 echo "OPENROUTER_API_KEY length: ${#OPENROUTER_API_KEY}"
-echo "MERCURY_MODEL: ${MERCURY_MODEL:-inception/mercury-coder}"
+echo "MERCURY_MODEL: ${MERCURY_MODEL:-inception/mercury-2}"
 ```
 
 Both should print something nonempty (`MERCURY_MODEL` falls back to a default — set it to the slug confirmed in Task 5/6 if different).

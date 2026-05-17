@@ -16,13 +16,13 @@ struct MercurySpikeCLI {
         do {
             switch command {
             case "ping":
-                try await ProbeCommands.ping(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+                try await ProbeCommands.ping(client: client, model: args.dropFirst().first ?? "inception/mercury-2")
             case "jsonMode":
-                try await ProbeCommands.jsonMode(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+                try await ProbeCommands.jsonMode(client: client, model: args.dropFirst().first ?? "inception/mercury-2")
             case "latency":
-                try await ProbeCommands.latency(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+                try await ProbeCommands.latency(client: client, model: args.dropFirst().first ?? "inception/mercury-2")
             case "all":
-                let model = args.dropFirst().first ?? "inception/mercury-coder"
+                let model = args.dropFirst().first ?? "inception/mercury-2"
                 try await ProbeCommands.ping(client: client, model: model)
                 print()
                 try await ProbeCommands.jsonMode(client: client, model: model)
@@ -46,7 +46,7 @@ struct MercurySpikeCLI {
         Usage: mercury-spike <command> [args]
 
         Commands:
-          ping [model]       Send a tiny round-trip; default model: inception/mercury-coder
+          ping [model]       Send a tiny round-trip; default model: inception/mercury-2
           jsonMode [model]   Validate response_format=json_object behavior
           latency [model]    Measure p50/p95 at representative payload sizes (10 runs)
           all                Run ping, jsonMode, latency in sequence
