@@ -236,6 +236,26 @@ public final class ComputerUseHarness {
             }
         }
 
+        // Preview of the latest user message — used in the observability log so
+        // each harness turn carries the input that drove it.
+        func latestUserPreview() -> String {
+            guard let lastUser = messages.last(where: { $0.role == "user" }) else { return "" }
+            for block in lastUser.content {
+                if case .text(let t) = block {
+                    return String(t.prefix(200))
+                }
+                if case .toolResult(_, let inner, _, _) = block {
+                    for ib in inner {
+                        if case .text(let t) = ib { return "tool_result: \(String(t.prefix(180)))" }
+                        if case .image = ib { return "tool_result: <image>" }
+                    }
+                }
+            }
+            return ""
+        }
+
+        let systemBlocksPreview = Self.systemBlocksPreview(system)
+
         while turn < maxTurns {
             if stopRequested {
                 AgentState.shared.set(.idle, detail: "Stopped")
@@ -244,6 +264,8 @@ public final class ComputerUseHarness {
             }
             turn += 1
             log.info("harness.turn run_id=\(runID.uuidString) turn=\(turn) model=\(currentModel)")
+            let turnStartedAt = Date()
+            let userPreviewForTurn = latestUserPreview()
 
             // Move the cache breakpoint to the most recent tool_result so the
             // next request reads everything before it from cache. Older
@@ -322,6 +344,19 @@ public final class ComputerUseHarness {
                         toolCalls: []
                     )
                 )
+                AgentObservabilityLog.shared.record(.harnessTurn(
+                    id: UUID(),
+                    t: turnStartedAt,
+                    turnIndex: turn,
+                    modelID: response.model,
+                    systemBlocksPreview: systemBlocksPreview,
+                    userContentPreview: userPreviewForTurn,
+                    assistantPreview: String(text.prefix(200)),
+                    toolCalls: [],
+                    inputTokens: response.usage?.inputTokens,
+                    outputTokens: response.usage?.outputTokens,
+                    latencyS: Date().timeIntervalSince(turnStartedAt)
+                ))
                 AgentState.shared.set(.idle, detail: text)
                 await recordMetrics(status: "completed_without_tool")
                 return
@@ -338,6 +373,7 @@ public final class ComputerUseHarness {
 
             var resultBlocks: [ContentBlock] = []
             var toolRecords: [HarnessTurnRecord.ToolCallRecord] = []
+            var observabilityToolCalls: [AgentObservabilityLog.ToolCallSummary] = []
             for use in toolUses {
                 if stopRequested {
                     await HarnessRunDetailStore.shared.appendTurn(
@@ -375,7 +411,9 @@ public final class ComputerUseHarness {
 
                 log.info("harness.tool run_id=\(runID.uuidString) turn=\(turn) action=\(action) tool_id=\(use.id)")
                 AgentState.shared.set(.toolCall(name: use.name), detail: action)
+                let dispatchStart = Date()
                 let result = await dispatcher.dispatch(toolUseId: use.id, name: use.name, input: use.input)
+                let dispatchDuration = Date().timeIntervalSince(dispatchStart)
                 log.info("harness.tool_result run_id=\(runID.uuidString) action=\(action) is_error=\(result.isError)")
                 resultBlocks.append(.toolResult(toolUseId: result.toolUseId, content: result.content, isError: result.isError, cache: false))
 
@@ -386,6 +424,13 @@ public final class ComputerUseHarness {
                     action: use.name == "computer" ? action : nil,
                     resultIsError: result.isError,
                     resultTextPreview: Self.previewText(of: result.content, limit: 200)
+                ))
+
+                observabilityToolCalls.append(AgentObservabilityLog.ToolCallSummary(
+                    toolName: use.name == "computer" ? "computer.\(action)" : use.name,
+                    argumentsPreview: Self.compactJSON(use.input, limit: 200),
+                    resultPreview: Self.toolResultPreview(content: result.content, isError: result.isError),
+                    durationS: dispatchDuration
                 ))
             }
             messages.append(Message(role: "user", content: resultBlocks))
@@ -405,6 +450,26 @@ public final class ComputerUseHarness {
                     toolCalls: toolRecords
                 )
             )
+
+            let assistantPreviewForTurn: String = {
+                let text = response.content.compactMap { block -> String? in
+                    if case .text(let t) = block { return t } else { return nil }
+                }.joined(separator: " ")
+                return String(text.prefix(200))
+            }()
+            AgentObservabilityLog.shared.record(.harnessTurn(
+                id: UUID(),
+                t: turnStartedAt,
+                turnIndex: turn,
+                modelID: response.model,
+                systemBlocksPreview: systemBlocksPreview,
+                userContentPreview: userPreviewForTurn,
+                assistantPreview: assistantPreviewForTurn,
+                toolCalls: observabilityToolCalls,
+                inputTokens: response.usage?.inputTokens,
+                outputTokens: response.usage?.outputTokens,
+                latencyS: Date().timeIntervalSince(turnStartedAt)
+            ))
 
             if response.stopReason != "tool_use" {
                 log.info("harness.done run_id=\(runID.uuidString) status=completed_after_tools turns=\(turn)")
@@ -662,6 +727,48 @@ public final class ComputerUseHarness {
             return "\(prefix)…"
         }
         return "<unencodable>"
+    }
+
+    /// Condensed multi-block preview for the observability log. Unlike
+    /// `previewText`, this surfaces image dimensions and error markers because
+    /// the timeline viewer treats screenshots as load-bearing data.
+    fileprivate static func toolResultPreview(content: [ContentBlock], isError: Bool) -> String {
+        var pieces: [String] = []
+        if isError { pieces.append("ERROR") }
+        for block in content {
+            switch block {
+            case .text(let t):
+                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    pieces.append(String(trimmed.prefix(180)))
+                }
+            case .image(_, let base64, _):
+                if let data = Data(base64Encoded: base64),
+                   let img = NSImage(data: data) {
+                    let w = Int(img.size.width)
+                    let h = Int(img.size.height)
+                    pieces.append("screenshot \(w)x\(h)")
+                } else {
+                    pieces.append("screenshot")
+                }
+            case .toolUse:
+                pieces.append("<tool_use>")
+            case .toolResult:
+                pieces.append("<tool_result>")
+            }
+            if pieces.joined(separator: " · ").count > 200 { break }
+        }
+        let joined = pieces.joined(separator: " · ")
+        if joined.count > 200 { return String(joined.prefix(200)) + "…" }
+        return joined.isEmpty ? "<empty>" : joined
+    }
+
+    /// Joined preview of the harness's system blocks (cached + dynamic) for
+    /// the observability timeline. First 240 chars per block, capped at 400 total.
+    fileprivate static func systemBlocksPreview(_ blocks: [SystemBlock]) -> String {
+        let joined = blocks.map { String($0.text.prefix(240)) }.joined(separator: "\n---\n")
+        if joined.count > 400 { return String(joined.prefix(400)) + "…" }
+        return joined
     }
 
     /// Pulls the first text block out of a tool result's content array and

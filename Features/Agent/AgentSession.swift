@@ -47,6 +47,13 @@ public final class AgentSession {
         }
         log.info("session.fire transcript=\(transcript)")
 
+        // Mark the start of a new agent run in the observability timeline. The
+        // `currentRunEvents()` slice depends on this being the first event of
+        // the run.
+        AgentObservabilityLog.shared.record(.longPressTranscript(
+            id: UUID(), t: Date(), transcript: transcript
+        ))
+
         // Phase 4 Mercury path: a single Selector call returns BOTH the resolved
         // intent and the markdown brief (formerly two passes — Haiku resolver +
         // ContextActivationBuilder). Brief is handed to the harness verbatim as
@@ -54,6 +61,27 @@ public final class AgentSession {
         // shape until Phase 5b cuts the legacy type from `ComputerUseHarness.Input`.
         let result = await ContextSelector.shared.select(transcript: transcript)
         log.info("session.selector latency=\(String(format: "%.2f", result.latencyS))s degraded=\(result.degraded) model=\(result.modelUsed ?? "<local>") brief_len=\(result.brief.count)")
+
+        // Record L2 + selector result for the timeline.
+        AgentObservabilityLog.shared.record(.l2Snapshot(
+            id: UUID(),
+            t: result.l2.capturedAt,
+            app: result.l2.app,
+            window: result.l2.windowTitle,
+            axElementCount: result.l2.axElements.count,
+            ocrLineCount: result.l2.ocrLines.count,
+            screenshotJPEG: result.initiationScreenshot
+        ))
+        AgentObservabilityLog.shared.record(.selectorRun(
+            id: UUID(),
+            t: Date(),
+            latencyS: result.latencyS,
+            degraded: result.degraded,
+            model: result.modelUsed,
+            intentVerb: result.intent.verb,
+            intentTarget: result.intent.target,
+            briefLength: result.brief.count
+        ))
 
         let legacyIntent = Self.mapToLegacyIntent(result.intent, degraded: result.degraded, latencyS: result.latencyS)
 
