@@ -1,0 +1,89 @@
+{
+  "transcript": "send maya the latest draft",
+  "current_screen": {
+    "app": "Slack",
+    "bundle_id": "com.tinyspeck.slackmacgap",
+    "pid": 6234,
+    "window_title": "design — Studio HQ",
+    "window_id": 142,
+    "display_id": 1,
+    "display_bounds": [0, 0, 1728, 1117],
+    "captured_at": "2026-05-16T19:42:11Z",
+    "ocr_lines": ["#design", "Maya Chen 2:34 PM", "love the step 1 copy!", "Message #design"],
+    "ax_elements": [
+      {"role": "AXTextArea", "label": "Message #design", "ax_path": "AXWindow/AXGroup[1]/AXTextArea", "focused": true},
+      {"role": "AXButton", "label": "Send", "ax_path": "AXWindow/AXGroup[2]/AXButton[Send]", "focused": false},
+      {"role": "AXButton", "label": "Open files", "ax_path": "AXWindow/AXGroup[2]/AXButton[Open files]", "focused": false}
+    ],
+    "cursor": [612, 590],
+    "selection": null,
+    "clipboard": {
+      "kind": "text",
+      "preview": "https://figma.com/file/abc/Onboarding-v3",
+      "bytes": 47,
+      "age_s": 12,
+      "source_app": "Figma",
+      "source_bundle_id": "com.figma.Desktop"
+    },
+    "app_specific": {
+      "workspace": "Studio HQ",
+      "channel": "#design",
+      "channel_kind": "channel",
+      "participants": ["maya", "wyatt", "arshan"]
+    }
+  },
+  "user_prefs": "I use Arc for browsing. Prefer concise messages.",
+  "active_task": {
+    "id": "t_2026-05-16_19",
+    "started_at": "2026-05-16T19:02:00Z",
+    "label": "Iterate onboarding v3 in Figma + coordinate with Maya",
+    "kind": "design_iteration",
+    "narrative": "User has been iterating on Figma's 'Onboarding v3' for 40 min, bouncing to Slack #design to discuss with Maya.",
+    "actions_taken": [
+      {"t": "2026-05-16T19:34:00Z", "what": "edited verify code instruction text"}
+    ],
+    "resources": [
+      "figma://file/abc/Onboarding-v3#frame:Step-2",
+      "slack://channel/T123/C456?ts=1747422120"
+    ],
+    "entities": [
+      {"label": "Maya Chen", "kind": "person", "slack_handle": "@maya"},
+      {"label": "Onboarding v3", "kind": "file", "uri": "figma://file/abc/Onboarding-v3"},
+      {"label": "#design", "kind": "channel", "uri": "slack://channel/T123/C456"}
+    ],
+    "blocked_on": null,
+    "likely_next_steps": ["apply Maya's copy suggestion", "post updated screenshot"]
+  },
+  "recent_events": [
+    {"t": "2026-05-16T19:38:42Z", "kind": "screen", "app": "Figma", "surface": "Onboarding v3 / Step 2"},
+    {"t": "2026-05-16T19:39:10Z", "kind": "screen", "app": "Slack", "surface": "#design"},
+    {"t": "2026-05-16T19:39:18Z", "kind": "input", "app": "Slack", "text": "asking maya about copy", "context": "drafting message"}
+  ],
+  "recent_resources": [
+    {"kind": "url", "uri": "https://figma.com/file/abc/Onboarding-v3", "label": "Onboarding v3", "app": "Figma", "last_seen": "2026-05-16T19:34:00Z"},
+    {"kind": "channel", "uri": "slack://channel/T123/C456", "label": "#design", "app": "Slack", "last_seen": "2026-05-16T19:39:10Z"}
+  ],
+  "recipes_for_active_app": [
+    {
+      "name": "open DM with person",
+      "trigger_pattern": "open DM | message <person> | DM <person>",
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+k"},
+        {"kind": "type", "value": "<person.name>"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "seen_count": 7,
+      "confidence": 0.92
+    },
+    {
+      "name": "post in current channel",
+      "trigger_pattern": "post in channel | send in channel",
+      "steps": [
+        {"kind": "type", "value": "<message>"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "seen_count": 12,
+      "confidence": 0.95
+    }
+  ]
+}

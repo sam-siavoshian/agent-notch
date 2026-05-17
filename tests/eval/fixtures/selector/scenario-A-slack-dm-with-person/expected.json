@@ -1,0 +1,13 @@
+{
+  "intent": {
+    "verb": "send",
+    "target": "the latest draft",
+    "resolved_target_contains": "Onboarding v3",
+    "entities": [
+      {"label": "Maya", "kind": "person"}
+    ]
+  },
+  "brief_must_contain": ["cmd+K", "maya", "return", "figma.com/file/abc/Onboarding-v3"],
+  "brief_must_not_contain": ["\\b\\d{3}\\s*,\\s*\\d{3}\\b", "AXButton.*\\d+,\\s*\\d+"],
+  "brief_token_budget": 600
+}
