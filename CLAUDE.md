@@ -22,8 +22,6 @@ After pulling changes that touch `Project.yml` or source layout, re-run `xcodege
 
 Requires macOS 14+ with a notch (M-series MacBook). Microphone, automation, and screen capture entitlements live in `App/AgentNotch.entitlements`.
 
-The app **is not** a fork of boring.notch. The boring.notch source is checked in under `vendored/boring.notch/` as read-only reference material. Read it, learn from it — **do not modify it** and do not include any of its files in our app target.
-
 ---
 
 ## API Keys

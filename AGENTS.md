@@ -32,7 +32,6 @@ Features/
   Context/            — screenshot capture, OCR, Gemini, memory
   Agent/              — Sonnet wiring, computer-use harness
   Onboarding/         — first-launch permission prompts
-vendored/             — read-only reference code (do not edit, do not include in target)
 ```
 
 ---
