@@ -8,17 +8,12 @@ import AppKit
 
 struct AgentSettingsView: View {
     @ObservedObject private var store = AgentSettingsStore.shared
-    @ObservedObject private var audio = AudioDeviceManager.shared
     @State private var savedOpacity: Double = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
-            modelRow
-            reasoningEffortRow
             cursorColorRow
-            ttsVoiceRow
-            audioInputRow
-            audioOutputRow
+            advancedRow
             killSwitchRow
             quitRow
             savedBadge
@@ -26,7 +21,7 @@ struct AgentSettingsView: View {
         // idealHeight (not minHeight) propagates through the parent's
         // .fixedSize(vertical:true) so the notch GeometryReader measures
         // a tall settings frame and grows the notch accordingly.
-        .frame(maxWidth: .infinity, idealHeight: 420, alignment: .topLeading)
+        .frame(maxWidth: .infinity, idealHeight: 280, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: store.settings) { _, _ in
             savedOpacity = 1
@@ -47,42 +42,6 @@ struct AgentSettingsView: View {
             }
             .opacity(savedOpacity)
         }
-    }
-
-    private var modelRow: some View {
-        SettingRow(title: "Model") {
-            PillToolbar {
-                ForEach(AgentModel.allCases) { model in
-                    ToolbarIconButton(
-                        systemImage: model.iconName,
-                        label: model.displayName,
-                        isActive: store.agentModel == model
-                    ) {
-                        store.agentModel = model
-                    }
-                }
-            }
-        }
-    }
-
-    private var reasoningEffortRow: some View {
-        SettingRow(title: "Reasoning") {
-            PillToolbar {
-                ForEach(AgentReasoningEffort.allCases) { effort in
-                    ToolbarIconButton(
-                        systemImage: effortIcon(effort),
-                        label: effort.displayName,
-                        isActive: store.reasoningEffort == effort
-                    ) {
-                        store.reasoningEffort = effort
-                    }
-                }
-            }
-        }
-    }
-
-    private func effortIcon(_ effort: AgentReasoningEffort) -> String {
-        effort.iconName
     }
 
     private var cursorColorRow: some View {
@@ -108,48 +67,24 @@ struct AgentSettingsView: View {
         }
     }
 
-    private var ttsVoiceRow: some View {
-        SettingRow(title: "Voice") {
-            Menu {
-                ForEach(TTSVoice.allCases) { voice in
-                    Button(voice.displayName) { store.ttsVoice = voice }
-                }
+    private var advancedRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                AdvancedSettingsWindowController.shared.toggle()
             } label: {
                 GhostPill(tint: SoftPill.Text.secondary) {
                     HStack(spacing: 4) {
-                        Image(systemName: "waveform")
+                        Image(systemName: "slider.horizontal.3")
                             .font(.system(size: 9, weight: .bold))
-                        Text(store.ttsVoice.displayName)
-                        Image(systemName: "chevron.up.chevron.down")
+                        Text("Advanced")
+                        Image(systemName: "arrow.up.right.square")
                             .font(.system(size: 7, weight: .bold))
                     }
                 }
             }
             .buttonStyle(.plain)
-        }
-    }
-
-    private var audioInputRow: some View {
-        SettingRow(title: "Mic") {
-            DevicePickerMenu(
-                icon: "mic.fill",
-                placeholder: "System Default",
-                devices: audio.inputs,
-                selectedUID: store.voiceInputDeviceUID,
-                onSelect: { store.voiceInputDeviceUID = $0 }
-            )
-        }
-    }
-
-    private var audioOutputRow: some View {
-        SettingRow(title: "Output") {
-            DevicePickerMenu(
-                icon: "speaker.wave.2.fill",
-                placeholder: "System Default",
-                devices: audio.outputs,
-                selectedUID: store.voiceOutputDeviceUID,
-                onSelect: { store.voiceOutputDeviceUID = $0 }
-            )
+            .help("Open audio + API key settings in a separate panel")
         }
     }
 
@@ -182,7 +117,7 @@ struct AgentSettingsView: View {
     }
 }
 
-private struct DevicePickerMenu: View {
+struct DevicePickerMenu: View {
     let icon: String
     let placeholder: String
     let devices: [AudioDevice]
@@ -239,7 +174,7 @@ private struct DevicePickerMenu: View {
     }
 }
 
-private struct SettingRow<Content: View>: View {
+struct SettingRow<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
 

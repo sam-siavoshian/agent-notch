@@ -20,6 +20,13 @@ final class NotchWindowController: NSObject {
     private var lastScreen: NSScreen?
     private var cmdDMonitor: Any?
 
+    /// Bottom-anchor point of the notch host window in screen coordinates.
+    /// Used by satellite panels (e.g. `AdvancedSettingsWindowController`) to
+    /// drop down under the notch.
+    func notchHostFrame() -> NSRect? {
+        window?.frame
+    }
+
     func install() {
         guard window == nil else { return }
 

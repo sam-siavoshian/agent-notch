@@ -7,5 +7,18 @@
   },
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"\nimport json, os\ncwd = os.getcwd()\nparts = []\nfor name in ['AGENTS.md', 'CLAUDE.md']:\n    path = os.path.join(cwd, name)\n    if os.path.exists(path):\n        with open(path) as f:\n            parts.append(f'=== {name} ===\\n{f.read()}')\nif parts:\n    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': '\\n\\n'.join(parts)}}))\n\"",
+            "statusMessage": "Reading AGENTS.md and CLAUDE.md..."
+          }
+        ]
+      }
+    ]
   }
 }
