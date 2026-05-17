@@ -334,10 +334,11 @@ public enum ContextDirtyDetector {
                 guard let currentPtr = currentRaw.baseAddress?.assumingMemoryBound(to: UInt8.self),
                       let previousPtr = previousRaw.baseAddress?.assumingMemoryBound(to: UInt8.self)
                 else { return }
+                let threshold = Int(noiseThreshold)
                 for index in 0..<count {
                     let delta = Int(currentPtr[index]) - Int(previousPtr[index])
                     let magnitude = delta < 0 ? -delta : delta
-                    if magnitude > Int(noiseThreshold) {
+                    if magnitude > threshold {
                         changed += 1
                         let x = index % size
                         let y = index / size
