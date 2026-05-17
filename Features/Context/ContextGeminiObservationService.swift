@@ -28,7 +28,7 @@ public actor ContextGeminiObservationService {
     }
 
     public static var isAPIKeyConfigured: Bool {
-        guard let apiKey = Env.value("GEMINI_API_KEY")?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+        guard let apiKey = Secrets.geminiAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
         }
         return !apiKey.isEmpty
@@ -74,7 +74,7 @@ public actor ContextGeminiObservationService {
         thinkingLevelOverride: String? = nil,
         session: URLSession = .shared,
         apiKeyProvider: @escaping @Sendable () -> String? = {
-            Env.value("GEMINI_API_KEY")
+            Secrets.geminiAPIKey
         }
     ) {
         self.model = model

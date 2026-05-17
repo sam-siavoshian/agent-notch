@@ -14,6 +14,12 @@ struct AgentSettingsView: View {
     @State private var savedOpacity: Double = 0
     @State private var diagnosticsStatus = ""
     @State private var contextHealth = "Checking context..."
+    @State private var openAIKeyDraft = ""
+    @State private var geminiKeyDraft = ""
+    @State private var anthropicKeyDraft = ""
+    @State private var openAIKeyIsSet = false
+    @State private var geminiKeyIsSet = false
+    @State private var anthropicKeyIsSet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -29,7 +35,10 @@ struct AgentSettingsView: View {
                 savedOpacity = 0
             }
         }
-        .task { await refreshContextHealth() }
+        .task {
+            refreshKeyStatus()
+            await refreshContextHealth()
+        }
     }
 
     private var savedBadge: some View {
@@ -126,6 +135,7 @@ struct AgentSettingsView: View {
             if showAdvanced {
                 VStack(alignment: .leading, spacing: 7) {
                     systemPromptEditor
+                    apiKeysSection
                     diagnosticsRow
                     if !contextHealth.isEmpty {
                         Text(contextHealth)
@@ -160,6 +170,86 @@ struct AgentSettingsView: View {
                 minHeight: 44,
                 maxHeight: 64
             )
+        }
+    }
+
+    private func refreshKeyStatus() {
+        openAIKeyIsSet = Secrets.openAIAPIKey != nil
+        geminiKeyIsSet = Secrets.geminiAPIKey != nil
+        anthropicKeyIsSet = Secrets.anthropicAPIKey != nil
+    }
+
+    private func flashSaved() {
+        savedOpacity = 1
+        withAnimation(.easeOut(duration: 0.4).delay(1.0)) { savedOpacity = 0 }
+    }
+
+    private var apiKeysSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("API Keys")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(SoftPill.Text.secondary)
+                .padding(.leading, 2)
+            pillKeyField(
+                "OpenAI",
+                placeholder: openAIKeyIsSet ? "(configured)" : "sk-proj-…",
+                draft: $openAIKeyDraft
+            ) {
+                Secrets.setOpenAIAPIKey(openAIKeyDraft)
+                openAIKeyDraft = ""
+                openAIKeyIsSet = true
+                flashSaved()
+            }
+            pillKeyField(
+                "Gemini",
+                placeholder: geminiKeyIsSet ? "(configured)" : "AIzaSy…",
+                draft: $geminiKeyDraft
+            ) {
+                Secrets.setGeminiAPIKey(geminiKeyDraft)
+                geminiKeyDraft = ""
+                geminiKeyIsSet = true
+                flashSaved()
+            }
+            pillKeyField(
+                "Anthropic",
+                placeholder: anthropicKeyIsSet ? "(configured)" : "sk-ant-…",
+                draft: $anthropicKeyDraft
+            ) {
+                Secrets.setAnthropicAPIKey(anthropicKeyDraft)
+                anthropicKeyDraft = ""
+                anthropicKeyIsSet = true
+                flashSaved()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func pillKeyField(
+        _ label: String,
+        placeholder: String,
+        draft: Binding<String>,
+        onSave: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(SoftPill.Text.secondary)
+                .frame(width: 54, alignment: .trailing)
+            SecureField(placeholder, text: draft)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(SoftPill.Text.primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    PillBackground(
+                        fill: AnyShapeStyle(SoftPill.Surface.inset),
+                        cornerRadius: 8
+                    )
+                )
+                .onSubmit {
+                    guard !draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    onSave()
+                }
         }
     }
 

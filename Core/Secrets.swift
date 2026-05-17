@@ -12,6 +12,7 @@ public enum Secrets {
     public enum Account {
         public static let anthropic = "ANTHROPIC_API_KEY"
         public static let openai = "OPENAI_API_KEY"
+        public static let gemini = "GEMINI_API_KEY"
     }
 
     public static var anthropicAPIKey: String? {
@@ -22,12 +23,20 @@ public enum Secrets {
         resolve(env: "OPENAI_API_KEY", account: Account.openai)
     }
 
+    public static var geminiAPIKey: String? {
+        resolve(env: "GEMINI_API_KEY", account: Account.gemini)
+    }
+
     public static func setOpenAIAPIKey(_ key: String) {
         Keychain.set(key, account: Account.openai)
     }
 
     public static func setAnthropicAPIKey(_ key: String) {
         Keychain.set(key, account: Account.anthropic)
+    }
+
+    public static func setGeminiAPIKey(_ key: String) {
+        Keychain.set(key, account: Account.gemini)
     }
 
     /// One-shot seed: stores a default OpenAI key only if Keychain has none.
