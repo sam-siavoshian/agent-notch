@@ -16,6 +16,8 @@ struct ToolCallStrip: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            Spacer(minLength: 0)
+
             if let icon = frontmost.icon {
                 Image(nsImage: icon)
                     .resizable()
@@ -46,7 +48,7 @@ struct ToolCallStrip: View {
         .padding(.horizontal, 14)
         .padding(.top, 1)
         .padding(.bottom, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Derivation
@@ -63,11 +65,18 @@ struct ToolCallStrip: View {
         return nil
     }
 
+    /// Recent tool calls with adjacent duplicates collapsed, including a
+    /// dupe of the currently-live name as the most recent log entry — the
+    /// agent fires the same `screenshot` tool many times in a row, and
+    /// printing five copies of "screenshot" is noise.
     private var recent: [Entry] {
         var out: [Entry] = []
+        var lastName: String? = liveEntry?.name
         for log in state.activityLog {
             guard case .toolCall(let name) = log.activity else { continue }
+            if name == lastName { continue }
             out.append(Entry(name: name, detail: log.detail))
+            lastName = name
             if out.count >= 5 { break }
         }
         return out
