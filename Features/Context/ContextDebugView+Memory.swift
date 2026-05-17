@@ -192,8 +192,7 @@ private struct MemoryDrilldownView: View {
             return
         }
         let ids = entries
-            .filter { $0.pathExtension == "json" }
-            .map { $0.deletingPathExtension().lastPathComponent }
+            .compactMap { $0.pathExtension == "json" ? $0.deletingPathExtension().lastPathComponent : nil }
             .sorted()
         bundleIDs = ids
         if selected == nil || !(selected.map { ids.contains($0) } ?? false) {
