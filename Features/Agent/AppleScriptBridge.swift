@@ -80,11 +80,15 @@ public enum AppleScriptBridge {
     /// literal and confirms each name is allowlisted. Misses obfuscated
     /// indirection (e.g. `set x to "Finder" \n tell application x`), which is
     /// fine — anything the model writes will be in the obvious form.
+    // swiftlint:disable:next force_try — pattern is a compile-time literal
+    private static let targetRegex: NSRegularExpression = try! NSRegularExpression(
+        pattern: #"application\s+"([^"]+)""#,
+        options: [.caseInsensitive]
+    )
+
     private static func assertAllowed(_ script: String) throws {
-        let pattern = #"application\s+"([^"]+)""#
-        let regex = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         let range = NSRange(script.startIndex..., in: script)
-        let matches = regex.matches(in: script, options: [], range: range)
+        let matches = targetRegex.matches(in: script, options: [], range: range)
         var sawTarget = false
         for m in matches where m.numberOfRanges >= 2 {
             guard let r = Range(m.range(at: 1), in: script) else { continue }
