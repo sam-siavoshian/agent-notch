@@ -23,11 +23,9 @@ final class CursorCompanionWindow {
     private static let spriteOffsetFromCursor = CGPoint(x: 28, y: -16)
 
     private let panel: NSPanel
-    private let hostingView: NSHostingView<CursorCompanionView>
 
     init(viewModel: CursorCompanionViewModel) {
-        let view = CursorCompanionView(viewModel: viewModel)
-        let hosting = NSHostingView(rootView: view)
+        let hosting = NSHostingView(rootView: CursorCompanionView(viewModel: viewModel))
         hosting.frame = CGRect(x: 0, y: 0, width: Self.panelSize, height: Self.panelSize)
 
         let panel = NSPanel(
@@ -47,7 +45,6 @@ final class CursorCompanionWindow {
         panel.contentView = hosting
 
         self.panel = panel
-        self.hostingView = hosting
     }
 
     func show() {
