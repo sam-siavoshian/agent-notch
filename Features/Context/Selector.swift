@@ -243,9 +243,7 @@ public final class ContextSelector {
         events: [CEvent],
         userPrefs: String
     ) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
+        let encoder = Self.promptEncoder
 
         /// Compact per-entry projection of `SurfaceObservation` for the
         /// Mercury payload. We drop fields Mercury doesn't need (controls,
@@ -335,6 +333,13 @@ public final class ContextSelector {
     // MARK: - Response parser
 
     private static let intentDecoder = JSONDecoder()
+
+    private static let promptEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = [.sortedKeys]
+        return e
+    }()
 
     /// Robust parse: extract `brief` via JSONSerialization first (so it survives even when
     /// Mercury's intent shape doesn't decode), then attempt typed intent decode.
