@@ -425,8 +425,11 @@ public final class ComputerUseHarness {
             }
 
             var resultBlocks: [ContentBlock] = []
+            resultBlocks.reserveCapacity(toolUses.count)
             var toolRecords: [HarnessTurnRecord.ToolCallRecord] = []
+            toolRecords.reserveCapacity(toolUses.count)
             var observabilityToolCalls: [AgentObservabilityLog.ToolCallSummary] = []
+            observabilityToolCalls.reserveCapacity(toolUses.count)
             for use in toolUses {
                 if stopRequested {
                     await HarnessRunDetailStore.shared.appendTurn(
