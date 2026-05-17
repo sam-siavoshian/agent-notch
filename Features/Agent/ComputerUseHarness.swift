@@ -199,7 +199,11 @@ public final class ComputerUseHarness {
             Message(role: "user", content: firstUserContent)
         ]
 
-        var currentModel = modelID
+        // Per-run model resolution: prefer the user's saved selection over the
+        // hardcoded default. Falls back to `self.modelID` if the settings store
+        // can't be reached (shouldn't happen on @MainActor but cheap to guard).
+        let selectedModelID = AgentSettingsStore.shared.agentModel.modelID
+        var currentModel = selectedModelID.isEmpty ? modelID : selectedModelID
         var triedFallback = false
         var turn = 0
 
