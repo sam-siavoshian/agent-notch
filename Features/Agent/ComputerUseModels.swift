@@ -16,10 +16,32 @@ public enum AnthropicModel {
 public struct AnthropicMessageRequest: Codable, Sendable {
     public var model: String
     public var maxTokens: Int
+    /// Plain-string system prompt. Used when no caching is needed.
     public var system: String?
+    /// Array-form system prompt with per-block cache_control. When non-nil
+    /// this takes precedence over `system` during encoding.
+    public var systemBlocks: [SystemBlock]?
     public var messages: [Message]
     public var tools: [Tool]
     public var toolChoice: ToolChoice?
+
+    public init(
+        model: String,
+        maxTokens: Int,
+        system: String? = nil,
+        systemBlocks: [SystemBlock]? = nil,
+        messages: [Message],
+        tools: [Tool],
+        toolChoice: ToolChoice? = nil
+    ) {
+        self.model = model
+        self.maxTokens = maxTokens
+        self.system = system
+        self.systemBlocks = systemBlocks
+        self.messages = messages
+        self.tools = tools
+        self.toolChoice = toolChoice
+    }
 
     enum CodingKeys: String, CodingKey {
         case model
@@ -30,9 +52,69 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         case toolChoice = "tool_choice"
     }
 
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(model, forKey: .model)
+        try c.encode(maxTokens, forKey: .maxTokens)
+        try c.encode(messages, forKey: .messages)
+        try c.encode(tools, forKey: .tools)
+        try c.encodeIfPresent(toolChoice, forKey: .toolChoice)
+        if let systemBlocks {
+            try c.encode(systemBlocks, forKey: .system)
+        } else if let system {
+            try c.encode(system, forKey: .system)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        model = try c.decode(String.self, forKey: .model)
+        maxTokens = try c.decode(Int.self, forKey: .maxTokens)
+        messages = try c.decode([Message].self, forKey: .messages)
+        tools = try c.decode([Tool].self, forKey: .tools)
+        toolChoice = try c.decodeIfPresent(ToolChoice.self, forKey: .toolChoice)
+        if let str = try? c.decodeIfPresent(String.self, forKey: .system) {
+            system = str
+            systemBlocks = nil
+        } else if let blocks = try? c.decodeIfPresent([SystemBlock].self, forKey: .system) {
+            system = nil
+            systemBlocks = blocks
+        } else {
+            system = nil
+            systemBlocks = nil
+        }
+    }
+
     public struct ToolChoice: Codable, Sendable {
         public var type: String // "auto" | "any" | "tool" | "none"
         public init(type: String) { self.type = type }
+    }
+}
+
+/// System prompt block with optional cache_control. Anthropic's API accepts a
+/// `system` field as either a string or an array of these blocks. Marking a
+/// block with `cache_control: {type: "ephemeral"}` makes it eligible for the
+/// 5-minute prompt cache — cuts TTFT and input-token cost on subsequent calls
+/// within the cache window.
+public struct SystemBlock: Codable, Sendable {
+    public var type: String
+    public var text: String
+    public var cacheControl: CacheControl?
+
+    public init(text: String, cached: Bool = false) {
+        self.type = "text"
+        self.text = text
+        self.cacheControl = cached ? CacheControl(type: "ephemeral") : nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type, text
+        case cacheControl = "cache_control"
+    }
+
+    public struct CacheControl: Codable, Sendable {
+        public var type: String
+        public init(type: String = "ephemeral") { self.type = type }
     }
 }
 

@@ -24,9 +24,15 @@ public final class ComputerUseHarness {
     public struct Input {
         public var transcript: String
         public var contextSummary: String
-        public init(transcript: String, contextSummary: String) {
+        public var resolvedIntent: ContextResolvedIntent?
+        public init(
+            transcript: String,
+            contextSummary: String,
+            resolvedIntent: ContextResolvedIntent? = nil
+        ) {
             self.transcript = transcript
             self.contextSummary = contextSummary
+            self.resolvedIntent = resolvedIntent
         }
     }
 
@@ -61,7 +67,11 @@ public final class ComputerUseHarness {
             )
         ]
 
-        let system = buildSystemPrompt(settings: settings, contextSummary: input.contextSummary)
+        let systemBlocks = buildSystemBlocks(
+            settings: settings,
+            contextSummary: input.contextSummary,
+            resolvedIntent: input.resolvedIntent
+        )
         var messages: [Message] = [
             Message(role: "user", content: [.text(input.transcript)])
         ]
@@ -96,6 +106,32 @@ public final class ComputerUseHarness {
                 finalStatus: status,
                 errorMessage: errorMessage
             ))
+
+            if let intent = input.resolvedIntent {
+                let outcome = ContextIntentResolverOutcomeLog.Outcome(
+                    recordedAt: endedAt,
+                    transcript: input.transcript,
+                    intent: intent,
+                    harnessStatus: status,
+                    harnessErrorMessage: errorMessage,
+                    harnessDurationMs: milliseconds(from: startedAt, to: endedAt)
+                )
+                await ContextIntentResolverOutcomeLog.shared.record(outcome)
+
+                // Recipe feedback loop: when the harness completed successfully
+                // and the resolver had surfaced a candidate recipe, bump that
+                // recipe's confidence. Successful completion = no anthropic /
+                // network / max_turn error AND tool calls actually ran.
+                let succeeded = (status == "completed_without_tool" || status == "completed_after_tools")
+                if succeeded, let topRecipe = intent.candidateRecipes.first,
+                   !topRecipe.appKey.isEmpty, !topRecipe.recipeID.isEmpty {
+                    await ContextMemoryStore.shared.bumpRecipeConfidence(
+                        appName: topRecipe.appKey,
+                        recipeID: topRecipe.recipeID
+                    )
+                    NSLog("[Harness] Bumped confidence for recipe \(topRecipe.recipeID) in \(topRecipe.appKey)")
+                }
+            }
         }
 
         while turn < maxTurns {
@@ -103,7 +139,7 @@ public final class ComputerUseHarness {
             let request = AnthropicMessageRequest(
                 model: currentModel,
                 maxTokens: maxOutputTokens,
-                system: system,
+                systemBlocks: systemBlocks,
                 messages: messages,
                 tools: tools,
                 toolChoice: nil
@@ -207,35 +243,98 @@ public final class ComputerUseHarness {
         max(0, Int(end.timeIntervalSince(start) * 1000))
     }
 
-    private func buildSystemPrompt(settings: AgentSettings, contextSummary: String) -> String {
-        var parts: [String] = []
-        parts.append("""
+    /// Builds the system prompt as two blocks:
+    /// - **Static block** (cached): identity + how-to-use-context instructions
+    ///   + user preferences + custom system prompt. These rarely change so
+    ///   `cache_control: ephemeral` is set on this block, giving us a
+    ///   5-minute prompt cache window across turns AND across activations.
+    /// - **Dynamic block** (not cached): resolved intent + activation context.
+    ///   These change per long-press so caching them would never hit.
+    private func buildSystemBlocks(
+        settings: AgentSettings,
+        contextSummary: String,
+        resolvedIntent: ContextResolvedIntent? = nil
+    ) -> [SystemBlock] {
+        var staticParts: [String] = []
+        staticParts.append("""
         You are an on-screen computer-use agent on macOS. You control the user's machine via the computer tool. \
         You can click, type, scroll, take screenshots, and press keys. Always take a screenshot before acting if you're unsure of the screen state. \
         Refuse to perform irreversible destructive actions (deleting files, formatting drives, sending payments) without explicit confirmation. \
         Before executing any tool calls, always begin your response with a brief natural one-sentence spoken acknowledgment of what you're about to do — e.g. "Opening Chrome now." or "Sure, I'll click that." Keep it under 15 words. This sentence will be read aloud to the user.
         """)
 
-        if !contextSummary.isEmpty {
-            parts.append("""
-            Local activation context:
-            \(contextSummary)
+        staticParts.append("""
+        How to use the context blocks below (when present):
 
-            Use this context to reduce UI exploration and choose a better first action. Treat it as recent learned context, not exact coordinates. If the current screen is ambiguous or the context looks stale, take a screenshot before acting.
-            """)
-        }
+        1. **Resolved Goal / Verb / Target / Resolved Entities** — this is a pre-computed read of what the user means. Trust it as your starting hypothesis; only re-derive if the live screen clearly contradicts it. The resolver has already mapped fuzzy references like "this" or first names to specific entities from your UI memory.
+
+        2. **Candidate Recipes (ranked)** — these are prose action sequences learned by watching the user repeat workflows. If the top-ranked recipe matches the goal, follow its steps directly — don't re-discover the path. The 🎯 marker means the recipe matched the intent keywords. Skip the recipe only if the live screen shows the entry-point surface is no longer where the recipe assumed.
+
+        3. **Current Task / Current Surface / Known Controls (Affordances)** — describes where the user just was and what was actionable there. Use it to skip the "what can I click here" exploration phase. Region names are semantic (footer, sidebar, top-right) — never pixel coordinates. You still ground visually in the live screenshot.
+
+        4. **Recent Activity / Likely Next Actions** — short narrative of what the user did right before invoking you, plus statistical hints of what they most often do from the current surface. Use as soft priors, not directives.
+
+        5. **Entities In Play / Cross-App Memory** — concrete objects (files, people, URLs, tickets) the user has touched recently across this app and adjacent apps. Use to resolve referent ambiguity in the request.
+
+        Treat all of the above as a *prior* describing the screen at the moment you were invoked. The live screenshot is always ground truth — if it contradicts the context, trust the screenshot and act accordingly. Take a screenshot before your first non-trivial action.
+        """)
 
         if !settings.preferences.isEmpty {
-            parts.append("User preferences:\n\(settings.preferences)")
+            staticParts.append("User preferences:\n\(settings.preferences)")
         }
 
         if !settings.systemPrompt.isEmpty {
-            parts.append(settings.systemPrompt)
+            staticParts.append(settings.systemPrompt)
         }
 
-        parts.append("Reasoning effort: \(settings.reasoningEffort.rawValue).")
+        staticParts.append("Reasoning effort: \(settings.reasoningEffort.rawValue).")
 
-        return parts.joined(separator: "\n\n")
+        var blocks: [SystemBlock] = []
+        blocks.append(SystemBlock(text: staticParts.joined(separator: "\n\n"), cached: true))
+
+        var dynamicParts: [String] = []
+        if let intent = resolvedIntent, !intent.usedFallback {
+            dynamicParts.append(Self.renderResolvedIntent(intent))
+        }
+        if !contextSummary.isEmpty {
+            dynamicParts.append("""
+            Activation context (built for this long-press):
+            \(contextSummary)
+            """)
+        }
+        if !dynamicParts.isEmpty {
+            blocks.append(SystemBlock(text: dynamicParts.joined(separator: "\n\n"), cached: false))
+        }
+        return blocks
+    }
+
+    private static func renderResolvedIntent(_ intent: ContextResolvedIntent) -> String {
+        var lines: [String] = []
+        lines.append("Resolved user intent: \(intent.inferredGoal)")
+        lines.append("Verb: \(intent.verb)")
+        if let target = intent.target, !target.isEmpty {
+            lines.append("Target: \(target)")
+        }
+        if !intent.resolvedEntities.isEmpty {
+            let entityLines = intent.resolvedEntities.prefix(5).map { entity -> String in
+                let label = entity.entityLabel ?? "(unmatched)"
+                let type = entity.entityType.map { " [\($0)]" } ?? ""
+                return "  - \"\(entity.userPhrase)\" → \(label)\(type) — \(entity.evidence)"
+            }
+            lines.append("Resolved entities:")
+            lines.append(contentsOf: entityLines)
+        }
+        if !intent.candidateRecipes.isEmpty {
+            lines.append("Candidate recipes (ranked):")
+            for recipe in intent.candidateRecipes.prefix(3) {
+                lines.append("  - \(recipe.recipeName) (score \(String(format: "%.2f", recipe.matchScore)))")
+                for step in recipe.stepsProse.prefix(6) {
+                    lines.append("      • \(step)")
+                }
+            }
+        }
+        lines.append("Resolver confidence: \(String(format: "%.2f", intent.confidence)). Treat this as a hint — re-derive only if it clearly contradicts the live screen.")
+        return lines.joined(separator: "\n")
     }
 
     private func primaryDisplayPixelSize() -> CGSize {

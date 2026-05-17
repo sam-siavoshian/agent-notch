@@ -69,6 +69,9 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
     public let controlsCount: Int
     public let affordancesCount: Int
     public let entitiesCount: Int
+    public let dirtyClassification: String?
+    public let dirtyHammingDistance: Int?
+    public let dirtyChangedAreaFraction: Double?
 
     public init(
         id: UUID = UUID(),
@@ -118,7 +121,10 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         errorPath: String? = nil,
         controlsCount: Int = 0,
         affordancesCount: Int = 0,
-        entitiesCount: Int = 0
+        entitiesCount: Int = 0,
+        dirtyClassification: String? = nil,
+        dirtyHammingDistance: Int? = nil,
+        dirtyChangedAreaFraction: Double? = nil
     ) {
         self.id = id
         self.attemptID = attemptID
@@ -168,6 +174,9 @@ public struct ContextAIObservationEvent: Codable, Identifiable, Sendable {
         self.controlsCount = controlsCount
         self.affordancesCount = affordancesCount
         self.entitiesCount = entitiesCount
+        self.dirtyClassification = dirtyClassification
+        self.dirtyHammingDistance = dirtyHammingDistance
+        self.dirtyChangedAreaFraction = dirtyChangedAreaFraction
     }
 }
 
@@ -311,17 +320,34 @@ public actor ContextAIObservationLog {
 }
 
 public actor ContextGeminiObservationGate {
+    /// Default minimum spacing when no classification is supplied. Used when
+    /// callers don't yet know whether the change is major or minor (e.g.,
+    /// pre-dirty-detector code paths).
     private let minimumAutomaticSpacingSeconds: TimeInterval
+    /// Spacing for major changes — a meaningful UI change deserves a fresh
+    /// observation soon. The dirty detector already filters noise, so we
+    /// don't need the original 8s wall here.
+    private let majorChangeSpacingSeconds: TimeInterval
+    /// Spacing for minor changes — they go through the cheap update lane
+    /// (or the OCR-delta fast path with zero LLM), so a tight spacing is OK.
+    private let minorChangeSpacingSeconds: TimeInterval
     private var lastAutomaticQueueAt: Date?
     private var inFlightCount = 0
 
-    public init(minimumAutomaticSpacingSeconds: TimeInterval = 8) {
+    public init(
+        minimumAutomaticSpacingSeconds: TimeInterval = 8,
+        majorChangeSpacingSeconds: TimeInterval = 2,
+        minorChangeSpacingSeconds: TimeInterval = 4
+    ) {
         self.minimumAutomaticSpacingSeconds = minimumAutomaticSpacingSeconds
+        self.majorChangeSpacingSeconds = majorChangeSpacingSeconds
+        self.minorChangeSpacingSeconds = minorChangeSpacingSeconds
     }
 
     public func startDecision(
         trigger: ContextCaptureTrigger,
         isAPIKeyConfigured: Bool,
+        dirtyClassification: String? = nil,
         now: Date = Date()
     ) -> ContextGeminiObservationDecision {
         guard trigger != .activation else {
@@ -339,8 +365,17 @@ public actor ContextGeminiObservationGate {
 
         if !isManual, let lastAutomaticQueueAt {
             let elapsed = now.timeIntervalSince(lastAutomaticQueueAt)
-            if elapsed < minimumAutomaticSpacingSeconds {
-                return .skip("rate limited; last automatic Gemini call was \(Int(elapsed))s ago")
+            let requiredSpacing: TimeInterval
+            switch dirtyClassification {
+            case "major_change":
+                requiredSpacing = majorChangeSpacingSeconds
+            case "minor_change":
+                requiredSpacing = minorChangeSpacingSeconds
+            default:
+                requiredSpacing = minimumAutomaticSpacingSeconds
+            }
+            if elapsed < requiredSpacing {
+                return .skip("rate limited; last automatic Gemini call was \(Int(elapsed))s ago (need \(Int(requiredSpacing))s for \(dirtyClassification ?? "unclassified"))")
             }
         }
 

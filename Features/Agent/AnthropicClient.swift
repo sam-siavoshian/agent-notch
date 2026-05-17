@@ -76,4 +76,81 @@ public struct AnthropicClient: Sendable {
             throw Error(status: http.statusCode, body: bodyString, underlying: error)
         }
     }
+
+    /// Plain text → text helper. Used by callers (e.g. the context reducer)
+    /// that only need single-shot synthesis with no tools and no beta headers.
+    /// Returns the concatenated text content from the response. Throws on a
+    /// non-2xx response, transport failure, or empty content.
+    public func sendPlainText(
+        model: String,
+        system: String?,
+        userText: String,
+        maxTokens: Int
+    ) async throws -> String {
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        // Deliberately no anthropic-beta header — this path is plain messages.
+
+        struct PlainMessage: Encodable {
+            let role: String
+            let content: String
+        }
+        struct PlainRequest: Encodable {
+            let model: String
+            let maxTokens: Int
+            let system: String?
+            let messages: [PlainMessage]
+            enum CodingKeys: String, CodingKey {
+                case model
+                case maxTokens = "max_tokens"
+                case system
+                case messages
+            }
+        }
+
+        let payload = PlainRequest(
+            model: model,
+            maxTokens: maxTokens,
+            system: system,
+            messages: [PlainMessage(role: "user", content: userText)]
+        )
+
+        do {
+            req.httpBody = try JSONEncoder().encode(payload)
+        } catch {
+            throw Error(status: nil, body: nil, underlying: error)
+        }
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw Error(status: nil, body: nil, underlying: error)
+        }
+
+        let http = response as? HTTPURLResponse
+        guard let http, (200..<300).contains(http.statusCode) else {
+            let bodyString = String(data: data, encoding: .utf8)
+            throw Error(status: http?.statusCode, body: bodyString, underlying: nil)
+        }
+
+        let decoded: AnthropicMessageResponse
+        do {
+            decoded = try JSONDecoder().decode(AnthropicMessageResponse.self, from: data)
+        } catch {
+            let bodyString = String(data: data, encoding: .utf8)
+            throw Error(status: http.statusCode, body: bodyString, underlying: error)
+        }
+
+        for block in decoded.content {
+            if case .text(let t) = block {
+                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return t }
+            }
+        }
+        throw Error(status: http.statusCode, body: "no text content block", underlying: nil)
+    }
 }

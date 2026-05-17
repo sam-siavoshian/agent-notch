@@ -147,6 +147,7 @@ public actor ContextGeminiObservationService {
             writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json")
             guard let text = result.response.firstText else {
                 NSLog("[ContextGeminiObservationService] Gemini response had no text candidate.")
+                preserveFailureArtifacts(imageHash: imageHash, laneName: nil, reason: "no text candidate")
                 return nil
             }
             writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json")
@@ -163,6 +164,7 @@ public actor ContextGeminiObservationService {
         } catch {
             writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt")
             NSLog("[ContextGeminiObservationService] Gemini observation failed: \(error)")
+            preserveFailureArtifacts(imageHash: imageHash, laneName: nil, reason: "\(error)")
             return nil
         }
     }
@@ -232,30 +234,87 @@ public actor ContextGeminiObservationService {
         }
 
         do {
-            let prompt = Self.lanePrompt(for: lane, input: input, previousSnapshot: previousSnapshot)
+            let systemInstruction = Self.laneSystemInstruction(for: lane)
+            let dynamicPrompt = Self.laneDynamicPrompt(for: lane, input: input, previousSnapshot: previousSnapshot)
+            let fullPromptForDebug = "[SYSTEM INSTRUCTION]\n\(systemInstruction)\n\n[USER PROMPT]\n\(dynamicPrompt)"
             writeDebugData(input.imageData, imageHash: imageHash, mimeType: input.mimeType, laneName: debugName)
             writeDebugText(requestMetadata(for: input, config: config, lane: lane), imageHash: imageHash, suffix: "request.txt", laneName: debugName)
-            writeDebugText(prompt, imageHash: imageHash, suffix: "prompt.txt", laneName: debugName)
+            writeDebugText(fullPromptForDebug, imageHash: imageHash, suffix: "prompt.txt", laneName: debugName)
+
+            // Try to attach a cached system instruction. Fall back to inlining it if caching fails.
+            let cachedContentName = await ContextGeminiCacheManager.shared.cachedContentName(
+                for: lane,
+                model: model,
+                promptVersion: Self.promptVersion,
+                systemInstruction: systemInstruction,
+                apiKey: apiKey
+            )
+
+            // Build parts. For .interaction with a previousSnapshot, send two images
+            // image-first ordered as [previous, current, text]; the user-visible prompt
+            // already calls these out as FIRST/SECOND.
+            var parts: [Part] = []
+            if lane == .interaction, let previousSnapshot, !previousSnapshot.jpegData.isEmpty {
+                parts.append(.inlineData(mimeType: "image/jpeg", data: previousSnapshot.jpegData.base64EncodedString()))
+            }
+            parts.append(.inlineData(mimeType: input.mimeType, data: input.imageData.base64EncodedString()))
+
+            // When caching is active, only send the dynamic per-call text; the cached
+            // system instruction supplies the rules + lane goal + JSON schema.
+            // When caching is not active, prepend the static system instruction to the text.
+            let textPrompt: String
+            if cachedContentName != nil {
+                textPrompt = dynamicPrompt
+            } else {
+                textPrompt = systemInstruction + "\n\n" + dynamicPrompt
+            }
+            parts.append(.text(textPrompt))
 
             let request = GeminiGenerateContentRequest(
-                contents: [
-                    .init(parts: [
-                        .inlineData(mimeType: input.mimeType, data: input.imageData.base64EncodedString()),
-                        .text(prompt)
-                    ])
-                ],
+                contents: [.init(parts: parts)],
                 generationConfig: .init(
                     maxOutputTokens: config.maxOutputTokens,
                     responseMimeType: "application/json",
                     mediaResolution: config.mediaResolution,
                     thinkingConfig: .init(thinkingLevel: config.thinkingLevel)
-                )
+                ),
+                cachedContent: cachedContentName
             )
 
-            let result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
+            let result: GeminiSendResult
+            do {
+                result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
+            } catch let error as Error where Self.isCacheMiss(error) && cachedContentName != nil {
+                // Cache expired or was deleted server-side. Drop it and retry once
+                // with the system instruction inlined.
+                NSLog("[ContextGeminiObservationService] Cached content miss for \(lane.rawValue); rebuilding without cache.")
+                await ContextGeminiCacheManager.shared.invalidate(
+                    lane: lane,
+                    model: model,
+                    promptVersion: Self.promptVersion
+                )
+                var retryParts: [Part] = []
+                if lane == .interaction, let previousSnapshot, !previousSnapshot.jpegData.isEmpty {
+                    retryParts.append(.inlineData(mimeType: "image/jpeg", data: previousSnapshot.jpegData.base64EncodedString()))
+                }
+                retryParts.append(.inlineData(mimeType: input.mimeType, data: input.imageData.base64EncodedString()))
+                retryParts.append(.text(systemInstruction + "\n\n" + dynamicPrompt))
+                let retryRequest = GeminiGenerateContentRequest(
+                    contents: [.init(parts: retryParts)],
+                    generationConfig: .init(
+                        maxOutputTokens: config.maxOutputTokens,
+                        responseMimeType: "application/json",
+                        mediaResolution: config.mediaResolution,
+                        thinkingConfig: .init(thinkingLevel: config.thinkingLevel)
+                    ),
+                    cachedContent: nil
+                )
+                result = try await send(retryRequest, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
+            }
             writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json", laneName: debugName)
             guard let text = result.response.firstText else {
                 NSLog("[ContextGeminiObservationService] \(lane.rawValue) lane response had no text candidate.")
+                preserveFailureArtifacts(imageHash: imageHash, laneName: debugName, reason: "no text candidate")
                 return nil
             }
             writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json", laneName: debugName)
@@ -273,8 +332,346 @@ public actor ContextGeminiObservationService {
         } catch {
             writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt", laneName: debugName)
             NSLog("[ContextGeminiObservationService] \(lane.rawValue) lane failed: \(error)")
+            preserveFailureArtifacts(imageHash: imageHash, laneName: debugName, reason: "\(error)")
             return nil
         }
+    }
+
+    /// Text-only synthesis call that merges the parallel lane outputs into the
+    /// final ContextGeminiObservation persisted to memory. Prefers Claude Haiku
+    /// 4.5 (sub-2s for ~800 tokens of structured JSON); falls back to Gemini
+    /// when no `ANTHROPIC_API_KEY` is configured or Claude errors out.
+    public func reduceObservations(
+        _ lanes: [ContextGeminiLaneObservation],
+        trigger: ContextCaptureTrigger
+    ) async throws -> ContextGeminiObservation {
+        guard !lanes.isEmpty else {
+            throw Error(status: nil, body: "reduceObservations called with no lanes", underlying: nil)
+        }
+
+        let lane = ContextGeminiObservationLane.reducer
+        let imageHash = lanes.first?.imageHash ?? Self.sha256Hex(Data())
+        let systemInstruction = Self.laneSystemInstruction(for: lane)
+        let dynamicPrompt = Self.reducerDynamicPrompt(lanes: lanes, trigger: trigger)
+        let fullPromptForDebug = "[SYSTEM INSTRUCTION]\n\(systemInstruction)\n\n[USER PROMPT]\n\(dynamicPrompt)"
+        writeDebugText(fullPromptForDebug, imageHash: imageHash, suffix: "prompt.txt", laneName: lane.rawValue)
+        let synthesizedInput = Self.synthesizedReducerInput(from: lanes)
+
+        // Path A: Claude Haiku 4.5 — preferred when ANTHROPIC_API_KEY is set.
+        if let anthropicKey = Secrets.anthropicAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines), !anthropicKey.isEmpty {
+            let start = Date()
+            do {
+                let client = AnthropicClient(apiKey: anthropicKey, betaHeaders: [])
+                let text = try await client.sendPlainText(
+                    model: AnthropicModel.haiku45,
+                    system: systemInstruction,
+                    userText: dynamicPrompt,
+                    maxTokens: 1500
+                )
+                let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
+                writeDebugText(text, imageHash: imageHash, suffix: "raw-response.json", laneName: lane.rawValue)
+                writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json", laneName: lane.rawValue)
+                NSLog("[ContextGeminiObservationService] reducer path=claude model=\(AnthropicModel.haiku45) latencyMs=\(elapsedMs)")
+                do {
+                    return try Self.parseObservation(
+                        text,
+                        input: synthesizedInput,
+                        imageHash: imageHash,
+                        model: AnthropicModel.haiku45,
+                        promptVersion: Self.promptVersion
+                    )
+                } catch {
+                    writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt", laneName: lane.rawValue)
+                    preserveFailureArtifacts(imageHash: imageHash, laneName: lane.rawValue, reason: "claude reducer parse error: \(error)")
+                    NSLog("[ContextGeminiObservationService] reducer claude parse failed, falling back to gemini: \(error)")
+                    // Fall through to Gemini.
+                }
+            } catch {
+                let elapsedMs = Int(Date().timeIntervalSince(start) * 1000)
+                NSLog("[ContextGeminiObservationService] reducer claude failed after \(elapsedMs)ms, falling back to gemini: \(error)")
+                // Fall through to Gemini.
+            }
+        } else {
+            NSLog("[ContextGeminiObservationService] reducer path=gemini (ANTHROPIC_API_KEY not configured)")
+        }
+
+        // Path B: Gemini text-only fallback (original behaviour).
+        let config = requestConfig(for: lane)
+        guard let apiKey = apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+            throw Error(status: nil, body: "GEMINI_API_KEY not configured (and Claude unavailable)", underlying: nil)
+        }
+
+        let cachedContentName = await ContextGeminiCacheManager.shared.cachedContentName(
+            for: lane,
+            model: model,
+            promptVersion: Self.promptVersion,
+            systemInstruction: systemInstruction,
+            apiKey: apiKey
+        )
+
+        let textPrompt: String
+        if cachedContentName != nil {
+            textPrompt = dynamicPrompt
+        } else {
+            textPrompt = systemInstruction + "\n\n" + dynamicPrompt
+        }
+
+        let request = GeminiGenerateContentRequest(
+            contents: [.init(parts: [.text(textPrompt)])],
+            generationConfig: .init(
+                maxOutputTokens: max(config.maxOutputTokens, 1200),
+                responseMimeType: "application/json",
+                mediaResolution: nil,
+                thinkingConfig: .init(thinkingLevel: Self.defaultThinkingLevel)
+            ),
+            cachedContent: cachedContentName
+        )
+
+        let geminiStart = Date()
+        let result: GeminiSendResult
+        do {
+            result = try await send(request, apiKey: apiKey, timeoutSeconds: 12)
+        } catch let error as Error where Self.isCacheMiss(error) && cachedContentName != nil {
+            NSLog("[ContextGeminiObservationService] Cached content miss for reducer; rebuilding without cache.")
+            await ContextGeminiCacheManager.shared.invalidate(
+                lane: lane,
+                model: model,
+                promptVersion: Self.promptVersion
+            )
+            let retryRequest = GeminiGenerateContentRequest(
+                contents: [.init(parts: [.text(systemInstruction + "\n\n" + dynamicPrompt)])],
+                generationConfig: .init(
+                    maxOutputTokens: max(config.maxOutputTokens, 1200),
+                    responseMimeType: "application/json",
+                    mediaResolution: nil,
+                    thinkingConfig: .init(thinkingLevel: Self.defaultThinkingLevel)
+                ),
+                cachedContent: nil
+            )
+            result = try await send(retryRequest, apiKey: apiKey, timeoutSeconds: 12)
+        }
+
+        writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json", laneName: lane.rawValue)
+        guard let text = result.response.firstText else {
+            preserveFailureArtifacts(imageHash: imageHash, laneName: lane.rawValue, reason: "reducer no text candidate")
+            throw Error(status: nil, body: "reducer response had no text candidate", underlying: nil)
+        }
+        writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json", laneName: lane.rawValue)
+        let geminiElapsedMs = Int(Date().timeIntervalSince(geminiStart) * 1000)
+        NSLog("[ContextGeminiObservationService] reducer path=gemini model=\(model) latencyMs=\(geminiElapsedMs)")
+
+        do {
+            return try Self.parseObservation(
+                text,
+                input: synthesizedInput,
+                imageHash: imageHash,
+                model: model,
+                promptVersion: Self.promptVersion
+            )
+        } catch {
+            writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt", laneName: lane.rawValue)
+            preserveFailureArtifacts(imageHash: imageHash, laneName: lane.rawValue, reason: "reducer parse error: \(error)")
+            throw error
+        }
+    }
+
+    /// Lightweight "update existing surface" call. Sends the previous reducer
+    /// observation as text plus the current screenshot, and asks Gemini to
+    /// return ONLY the fields that changed. Returns nil if Gemini reports
+    /// `summary: "no_change"`, the request fails, or the API key is missing.
+    public func observeUpdate(
+        previousObservation: ContextGeminiObservation,
+        input: ContextGeminiObservationInput,
+        thumbnailData: Data? = nil,
+        cropData: Data? = nil
+    ) async -> ContextGeminiLaneObservation? {
+        let lane = ContextGeminiObservationLane.update
+        let config = requestConfig(for: lane)
+        let imageHash = Self.sha256Hex(input.imageData)
+        let debugName = lane.rawValue
+
+        guard let apiKey = apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
+            NSLog("[ContextGeminiObservationService] GEMINI_API_KEY is not set; skipping update lane.")
+            return nil
+        }
+
+        do {
+            let useTwoImage = thumbnailData != nil && cropData != nil
+            let systemInstruction = Self.laneSystemInstruction(for: lane, twoImage: useTwoImage)
+            let dynamicPrompt = Self.updateLaneDynamicPrompt(
+                previousObservation: previousObservation,
+                input: input,
+                twoImage: useTwoImage
+            )
+            let fullPromptForDebug = "[SYSTEM INSTRUCTION]\n\(systemInstruction)\n\n[USER PROMPT]\n\(dynamicPrompt)"
+            writeDebugData(input.imageData, imageHash: imageHash, mimeType: input.mimeType, laneName: debugName)
+            writeDebugText(requestMetadata(for: input, config: config, lane: lane), imageHash: imageHash, suffix: "request.txt", laneName: debugName)
+            writeDebugText(fullPromptForDebug, imageHash: imageHash, suffix: "prompt.txt", laneName: debugName)
+
+            let cachedContentName = await ContextGeminiCacheManager.shared.cachedContentName(
+                for: lane,
+                model: "gemini-3.1-flash-lite",
+                promptVersion: Self.promptVersion + (useTwoImage ? "+2img" : ""),
+                systemInstruction: systemInstruction,
+                apiKey: apiKey
+            )
+
+            let textPrompt = cachedContentName != nil
+                ? dynamicPrompt
+                : systemInstruction + "\n\n" + dynamicPrompt
+            let parts: [Part] = Self.buildUpdateParts(
+                input: input,
+                thumbnailData: thumbnailData,
+                cropData: cropData,
+                textPrompt: textPrompt
+            )
+
+            let request = GeminiGenerateContentRequest(
+                contents: [.init(parts: parts)],
+                generationConfig: .init(
+                    maxOutputTokens: config.maxOutputTokens,
+                    responseMimeType: "application/json",
+                    mediaResolution: "MEDIA_RESOLUTION_HIGH",
+                    thinkingConfig: .init(thinkingLevel: "minimal")
+                ),
+                cachedContent: cachedContentName
+            )
+
+            let result: GeminiSendResult
+            do {
+                result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
+            } catch let error as Error where Self.isCacheMiss(error) && cachedContentName != nil {
+                NSLog("[ContextGeminiObservationService] Cached content miss for update; rebuilding without cache.")
+                await ContextGeminiCacheManager.shared.invalidate(
+                    lane: lane,
+                    model: "gemini-3.1-flash-lite",
+                    promptVersion: Self.promptVersion + (useTwoImage ? "+2img" : "")
+                )
+                let retryParts = Self.buildUpdateParts(
+                    input: input,
+                    thumbnailData: thumbnailData,
+                    cropData: cropData,
+                    textPrompt: systemInstruction + "\n\n" + dynamicPrompt
+                )
+                let retryRequest = GeminiGenerateContentRequest(
+                    contents: [.init(parts: retryParts)],
+                    generationConfig: .init(
+                        maxOutputTokens: config.maxOutputTokens,
+                        responseMimeType: "application/json",
+                        mediaResolution: "MEDIA_RESOLUTION_HIGH",
+                        thinkingConfig: .init(thinkingLevel: "minimal")
+                    ),
+                    cachedContent: nil
+                )
+                result = try await send(retryRequest, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
+            }
+
+            writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json", laneName: debugName)
+            guard let text = result.response.firstText else {
+                NSLog("[ContextGeminiObservationService] update lane response had no text candidate.")
+                preserveFailureArtifacts(imageHash: imageHash, laneName: debugName, reason: "update lane no text candidate")
+                return nil
+            }
+            writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json", laneName: debugName)
+
+            let trimmed = Self.cleanedJSONString(text)
+            // Short-circuit explicit no-change marker.
+            if let noChange = trimmed.data(using: .utf8),
+               let payload = try? Self.decoder.decode(LaneObservationPayload.self, from: noChange),
+               (payload.summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "no_change" {
+                return nil
+            }
+
+            return try Self.parseLaneObservation(
+                text,
+                lane: lane,
+                input: input,
+                imageHash: imageHash,
+                model: model,
+                promptVersion: Self.promptVersion
+            )
+        } catch {
+            writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt", laneName: debugName)
+            NSLog("[ContextGeminiObservationService] update lane failed: \(error)")
+            preserveFailureArtifacts(imageHash: imageHash, laneName: debugName, reason: "\(error)")
+            return nil
+        }
+    }
+
+    /// Merge an update-lane delta into a previous reducer observation. Only
+    /// non-empty fields from the delta overwrite or extend the base. Caller is
+    /// responsible for persisting and re-logging the merged observation.
+    public static func mergeUpdate(
+        previous: ContextGeminiObservation,
+        delta: ContextGeminiLaneObservation
+    ) -> ContextGeminiObservation {
+        var merged = previous
+        merged.observedAt = delta.observedAt
+        merged.imageHash = delta.imageHash
+        merged.source = .gemini
+
+        if let value = clean(delta.appLabel) { merged.appLabel = value }
+        if let value = clean(delta.windowTitle) { merged.windowTitle = value }
+        if let value = clean(delta.surfaceID) { merged.surfaceID = value }
+        if let value = clean(delta.surfaceLabel) { merged.surfaceLabel = value }
+        if let value = clean(delta.screenType) { merged.screenType = value }
+        if let value = clean(delta.primaryTask) { merged.primaryTask = value }
+        if let value = clean(delta.contentSummary) { merged.contentSummary = value }
+        if let value = clean(delta.summary) { merged.summary = value }
+
+        if !delta.layoutRegions.isEmpty {
+            merged.layoutSummary = delta.layoutRegions.joined(separator: " | ")
+            merged.landmarks = cleanStrings(delta.layoutRegions + previous.landmarks, maxCount: 16)
+            merged.dataRegions = cleanStrings(delta.layoutRegions + previous.dataRegions, maxCount: 12)
+        }
+        if !delta.controls.isEmpty {
+            merged.visibleControls = Array(uniqueControls(delta.controls + previous.visibleControls).prefix(24))
+        }
+        if !delta.entities.isEmpty {
+            merged.entities = cleanStrings(delta.entities + previous.entities, maxCount: 24)
+        }
+        if !delta.stateIndicators.isEmpty {
+            merged.stateIndicators = cleanStrings(delta.stateIndicators + previous.stateIndicators, maxCount: 12)
+        }
+        if !delta.workflows.isEmpty {
+            merged.workflowHints = cleanStrings(delta.workflows + previous.workflowHints, maxCount: 12)
+        }
+        if !delta.navigation.isEmpty {
+            merged.navigationPaths = cleanStrings(delta.navigation + previous.navigationPaths, maxCount: 12)
+        }
+        if !delta.negativeCues.isEmpty {
+            merged.negativeCues = cleanStrings(delta.negativeCues + previous.negativeCues, maxCount: 12)
+        }
+        if !delta.memoryCards.isEmpty {
+            merged.memoryCandidates = cleanStrings(delta.memoryCards + previous.memoryCandidates, maxCount: 16)
+        }
+        if !delta.uncertainty.isEmpty {
+            merged.uncertainty = cleanStrings(delta.uncertainty + previous.uncertainty, maxCount: 12)
+        }
+        if delta.confidence.isFinite, delta.confidence > 0 {
+            merged.confidence = clamp((previous.confidence + delta.confidence) / 2)
+        }
+        return merged
+    }
+
+    private static func isCacheMiss(_ error: Error) -> Bool {
+        guard let status = error.status else { return false }
+        if status == 404 { return true }
+        if status == 400, let body = error.body?.lowercased(), body.contains("cached") {
+            return true
+        }
+        return false
+    }
+
+    private static func synthesizedReducerInput(from lanes: [ContextGeminiLaneObservation]) -> ContextGeminiObservationInput {
+        let appName = lanes.first(where: { !$0.appLabel.isEmpty })?.appLabel
+        let windowTitle = lanes.first(where: { !$0.windowTitle.isEmpty })?.windowTitle
+        return ContextGeminiObservationInput(
+            imageData: Data(),
+            mimeType: "text/plain",
+            appName: appName,
+            windowTitle: windowTitle
+        )
     }
 
     public static func reduceLaneObservations(
@@ -459,6 +856,82 @@ public actor ContextGeminiObservationService {
         }
     }
 
+    /// Copies the most-recent debug artifacts (raw-response, raw-text, prompt,
+    /// error) for a failed lane call into `Debug/Failures/` with a timestamp
+    /// prefix so a subsequent successful call for the same image hash does not
+    /// overwrite the evidence. LRU-prunes to keep at most 50 failures.
+    private func preserveFailureArtifacts(
+        imageHash: String,
+        laneName: String?,
+        reason: String
+    ) {
+        let prefix = Self.debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
+        let failuresDir = debugDirectoryURL.appendingPathComponent("Failures", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: failuresDir, withIntermediateDirectories: true)
+        } catch {
+            NSLog("[ContextGeminiObservationService] Failed to create Failures dir: \(error)")
+            return
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withTime]
+        let ts = formatter
+            .string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let suffixes = ["raw-response.json", "raw-text.json", "prompt.txt", "error.txt", "request.txt"]
+        for suffix in suffixes {
+            let src = debugDirectoryURL.appendingPathComponent("\(prefix)-\(suffix)")
+            guard FileManager.default.fileExists(atPath: src.path) else { continue }
+            let dst = failuresDir.appendingPathComponent("\(ts)-\(prefix)-\(suffix)")
+            do {
+                if FileManager.default.fileExists(atPath: dst.path) {
+                    try FileManager.default.removeItem(at: dst)
+                }
+                try FileManager.default.copyItem(at: src, to: dst)
+            } catch {
+                NSLog("[ContextGeminiObservationService] Failed to copy failure artifact \(suffix): \(error)")
+            }
+        }
+        let reasonURL = failuresDir.appendingPathComponent("\(ts)-\(prefix)-reason.txt")
+        try? reason.write(to: reasonURL, atomically: true, encoding: .utf8)
+        pruneFailureArtifacts(in: failuresDir, keep: 50)
+    }
+
+    private func pruneFailureArtifacts(in directory: URL, keep: Int) {
+        let fm = FileManager.default
+        guard let urls = try? fm.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        // Group by timestamp+prefix (everything before "-<suffix>"). We prune
+        // by group so all related files for the oldest failures fall off
+        // together; "keep" counts groups, not files.
+        struct Entry { let url: URL; let mtime: Date; let stem: String }
+        let known = ["raw-response.json", "raw-text.json", "prompt.txt", "error.txt", "request.txt", "reason.txt"]
+        let entries: [Entry] = urls.compactMap { url in
+            let name = url.lastPathComponent
+            guard let suffix = known.first(where: { name.hasSuffix($0) }) else { return nil }
+            let stem = String(name.dropLast(suffix.count))
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date.distantPast
+            return Entry(url: url, mtime: mtime, stem: stem)
+        }
+        var groups: [String: (latest: Date, urls: [URL])] = [:]
+        for entry in entries {
+            var current = groups[entry.stem] ?? (Date.distantPast, [])
+            current.urls.append(entry.url)
+            if entry.mtime > current.latest { current.latest = entry.mtime }
+            groups[entry.stem] = current
+        }
+        let sortedGroups = groups.sorted { $0.value.latest > $1.value.latest }
+        guard sortedGroups.count > keep else { return }
+        for (_, value) in sortedGroups.dropFirst(keep) {
+            for url in value.urls {
+                try? fm.removeItem(at: url)
+            }
+        }
+    }
+
     private func requestConfig(for lane: ContextGeminiObservationLane? = nil) -> GeminiObservationRequestConfig {
         Self.requestConfig(
             for: lane,
@@ -473,19 +946,29 @@ public actor ContextGeminiObservationService {
         thinkingLevelOverride: String? = nil
     ) -> GeminiObservationRequestConfig {
         let laneMaxOutput: Int
+        let timeoutSeconds: TimeInterval
         switch lane {
         case .activity:
             laneMaxOutput = 900
+            timeoutSeconds = 20
         case .uiMap:
             laneMaxOutput = 1200
+            timeoutSeconds = 20
         case .entityContent:
             laneMaxOutput = 1000
+            timeoutSeconds = 20
         case .interaction:
             laneMaxOutput = 800
+            timeoutSeconds = 20
         case .reducer:
             laneMaxOutput = 900
+            timeoutSeconds = 20
+        case .update:
+            laneMaxOutput = 600
+            timeoutSeconds = 6
         case nil:
             laneMaxOutput = defaultMaxOutputTokens
+            timeoutSeconds = 20
         }
 
         return GeminiObservationRequestConfig(
@@ -496,7 +979,7 @@ public actor ContextGeminiObservationService {
                 ? configuredThinkingLevel
                 : normalizedThinkingLevel(thinkingLevelOverride),
             maxOutputTokens: laneMaxOutput,
-            timeoutSeconds: 20
+            timeoutSeconds: timeoutSeconds
         )
     }
 
@@ -586,13 +1069,10 @@ public actor ContextGeminiObservationService {
         """
     }
 
-    private static func lanePrompt(
-        for lane: ContextGeminiObservationLane,
-        input: ContextGeminiObservationInput,
-        previousSnapshot: ContextSnapshot?
-    ) -> String {
-        let metadataLines = metadataLines(for: input)
-        let previous = previousSnapshot.map(previousSnapshotLines) ?? "- No previous screen supplied."
+    /// Static, cacheable system instruction for a lane. Contains rules + lane goal
+    /// + JSON schema — exactly the portions that don't change between calls and
+    /// can be served from a Gemini cachedContents entry.
+    private static func laneSystemInstruction(for lane: ContextGeminiObservationLane, twoImage: Bool = false) -> String {
         let base = """
         You are one lane in a modular screen-understanding pipeline for a macOS computer-use agent.
         Analyze the full-display screenshot, but separate the active/frontmost work surface from background windows and AgentNotch/dev overlays.
@@ -604,17 +1084,12 @@ public actor ContextGeminiObservationService {
         - Keep output compact. Short, dense strings are better than paragraphs.
         - Mention private content only as short visible labels/entities needed for operation.
         - Return strict JSON only.
-
-        Metadata:
-        \(metadataLines)
-
-        Previous screen for interaction reasoning:
-        \(previous)
         """
 
         switch lane {
         case .activity:
             return base + """
+
 
             Lane goal: understand what the user is actively doing, the current work state, and what the agent should know if asked to jump in.
             Focus on task, visible content, active app/page, current state, likely intent, and recent work context. Do not catalog every control.
@@ -629,6 +1104,7 @@ public actor ContextGeminiObservationService {
             """
         case .uiMap:
             return base + """
+
 
             Lane goal: learn how this UI can be operated so a future computer-use agent can act faster.
             Focus on visible regions, controls, navigation, workflows, successful next actions, and negative/no-op cues. Treat UI/UX memory as an accelerator, not a screenshot caption.
@@ -650,8 +1126,14 @@ public actor ContextGeminiObservationService {
         case .entityContent:
             return base + """
 
+
             Lane goal: harvest useful content and entities from the screen.
             Focus on files, docs, URLs, people, tickets, records, errors, messages, terminal output, selected/current items, and app-specific objects. Capture what the user is working with, not just what app is open.
+
+            CRITICAL — format each entry in the `entities` array as `"<label> [<type>]"` where <type> is exactly one of:
+            person, file, url, app, ticket, record, error, message, document, account, folder, project, command, other.
+            Examples: "Mara Lee [person]", "src/auth/oauth.ts [file]", "stackoverflow.com/q/123 [url]", "AUTH-412 [ticket]", "TokenExpiredError [error]", "Untitled Notion doc [document]".
+            NEVER emit a bare label without the bracketed type. If you genuinely cannot classify, use "[other]" — but try first.
 
             JSON fields:
             appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary, contentSummary,
@@ -666,11 +1148,26 @@ public actor ContextGeminiObservationService {
         case .interaction:
             return base + """
 
-            Lane goal: compare previous and current screen hints to infer what changed after the last click/app switch/manual capture.
-            Focus on action effect, transition, changed state, likely clicked target, success/failure signal, and whether the action taught a reusable navigation/workflow fact.
+
+            Lane goal: explain what the user just did by comparing two screenshots taken moments apart.
+
+            You will receive exactly TWO images, in order:
+            - The FIRST image is the PREVIOUS screen, captured roughly a few seconds ago (the user prompt will include the exact elapsed time).
+            - The SECOND image is the CURRENT screen, captured immediately after the user's action (a click, app switch, or manual capture trigger).
+
+            Both images are full-display screenshots from the same Mac. The OCR text recap in the user prompt is supplemental context — the pixel diff between the FIRST and SECOND images is the primary signal.
+
+            Your job:
+            1. Identify the exact UI change between the FIRST and SECOND images: which region of the screen changed, what was added, removed, toggled, opened, or selected.
+            2. Characterize the user's apparent action operationally. Do NOT say "the screen changed". Say what the user did and what the UI did in response. Example: "user clicked the second chat thread in the left sidebar, which revealed a new conversation in the main panel" or "user switched apps from Safari to Xcode, surfacing the editor tab they last had open".
+            3. Note whether the action looks successful, failed, or ambiguous (e.g., "click landed but no panel opened — possible no-op").
+            4. Record reusable navigation/workflow knowledge that the agent should remember (e.g., "the gear icon in the top-right opens preferences").
+
+            Put your concise one-sentence narrative of the action into the `summary` field as a single string (this is the `interaction_summary`). Use the remaining structured fields to capture the durable workflow/navigation/state facts.
 
             JSON fields:
-            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary,
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType,
+            summary: string — the interaction_summary, one sentence framed as "user did X, which caused Y"
             primaryTask,
             workflows: [string],
             navigation: [string],
@@ -679,25 +1176,218 @@ public actor ContextGeminiObservationService {
             memoryCards: [string],
             uncertainty: [string],
             confidence: number
+
+            Never re-describe the entire screen. Focus only on what is different between FIRST and SECOND, and what that difference implies operationally.
+            """
+        case .update:
+            if twoImage {
+                return """
+                You are updating an existing UI/UX observation. You will receive:
+                1. The previous structured observation of this surface (as JSON in the user prompt).
+                2. The FIRST image: a downscaled thumbnail of the full screen. Use this ONLY for orientation — to confirm which app/surface you're on.
+                3. The SECOND image: a high-resolution crop of the region that changed since the previous observation. Focus your analysis here.
+
+                Your job: identify what has CHANGED inside the cropped region and return ONLY the delta — a partial observation containing fields that genuinely differ. Do NOT re-describe everything visible in the thumbnail. Examples of legitimate updates: a new notification banner appeared, a button toggled state, a value in a text field changed, a panel opened/closed, a row was added to a table.
+
+                Output JSON matching the ContextGeminiLaneObservation schema, but include ONLY the fields that changed. For fields you're not updating, omit them entirely (don't set to empty). Region names in `visibleControls.region` must be semantic ("footer", "sidebar", "top-right") — never pixel coordinates.
+
+                If the crop shows no meaningful change, output: {"lane":"update","summary":"no_change"}.
+                """
+            }
+            return """
+            You are updating an existing UI/UX observation. You will receive:
+            1. A previous structured observation of the same surface (as JSON).
+            2. A current screenshot of the (mostly unchanged) screen.
+
+            Your job: identify what has CHANGED since the previous observation and return ONLY the delta — a partial observation containing fields that genuinely differ. Do NOT re-describe everything. Examples of legitimate updates: a new notification banner appeared, a button toggled state, a value in a text field changed, a panel opened/closed, a row was added to a table.
+
+            Output JSON matching the ContextGeminiLaneObservation schema, but include ONLY the fields that changed. For fields you're not updating, omit them entirely (don't set to empty). Region names in `visibleControls.region` must be semantic ("footer", "sidebar", "top-right") — never pixel coordinates.
+
+            If you genuinely see no meaningful change, output: {"lane":"update","summary":"no_change"}.
             """
         case .reducer:
-            return base + """
+            return """
+            You are the reducer stage of a modular screen-understanding pipeline for a macOS computer-use agent.
+            You receive structured JSON outputs from parallel lanes (activity, uiMap, entityContent, optionally interaction). Your job is to synthesize a single coherent observation that will be persisted as the agent's UI memory.
 
-            Lane goal: merge previously extracted lane outputs. If you receive a screenshot here, still keep output compact and activation-ready.
+            Rules:
+            - Merge overlapping facts; keep the strongest, most specific phrasing.
+            - Resolve conflicts by preferring whichever lane is closest to the topic (uiMap for controls/layout, activity for task/state, entityContent for entities/content, interaction for transitions).
+            - Drop generic filler. Keep operational, action-relevant facts.
+            - Return strict JSON only.
+
             JSON fields:
-            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary, primaryTask, contentSummary,
-            layoutRegions: [string],
-            controls: [{ "label": string, "role": string, "region": string, "actionHint": string, "confidence": number }],
+            appLabel, windowTitle, surfaceID, surfaceLabel, screenType, summary, primaryTask, layoutSummary, contentSummary,
+            visibleControls: [{ "label": string, "role": string, "region": string, "actionHint": string, "confidence": number }],
+            landmarks: [string],
             entities: [string],
+            affordances: [string],
             stateIndicators: [string],
-            workflows: [string],
-            navigation: [string],
+            navigationPaths: [string],
+            dataRegions: [string],
+            workflowHints: [string],
             negativeCues: [string],
-            memoryCards: [string],
+            memoryCandidates: [string],
             uncertainty: [string],
             confidence: number
+
+            Keep landmarks <= 16, entities <= 24, visibleControls <= 20, and other arrays <= 12.
             """
         }
+    }
+
+    /// Dynamic per-call user prompt for a lane. Contains the metadata and previous-screen OCR
+    /// recap that change every call and must not be cached.
+    private static func laneDynamicPrompt(
+        for lane: ContextGeminiObservationLane,
+        input: ContextGeminiObservationInput,
+        previousSnapshot: ContextSnapshot?
+    ) -> String {
+        let metadata = metadataLines(for: input)
+        let previous = previousSnapshot.map(previousSnapshotLines) ?? "- No previous screen supplied."
+
+        switch lane {
+        case .interaction:
+            return """
+            Metadata for the CURRENT (SECOND) screen:
+            \(metadata)
+
+            Recap of the PREVIOUS (FIRST) screen:
+            \(previous)
+
+            Produce the strict JSON described in the system instruction. Reference the FIRST and SECOND images explicitly when describing what changed.
+            """
+        case .reducer:
+            return """
+            Metadata for the active screen:
+            \(metadata)
+
+            Previous screen recap:
+            \(previous)
+
+            Synthesize the lane outputs into the strict JSON described in the system instruction.
+            """
+        default:
+            return """
+            Metadata:
+            \(metadata)
+
+            Previous screen for interaction reasoning:
+            \(previous)
+
+            Produce the strict JSON described in the system instruction.
+            """
+        }
+    }
+
+    /// User prompt for the update lane. Embeds the previous reducer observation
+    /// as compact JSON-style text so Gemini can compare it against the current
+    /// screenshot and return only deltas.
+    private static func updateLaneDynamicPrompt(
+        previousObservation: ContextGeminiObservation,
+        input: ContextGeminiObservationInput,
+        twoImage: Bool = false
+    ) -> String {
+        let metadata = metadataLines(for: input)
+        let previousJSON = serializePreviousObservationForUpdate(previousObservation)
+        let imagesNote = twoImage
+            ? "Two images attached. FIRST is a thumbnail for orientation; SECOND is the high-res crop of the changed region."
+            : "The current full screenshot follows as the only image."
+        return """
+        Metadata for the current screen:
+        \(metadata)
+
+        Previous structured observation of this same surface (JSON):
+        \(previousJSON)
+
+        \(imagesNote) Identify what changed since the previous observation and return ONLY the delta as JSON per the system instruction. If nothing meaningful changed, return {"lane":"update","summary":"no_change"}.
+        """
+    }
+
+    /// Build the `parts` array for an update lane request. When both a
+    /// thumbnail and a crop are supplied, sends them in the order the prompt
+    /// expects (thumbnail first, crop second). Falls back to the full image
+    /// when either is missing.
+    private static func buildUpdateParts(
+        input: ContextGeminiObservationInput,
+        thumbnailData: Data?,
+        cropData: Data?,
+        textPrompt: String
+    ) -> [Part] {
+        if let thumbnailData, let cropData {
+            return [
+                .inlineData(mimeType: "image/png", data: thumbnailData.base64EncodedString()),
+                .inlineData(mimeType: "image/png", data: cropData.base64EncodedString()),
+                .text(textPrompt)
+            ]
+        }
+        return [
+            .inlineData(mimeType: input.mimeType, data: input.imageData.base64EncodedString()),
+            .text(textPrompt)
+        ]
+    }
+
+    private static func serializePreviousObservationForUpdate(_ observation: ContextGeminiObservation) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(observation), let text = String(data: data, encoding: .utf8) {
+            return text
+        }
+        return "{}"
+    }
+
+    /// User prompt for the reducer call. Includes the lane outputs serialized as text.
+    private static func reducerDynamicPrompt(
+        lanes: [ContextGeminiLaneObservation],
+        trigger: ContextCaptureTrigger
+    ) -> String {
+        let serialized = lanes.map { lane in
+            laneSummaryForReducer(lane)
+        }.joined(separator: "\n\n")
+
+        let appHint = lanes.first(where: { !$0.appLabel.isEmpty })?.appLabel ?? "unknown"
+        let windowHint = lanes.first(where: { !$0.windowTitle.isEmpty })?.windowTitle ?? "unknown"
+
+        return """
+        Capture trigger: \(trigger.rawValue)
+        App hint: \(appHint)
+        Window hint: \(windowHint)
+
+        Lane outputs to merge:
+        \(serialized)
+
+        Synthesize a single ContextGeminiObservation JSON object per the schema in the system instruction. Prefer specifics from the lane closest to each topic (uiMap for controls/layout, activity for task/state, entityContent for entities, interaction for transitions). Drop generic filler.
+        """
+    }
+
+    private static func laneSummaryForReducer(_ lane: ContextGeminiLaneObservation) -> String {
+        let controls = lane.controls.prefix(12).map { control -> String in
+            let hint = control.actionHint?.isEmpty == false ? " — \(control.actionHint ?? "")" : ""
+            return "    - \(control.label) [\(control.role) @ \(control.region)]\(hint)"
+        }.joined(separator: "\n")
+
+        let sections: [String] = [
+            "[\(lane.lane.rawValue)] confidence=\(String(format: "%.2f", lane.confidence)) source=\(lane.source.rawValue)",
+            "  appLabel: \(lane.appLabel)",
+            "  windowTitle: \(lane.windowTitle)",
+            "  surfaceID: \(lane.surfaceID)",
+            "  surfaceLabel: \(lane.surfaceLabel)",
+            "  screenType: \(lane.screenType)",
+            "  summary: \(lane.summary)",
+            "  primaryTask: \(lane.primaryTask)",
+            "  contentSummary: \(lane.contentSummary)",
+            "  layoutRegions: \(lane.layoutRegions.joined(separator: " | "))",
+            "  controls:\n\(controls)",
+            "  entities: \(lane.entities.joined(separator: " | "))",
+            "  stateIndicators: \(lane.stateIndicators.joined(separator: " | "))",
+            "  workflows: \(lane.workflows.joined(separator: " | "))",
+            "  navigation: \(lane.navigation.joined(separator: " | "))",
+            "  negativeCues: \(lane.negativeCues.joined(separator: " | "))",
+            "  memoryCards: \(lane.memoryCards.joined(separator: " | "))",
+            "  uncertainty: \(lane.uncertainty.joined(separator: " | "))"
+        ]
+        return sections.joined(separator: "\n")
     }
 
     private static func metadataLines(for input: ContextGeminiObservationInput) -> String {
@@ -1303,6 +1993,7 @@ private struct ControlPayload: Decodable {
 private struct GeminiGenerateContentRequest: Encodable {
     var contents: [Content]
     var generationConfig: GenerationConfig
+    var cachedContent: String? = nil
 
     struct Content: Encodable {
         var parts: [Part]
@@ -1311,7 +2002,7 @@ private struct GeminiGenerateContentRequest: Encodable {
     struct GenerationConfig: Encodable {
         var maxOutputTokens: Int
         var responseMimeType: String
-        var mediaResolution: String
+        var mediaResolution: String?
         var thinkingConfig: ThinkingConfig
     }
 

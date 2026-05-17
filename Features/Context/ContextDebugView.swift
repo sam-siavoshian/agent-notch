@@ -765,7 +765,9 @@ struct ContextDebugView: View {
                 surface.facts
                     .sorted { $0.lastSeen > $1.lastSeen }
                     .prefix(10)
-                    .map { "[\($0.category)/\($0.durability)] \($0.text)" }
+                    .map { fact in
+                        "\(fact.text) — \(fact.category) (\(fact.durability))"
+                    }
             )
             detailList(
                 "Structured controls",
@@ -773,11 +775,20 @@ struct ContextDebugView: View {
                     .sorted { $0.lastSeen > $1.lastSeen }
                     .prefix(10)
                     .map { control in
-                        let hint = control.actionHint.isEmpty ? "" : ": \(control.actionHint)"
+                        let hint = control.actionHint.isEmpty ? "" : " — \(control.actionHint)"
                         return "\(control.label) (\(control.role), \(control.region))\(hint)"
                     }
             )
-            detailList("Structured entities", surface.entities.sorted { $0.lastSeen > $1.lastSeen }.prefix(12).map(\.text))
+            detailList(
+                "Structured entities",
+                surface.entities
+                    .sorted { $0.lastSeen > $1.lastSeen }
+                    .prefix(12)
+                    .map { entity in
+                        let labelText = entity.label.isEmpty ? entity.text : entity.label
+                        return "\(labelText) (\(entity.type))"
+                    }
+            )
             detailList("UI facts", surface.semanticHighlights)
             detailList("Controls", surface.controlHighlights)
             detailList("Affordances", surface.affordanceHighlights)
