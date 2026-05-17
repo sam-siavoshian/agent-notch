@@ -28,6 +28,9 @@ public struct AnthropicClient: Sendable {
     // swiftlint:disable:next force_unwrapping — hardcoded literal, never nil
     public static let defaultEndpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
+    private static let sharedEncoder = JSONEncoder()
+    private static let sharedDecoder = JSONDecoder()
+
     public init(
         apiKey: String,
         session: URLSession = .shared,
@@ -50,9 +53,8 @@ public struct AnthropicClient: Sendable {
             req.setValue(betaHeaders.joined(separator: ","), forHTTPHeaderField: "anthropic-beta")
         }
 
-        let encoder = JSONEncoder()
         do {
-            req.httpBody = try encoder.encode(request)
+            req.httpBody = try Self.sharedEncoder.encode(request)
         } catch {
             throw Error(status: nil, body: nil, underlying: error)
         }
@@ -74,9 +76,8 @@ public struct AnthropicClient: Sendable {
         }
 
         log.info("anthropic.response status=\(http.statusCode) body_bytes=\(data.count)")
-        let decoder = JSONDecoder()
         do {
-            return try decoder.decode(AnthropicMessageResponse.self, from: data)
+            return try Self.sharedDecoder.decode(AnthropicMessageResponse.self, from: data)
         } catch {
             let bodyString = String(data: data, encoding: .utf8)
             log.error("anthropic.decode_error status=\(http.statusCode) body=\(bodyString ?? "nil") error=\(error)")
@@ -126,7 +127,7 @@ public struct AnthropicClient: Sendable {
         )
 
         do {
-            req.httpBody = try JSONEncoder().encode(payload)
+            req.httpBody = try Self.sharedEncoder.encode(payload)
         } catch {
             throw Error(status: nil, body: nil, underlying: error)
         }
@@ -146,7 +147,7 @@ public struct AnthropicClient: Sendable {
 
         let decoded: AnthropicMessageResponse
         do {
-            decoded = try JSONDecoder().decode(AnthropicMessageResponse.self, from: data)
+            decoded = try Self.sharedDecoder.decode(AnthropicMessageResponse.self, from: data)
         } catch {
             let bodyString = String(data: data, encoding: .utf8)
             throw Error(status: http.statusCode, body: bodyString, underlying: error)
