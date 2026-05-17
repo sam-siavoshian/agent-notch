@@ -37,7 +37,7 @@ public final class IDEAdapter: AppContextAdapter {
     public func recentResources(bundleID: String) async -> [CResourceRef] {
         guard let snap = try? await snapshot(bundleID: bundleID) else { return [] }
         var out: [CResourceRef] = []
-        let appLabel = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleID }?.localizedName ?? bundleID
+        let appLabel = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
         if let openFile = snap["open_file"]?.value as? String, !openFile.isEmpty {
             out.append(CResourceRef(kind: "file", uri: "file://\(openFile)", label: (openFile as NSString).lastPathComponent, app: appLabel, lastSeen: Date()))
         }
