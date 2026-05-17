@@ -65,7 +65,12 @@ struct NotchContentView: View {
     private let closedHeight: CGFloat = 30
 
     private let liveWidth: CGFloat = 280
-    private let liveHeight: CGFloat = 36
+    private let liveContentHeight: CGFloat = 30
+    /// Hardware notch eats the top middle of the surface — push the live
+    /// content row below it so the text isn't clipped by the camera island.
+    private var liveHeight: CGFloat {
+        NotchSizing.notchHeight(for: NSScreen.main) + liveContentHeight
+    }
 
     private let openWidth: CGFloat = NotchSizing.openWidth
     /// Measured height of the open content — flows from a GeometryReader in

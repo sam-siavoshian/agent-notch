@@ -34,8 +34,9 @@ struct NotchLiveActivityView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 14)
+        .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 1)
+        .padding(.bottom, 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .allowsHitTesting(false)
     }
