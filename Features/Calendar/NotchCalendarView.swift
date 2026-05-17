@@ -21,63 +21,44 @@ struct NotchCalendarView: View {
         .onReceive(ticker) { now = $0 }
     }
 
-    // MARK: - Request access
+    // MARK: - Request access (editorial layout)
 
     private var requestView: some View {
-        VStack(spacing: 10) {
-            DateTile(date: Date(), tint: SoftPill.Status.red)
-                .frame(width: 48, height: 48)
-
-            VStack(spacing: 3) {
-                Text("Apple Calendar")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SoftPill.Text.primary)
-                Text("Today's events, right in your notch.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(SoftPill.Text.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            GradientPillButton(label: "Allow Access", icon: "sparkles") {
-                Task { await service.requestAccess() }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
+        EditorialPermissionView(
+            eyebrow: eyebrowDate,
+            headlineTop: "Your week,",
+            headlineBottom: "in the notch.",
+            accent: SoftPill.Status.red,
+            ctaLabel: "Connect Calendar",
+            ctaIcon: "sparkles",
+            ctaAction: { Task { await service.requestAccess() } },
+            secondary: nil
+        )
     }
 
     // MARK: - Denied
 
     private var deniedView: some View {
-        VStack(spacing: 10) {
-            DateTile(date: Date(), tint: SoftPill.Status.amber, dimmed: true)
-                .frame(width: 52, height: 52)
-
-            VStack(spacing: 3) {
-                Text("Access Denied")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SoftPill.Text.primary)
-                Text("Enable Calendars in System Settings.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(SoftPill.Text.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button {
+        EditorialPermissionView(
+            eyebrow: eyebrowDate,
+            headlineTop: "Calendar",
+            headlineBottom: "is locked out.",
+            accent: SoftPill.Status.amber,
+            ctaLabel: "Open Settings",
+            ctaIcon: "arrow.up.right",
+            ctaAction: {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
                     NSWorkspace.shared.open(url)
                 }
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 9, weight: .semibold))
-                    Text("Open System Settings")
-                }
-            }
-            .buttonStyle(GhostPillButtonStyle())
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+            },
+            secondary: "Enable Calendars under Privacy."
+        )
+    }
+
+    private var eyebrowDate: String {
+        let f = DateFormatter()
+        f.dateFormat = "EEE • MMM d"
+        return f.string(from: Date()).uppercased()
     }
 
     // MARK: - Authorized
@@ -92,21 +73,26 @@ struct NotchCalendarView: View {
     }
 
     private var emptyView: some View {
-        VStack(spacing: 10) {
-            DateTile(date: Date(), tint: SoftPill.Status.green)
-                .frame(width: 56, height: 56)
-
-            VStack(spacing: 3) {
-                Text("You're free")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(SoftPill.Text.primary)
-                Text("No events for the rest of today.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(SoftPill.Text.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            CalendarHeader(date: now, todayCount: 0)
+            WeekStrip(reference: now, accent: SoftPill.Status.green)
+            HStack(spacing: 6) {
+                Circle().fill(SoftPill.Status.green).frame(width: 5, height: 5)
+                    .shadow(color: SoftPill.Status.green.opacity(0.8), radius: 3)
+                Text("NOTHING ON THE BOOKS.")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(SoftPill.Text.muted)
+                Spacer()
             }
+            Text("Enjoy the quiet.")
+                .font(.system(size: 18, design: .serif).italic())
+                .foregroundStyle(SoftPill.Text.primary)
+                .padding(.top, 2)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Events list
@@ -634,6 +620,148 @@ private struct GhostPillButtonStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Editorial permission layout
+
+private struct EditorialPermissionView: View {
+    let eyebrow: String
+    let headlineTop: String
+    let headlineBottom: String
+    let accent: Color
+    let ctaLabel: String
+    let ctaIcon: String?
+    let ctaAction: () -> Void
+    let secondary: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Eyebrow
+            HStack(spacing: 6) {
+                Rectangle()
+                    .fill(accent)
+                    .frame(width: 14, height: 1.5)
+                Text(eyebrow)
+                    .font(.system(size: 8.5, weight: .bold))
+                    .tracking(1.0)
+                    .foregroundStyle(SoftPill.Text.secondary)
+                Spacer()
+                Text("APPLE CALENDAR")
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.9)
+                    .foregroundStyle(SoftPill.Text.muted)
+            }
+
+            // Serif headline — two lines, italic accent on bottom line
+            VStack(alignment: .leading, spacing: -2) {
+                Text(headlineTop)
+                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .foregroundStyle(SoftPill.Text.primary)
+                Text(headlineBottom)
+                    .font(.system(size: 22, design: .serif).italic())
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [SoftPill.CTA.from, SoftPill.CTA.to],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+            }
+            .padding(.top, 1)
+
+            // Mini week strip
+            WeekStrip(reference: Date(), accent: accent)
+                .padding(.top, 2)
+
+            // CTA row
+            HStack(spacing: 6) {
+                GradientPillButton(label: ctaLabel, icon: ctaIcon, action: ctaAction)
+                if let secondary {
+                    Text(secondary)
+                        .font(.system(size: 9))
+                        .foregroundStyle(SoftPill.Text.muted)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct WeekStrip: View {
+    let reference: Date
+    let accent: Color
+
+    private var days: [Date] {
+        let cal = Calendar.current
+        let weekday = cal.component(.weekday, from: reference) // Sun=1
+        // Anchor strip to Monday
+        let offsetToMonday = ((weekday + 5) % 7)
+        guard let monday = cal.date(byAdding: .day, value: -offsetToMonday,
+                                    to: cal.startOfDay(for: reference)) else { return [] }
+        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: monday) }
+    }
+
+    var body: some View {
+        let today = Calendar.current.startOfDay(for: Date())
+        HStack(spacing: 4) {
+            ForEach(days, id: \.self) { day in
+                let isToday = Calendar.current.isDate(day, inSameDayAs: today)
+                DayCell(date: day, isToday: isToday, accent: accent)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private struct DayCell: View {
+        let date: Date
+        let isToday: Bool
+        let accent: Color
+
+        var body: some View {
+            VStack(spacing: 2) {
+                Text(letter)
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(isToday ? .white.opacity(0.95) : SoftPill.Text.muted)
+                Text(day)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isToday ? .white : SoftPill.Text.secondary)
+            }
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity)
+            .background(
+                ZStack {
+                    if isToday {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent.opacity(0.95), accent.opacity(0.7)],
+                                    startPoint: .top, endPoint: .bottom
+                                )
+                            )
+                            .shadow(color: accent.opacity(0.5), radius: 5, y: 2)
+                    } else {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(SoftPill.Border.subtle,
+                                          style: StrokeStyle(lineWidth: 1, dash: [2.5, 2.5]))
+                    }
+                }
+            )
+        }
+
+        private var letter: String {
+            let f = DateFormatter(); f.dateFormat = "EEEEE"
+            return f.string(from: date).uppercased()
+        }
+        private var day: String {
+            let f = DateFormatter(); f.dateFormat = "d"
+            return f.string(from: date)
+        }
     }
 }
 
