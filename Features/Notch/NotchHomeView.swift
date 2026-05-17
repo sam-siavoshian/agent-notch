@@ -17,6 +17,7 @@ struct NotchHomeView: View {
     @ObservedObject private var state = AgentState.shared
     @ObservedObject private var store = AgentSettingsStore.shared
     @ObservedObject private var permissions = PermissionChecker.shared
+    @ObservedObject private var battery = BatteryService.shared
 
     private var isActive: Bool {
         switch state.activity {
@@ -118,6 +119,9 @@ struct NotchHomeView: View {
                 DraggableAgentIcon(size: 26)
                     .help("Drag onto the privacy list in System Settings to add AgentNotch")
                 GrantPermissionButton(target: fix)
+            }
+            if battery.hasBattery {
+                BatteryArcView(percentage: battery.percentage, isCharging: battery.isCharging)
             }
             QuitIconButton()
         }
@@ -502,6 +506,65 @@ private struct AgentNotchBadge: View {
                             radius: s * 0.10)
             }
         }
+    }
+}
+
+// MARK: - Battery arc gauge
+
+private struct BatteryArcView: View {
+    let percentage: Int
+    let isCharging: Bool
+
+    private var fraction: Double { Double(min(max(percentage, 0), 100)) / 100.0 }
+
+    private var color: Color {
+        if isCharging    { return SoftPill.Status.green }
+        if percentage > 50 { return SoftPill.Status.green }
+        if percentage > 20 { return SoftPill.Status.amber }
+        return SoftPill.Status.red
+    }
+
+    @State private var lowPulse = false
+
+    var body: some View {
+        ZStack {
+            // Dim track — 270° arc
+            Circle()
+                .trim(from: 0, to: 0.75)
+                .stroke(color.opacity(0.14), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(135))
+
+            // Filled arc
+            Circle()
+                .trim(from: 0, to: 0.75 * fraction)
+                .stroke(color, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(135))
+                .shadow(color: color.opacity(0.55), radius: 3)
+                .opacity(lowPulse ? 0.35 : 1.0)
+                .animation(
+                    lowPulse
+                        ? .easeInOut(duration: 0.85).repeatForever(autoreverses: true)
+                        : .default,
+                    value: lowPulse
+                )
+
+            // Center glyph
+            Group {
+                if isCharging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 6.5, weight: .bold))
+                } else {
+                    Text("\(percentage)")
+                        .font(.system(size: 6.5, weight: .bold, design: .monospaced))
+                }
+            }
+            .foregroundStyle(color)
+        }
+        .frame(width: 22, height: 22)
+        .animation(.easeInOut(duration: 0.4), value: percentage)
+        .onAppear      { lowPulse = percentage <= 20 && !isCharging }
+        .onChange(of: percentage)  { _, v  in lowPulse = v  <= 20 && !isCharging }
+        .onChange(of: isCharging)  { _, ch in lowPulse = percentage <= 20 && !ch }
     }
 }
 

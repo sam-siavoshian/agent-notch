@@ -10,6 +10,7 @@ import SwiftUI
 
 struct ClosedNotchView: View {
     @ObservedObject private var state = AgentState.shared
+    @ObservedObject private var battery = BatteryService.shared
 
     var body: some View {
         HStack(spacing: 5) {
@@ -18,9 +19,34 @@ struct ClosedNotchView: View {
                 WaveformBars(color: SoftPill.activityHue(.listening))
                     .transition(.opacity.animation(.easeIn(duration: 0.12)))
             }
+            Spacer(minLength: 0)
+            if case .idle = state.activity, battery.hasBattery {
+                closedBatteryLabel
+                    .transition(.opacity.animation(.easeIn(duration: 0.2)))
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
+    }
+
+    private var closedBatteryLabel: some View {
+        HStack(spacing: 2) {
+            if battery.isCharging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 6, weight: .semibold))
+                    .foregroundStyle(SoftPill.Status.green.opacity(0.75))
+            }
+            Text("\(battery.percentage)%")
+                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .foregroundStyle(closedBatteryColor)
+        }
+    }
+
+    private var closedBatteryColor: Color {
+        if battery.isCharging  { return SoftPill.Status.green.opacity(0.75) }
+        if battery.percentage > 20 { return SoftPill.Text.muted }
+        if battery.percentage > 10 { return SoftPill.Status.amber.opacity(0.85) }
+        return SoftPill.Status.red.opacity(0.9)
     }
 
     @ViewBuilder
