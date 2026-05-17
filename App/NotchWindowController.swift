@@ -129,7 +129,7 @@ enum NotchSizing {
     /// Upper bound on open height; the visible frame is content-driven
     /// (see NotchContentView). The window pre-allocates the maximum so the
     /// inner SwiftUI can grow without resizing the NSWindow.
-    static let openHeightMax: CGFloat = 480
+    static let openHeightMax: CGFloat = 640
     static let openHeight: CGFloat = openHeightMax  // legacy alias
     static let shadowPadding: CGFloat = 24
 
