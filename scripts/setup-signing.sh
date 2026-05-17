@@ -41,7 +41,7 @@ fi
 
 # Extract cert SHA from the find-identity line. Format example:
 #   "  1) <40-hex-SHA> "Apple Development: name@example.com (XXXXXXXXXX)""
-CERT_SHA=$(echo "$TEAM_LINE" | sed -E 's/^[[:space:]]*[0-9]+\)[[:space:]]+([A-F0-9]{40}).*/\1/')
+CERT_SHA=$(sed -E 's/^[[:space:]]*[0-9]+\)[[:space:]]+([A-F0-9]{40}).*/\1/' <<<"$TEAM_LINE")
 if ! [[ "$CERT_SHA" =~ ^[A-F0-9]{40}$ ]]; then
     echo "✗ Failed to parse cert SHA from: $TEAM_LINE"
     exit 1
