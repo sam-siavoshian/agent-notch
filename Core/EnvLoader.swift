@@ -55,11 +55,12 @@ public enum Env {
     // MARK: - Private
 
     private static func locateEnvFile() -> URL? {
-        let candidates: [URL?] = [
+        let fm = FileManager.default
+        let candidates: [URL] = [
             Bundle.main.resourceURL?.appendingPathComponent(".env"),
-            Optional(Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(".env")),
-        ]
-        return candidates.compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
+            Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(".env"),
+        ].compactMap { $0 }
+        return candidates.first { fm.fileExists(atPath: $0.path) }
     }
 
     private static func parse(_ contents: String) -> [String: String] {
