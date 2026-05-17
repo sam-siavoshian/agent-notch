@@ -2,8 +2,7 @@
 //  LucideIcons.swift
 //  Agent in the Notch
 //
-//  Standard SF Symbols. No custom path math, no animation states.
-//  API kept stable so call sites do not need to change.
+//  Thin SF Symbols wrapper used by the onboarding cards.
 //
 
 import SwiftUI
@@ -25,8 +24,6 @@ struct LucideIcon: View {
     let name: LucideName
     var size: CGFloat = 20
     var lineWidth: CGFloat = 2
-    var animate: Bool = false
-    var trigger: AnyHashable? = nil
 
     var body: some View {
         Image(systemName: symbolName)

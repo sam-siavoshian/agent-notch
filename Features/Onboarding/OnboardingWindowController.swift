@@ -2,9 +2,7 @@
 //  OnboardingWindowController.swift
 //  Agent in the Notch
 //
-//  Plain NSWindow (not a panel) because the user needs to interact with it
-//  normally. Centered, non-resizable, no minimize. Held in memory until
-//  dismissed.
+//  Presents the first-launch permission prompts in a centered NSWindow.
 //
 
 import AppKit
@@ -17,12 +15,9 @@ public final class OnboardingWindowController {
     private var window: NSWindow?
     private let checker = PermissionChecker.shared
     private var windowDelegate: CloseDelegate?
+    private let skipKey = "AgentNotch.onboardingDismissed"
 
     private init() {}
-
-    public var allGranted: Bool { checker.allGranted }
-
-    private let skipKey = "AgentNotch.onboardingDismissed"
 
     public func presentIfNeeded(_ onCompletion: @escaping () -> Void) {
         let forced = ProcessInfo.processInfo.environment["AGENTNOTCH_FORCE_ONBOARDING"] == "1"
@@ -38,8 +33,7 @@ public final class OnboardingWindowController {
         }
         // Cold-start race: AXIsProcessTrusted / CGPreflightScreenCaptureAccess
         // can return stale false on the very first call after launch even
-        // when TCC has the grant. Re-check after a short delay before
-        // bothering the user.
+        // when TCC has the grant. Re-check after a short delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self else { return }
             self.checker.refresh()
@@ -47,10 +41,7 @@ public final class OnboardingWindowController {
                 onCompletion()
                 return
             }
-            // User already saw + dismissed onboarding once → don't block them
-            // again on subsequent launches even if our TCC check still reads
-            // false (the agent itself will fail loudly if perms are truly
-            // missing). They can re-trigger onboarding from the notch menu.
+            // Already dismissed once → don't block subsequent launches.
             if UserDefaults.standard.bool(forKey: self.skipKey) {
                 onCompletion()
                 return
@@ -108,12 +99,6 @@ public final class OnboardingWindowController {
         windowDelegate = nil
         // Drop back to accessory mode so we don't sit in the Dock.
         NSApp.setActivationPolicy(.accessory)
-    }
-
-    /// Manually re-show onboarding (e.g. from a debug menu).
-    public func resetAndShow(_ onCompletion: @escaping () -> Void = {}) {
-        UserDefaults.standard.removeObject(forKey: skipKey)
-        present(onCompletion: onCompletion)
     }
 }
 

@@ -2,8 +2,8 @@
 //  PermissionChecker.swift
 //  Agent in the Notch
 //
-//  Polls macOS TCC state for the four permissions we need. Publishes status
-//  so the onboarding UI re-renders the moment the user toggles a switch in
+//  Polls macOS TCC state for the four permissions we need and publishes
+//  status so the UI re-renders the moment the user toggles a switch in
 //  System Settings.
 //
 
@@ -17,9 +17,8 @@ import ApplicationServices
 public final class PermissionChecker: ObservableObject {
     public static let shared = PermissionChecker()
 
-    public enum PermissionID: String, CaseIterable, Identifiable, Sendable {
+    public enum PermissionID: String, CaseIterable, Sendable {
         case accessibility, screenRecording, microphone, inputMonitoring
-        public var id: String { rawValue }
 
         public var label: String {
             switch self {
@@ -48,8 +47,7 @@ public final class PermissionChecker: ObservableObject {
         statuses.values.allSatisfy { $0 == .granted }
     }
 
-    /// IDs that are not currently granted, in stable display order
-    /// (accessibility → screen recording → microphone → input monitoring).
+    /// IDs that are not currently granted, in stable display order.
     public var missing: [PermissionID] {
         PermissionID.allCases.filter { statuses[$0] != .granted }
     }
@@ -99,19 +97,14 @@ public final class PermissionChecker: ObservableObject {
 
     // MARK: - Requests
 
-    /// Triggers the system Accessibility prompt. After clicking "Open
-    /// System Settings," the user toggles the switch and macOS records the
-    /// grant. We pick it up on the next poll tick.
     public func requestAccessibility() {
         let key = "AXTrustedCheckOptionPrompt" as CFString
         let options = [key: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
     }
 
-    /// Forces the Screen Recording prompt by attempting a capture. macOS
-    /// shows the system dialog the first time this is called per app
-    /// identity. After grant, app MUST be relaunched — ScreenCaptureKit
-    /// caches the denial in-process otherwise.
+    /// Forces the Screen Recording prompt. After grant, the app MUST be
+    /// relaunched — ScreenCaptureKit caches the denial in-process otherwise.
     public func requestScreenRecording() {
         _ = CGRequestScreenCaptureAccess()
     }
@@ -122,9 +115,8 @@ public final class PermissionChecker: ObservableObject {
         }
     }
 
-    /// Triggers the system Input Monitoring prompt. Required for CGEvent
-    /// taps that observe keystrokes (separate TCC grant from Accessibility
-    /// on macOS 14+).
+    /// Separate TCC grant from Accessibility on macOS 14+ — required for
+    /// CGEvent taps that observe keystrokes.
     public func requestInputMonitoring() {
         _ = CGRequestListenEventAccess()
     }
