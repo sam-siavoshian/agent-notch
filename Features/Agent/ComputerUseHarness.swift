@@ -398,9 +398,9 @@ public final class ComputerUseHarness {
             }
 
             if turn == 1 {
-                let affirmation = response.content.compactMap { block -> String? in
-                    if case .text(let t) = block { return t } else { return nil }
-                }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                var affirmationParts: [String] = []
+                for case .text(let t) in response.content { affirmationParts.append(t) }
+                let affirmation = affirmationParts.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !affirmation.isEmpty {
                     TextToSpeechService.shared.speak(capped(affirmation))
                 }
