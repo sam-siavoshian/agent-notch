@@ -795,17 +795,24 @@ private func shortDuration(_ seconds: TimeInterval) -> String {
     return "\(h)h \(rem)m"
 }
 
+private let dayLabelWeekdayFormatter: DateFormatter = {
+    let f = DateFormatter(); f.dateFormat = "EEE"; return f
+}()
+private let dayLabelTimeFormatter: DateFormatter = {
+    let f = DateFormatter(); f.timeStyle = .short; return f
+}()
+private let dayLabelMonthDayFormatter: DateFormatter = {
+    let f = DateFormatter(); f.dateFormat = "MMM d"; return f
+}()
+
 private func dayLabel(_ date: Date) -> String {
     let cal = Calendar.current
     if cal.isDateInTomorrow(date) { return "Tomorrow" }
     let days = cal.dateComponents([.day], from: cal.startOfDay(for: Date()),
                                   to: cal.startOfDay(for: date)).day ?? 0
     if days < 7 {
-        let f = DateFormatter(); f.dateFormat = "EEE"
-        let weekday = f.string(from: date)
-        let t = DateFormatter(); t.timeStyle = .short
-        return "\(weekday) \(t.string(from: date))"
+        let weekday = dayLabelWeekdayFormatter.string(from: date)
+        return "\(weekday) \(dayLabelTimeFormatter.string(from: date))"
     }
-    let f = DateFormatter(); f.dateFormat = "MMM d"
-    return f.string(from: date)
+    return dayLabelMonthDayFormatter.string(from: date)
 }
