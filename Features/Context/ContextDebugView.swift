@@ -1,11 +1,3 @@
-//
-//  ContextDebugView.swift
-//  Agent in the Notch
-//
-//  Root view for the Dev Tools window. Sidebar + main-area dispatch with a
-//  2-second polling refresh so the panes stay live without manual reloads.
-//
-
 import SwiftUI
 
 public enum ContextDebugMode: String, CaseIterable, Identifiable {
@@ -51,7 +43,6 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
 public struct ContextDebugView: View {
     @State var mode: ContextDebugMode = .newSystem
     @State var snapshots: [ContextSnapshot] = []
-    @State var activationPreview: String = ""
     @State var diagnostics: ContextDiagnostics?
     @State var isPaused: Bool = false
     @State var lastRefreshed: Date = .distantPast
@@ -165,16 +156,13 @@ public struct ContextDebugView: View {
 
     private func refresh() async {
         async let snaps = ContextCoordinator.shared.recentSnapshots()
-        async let preview = ContextCoordinator.shared.currentActivationPreview()
         async let diag = ContextCoordinator.shared.diagnostics()
 
         let snapsValue = await snaps
-        let previewValue = await preview
         let diagValue = await diag
 
         await MainActor.run {
             self.snapshots = snapsValue
-            self.activationPreview = previewValue
             self.diagnostics = diagValue
             self.isPaused = diagValue.isGatheringPaused
             self.lastRefreshed = Date()

@@ -1,12 +1,3 @@
-//
-//  ContextDebugView+Packet.swift
-//  Agent in the Notch
-//
-//  Brief Inspector: shows the last ContextSelector.Result — the markdown
-//  brief Mercury (or LocalBriefRenderer) emitted, the resolved CIntent,
-//  and the L2 snapshot it was assembled from. Refreshes every 1s.
-//
-
 import SwiftUI
 import AppKit
 

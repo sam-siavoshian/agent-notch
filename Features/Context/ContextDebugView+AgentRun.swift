@@ -1,15 +1,3 @@
-//
-//  ContextDebugView+AgentRun.swift
-//  Agent in the Notch
-//
-//  Sequential timeline of the CURRENT (or most recent) long-press → Mercury →
-//  Claude agent run. Reads from `AgentObservabilityLog.shared.currentRunEvents()`.
-//
-//  Auto-refreshes once a second; scrolls to the tail whenever a new event
-//  arrives so the viewer keeps up with an in-flight run. A small follow-up
-//  will wire this into ContextDebugView's tab enum after sibling F7 lands.
-//
-
 import SwiftUI
 import AppKit
 

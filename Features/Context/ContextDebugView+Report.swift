@@ -1,13 +1,3 @@
-//
-//  ContextDebugView+Report.swift
-//  Agent in the Notch
-//
-//  Run Metrics: a tile-based dashboard over the new context system.
-//  Aggregates from EventLog, PrivacyGate, L5Store, ContextSelector, and the
-//  on-disk AnchorRecorder collections. Refreshes every 5s — these numbers
-//  change slowly.
-//
-
 import SwiftUI
 
 struct ContextDebugReportPane: View {

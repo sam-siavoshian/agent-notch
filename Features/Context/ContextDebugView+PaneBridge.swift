@@ -1,11 +1,3 @@
-//
-//  ContextDebugView+PaneBridge.swift
-//  Agent in the Notch
-//
-//  Bridges standalone pane View structs (built by parallel agents) into the
-//  ContextDebugView's expected `<name>Pane` extension property dispatch.
-//
-
 import SwiftUI
 
 extension ContextDebugView {

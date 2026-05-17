@@ -1,12 +1,3 @@
-//
-//  ContextDevToolsWindowController.swift
-//  Agent in the Notch
-//
-//  Hosts the Dev Tools panel. Cmd+Shift+I toggles visibility; the window is
-//  created lazily and kept around between presentations so SwiftUI state
-//  persists. Floating level so it stays above the user's working windows.
-//
-
 import AppKit
 import SwiftUI
 
@@ -33,33 +24,20 @@ public final class ContextDevToolsWindowController: NSObject {
         }
     }
 
-    public func present() {
-        ensureWindow()
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    public func togglePresent() {
+    private func togglePresent() {
         ensureWindow()
         if let window, window.isVisible {
-            dismiss()
+            window.orderOut(nil)
         } else {
-            present()
+            window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
-    }
-
-    public func dismiss() {
-        window?.orderOut(nil)
     }
 
     private func ensureWindow() {
         guard window == nil else { return }
 
         let rect = NSRect(x: 0, y: 0, width: 980, height: 720)
-        // Regular NSWindow (not NSPanel) so the Dev Tools shows up as a
-        // first-class window: appears in the Dock, the app's Window menu,
-        // the Cmd+` window cycler, and Mission Control. Panels are excluded
-        // from all of those by design.
         let styleMask: NSWindow.StyleMask = [.titled, .closable, .resizable, .miniaturizable]
         let window = NSWindow(
             contentRect: rect,
