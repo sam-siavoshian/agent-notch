@@ -28,6 +28,9 @@ final class TextToSpeechService {
 
     private var boundOutputUID: String?
 
+    // swiftlint:disable:next force_unwrapping — hardcoded literal
+    private static let speechEndpoint = URL(string: "https://api.openai.com/v1/audio/speech")!
+
     private init() {
         audioEngine.attach(playerNode)
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: pcmFormat)
@@ -70,7 +73,7 @@ final class TextToSpeechService {
     private func stream(_ text: String) async {
         guard let apiKey = Secrets.openAIAPIKey else { return }
 
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/audio/speech")!)
+        var request = URLRequest(url: Self.speechEndpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
