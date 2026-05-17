@@ -153,11 +153,9 @@ public struct AnthropicClient: Sendable {
             throw Error(status: http.statusCode, body: bodyString, underlying: error)
         }
 
-        for block in decoded.content {
-            if case .text(let t) = block {
-                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { return t }
-            }
+        for case .text(let t) in decoded.content
+            where !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return t
         }
         throw Error(status: http.statusCode, body: "no text content block", underlying: nil)
     }
