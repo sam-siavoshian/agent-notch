@@ -75,8 +75,9 @@ public actor ScreenCapture {
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let cfg = SCStreamConfiguration()
-        cfg.width = Int(CGFloat(display.width) * display.pointPixelScale())
-        cfg.height = Int(CGFloat(display.height) * display.pointPixelScale())
+        let scale = display.pointPixelScale()
+        cfg.width = Int(CGFloat(display.width) * scale)
+        cfg.height = Int(CGFloat(display.height) * scale)
         cfg.pixelFormat = kCVPixelFormatType_32BGRA
         cfg.showsCursor = true
 
@@ -89,7 +90,7 @@ public actor ScreenCapture {
             jpegData: jpeg,
             width: image.width,
             height: image.height,
-            scale: display.pointPixelScale(),
+            scale: scale,
             capturedAt: Date(),
             rawImage: raw
         )
