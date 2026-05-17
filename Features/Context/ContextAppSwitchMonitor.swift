@@ -9,10 +9,10 @@
 import AppKit
 
 final class ContextAppSwitchMonitor {
-    private let onSwitch: @Sendable (String) -> Void
+    private let onSwitch: @Sendable () -> Void
     private var observer: NSObjectProtocol?
 
-    init(onSwitch: @escaping @Sendable (String) -> Void) {
+    init(onSwitch: @escaping @Sendable () -> Void) {
         self.onSwitch = onSwitch
     }
 
@@ -22,10 +22,8 @@ final class ContextAppSwitchMonitor {
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
-        ) { [weak self] note in
-            let appName = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?
-                .localizedName ?? "Unknown"
-            self?.onSwitch(appName)
+        ) { [weak self] _ in
+            self?.onSwitch()
         }
     }
 

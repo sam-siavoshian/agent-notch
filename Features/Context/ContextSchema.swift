@@ -177,17 +177,6 @@ public struct CAppRecipes: Codable {
     }
 }
 
-// MARK: - L4 Preferences
-
-public struct CPreferences: Codable {
-    public var explicit: String          // user-edited free text
-    public var perApp: [String: String]  // bundleID -> note (reserved; empty in v1)
-
-    public init(explicit: String = "", perApp: [String: String] = [:]) {
-        self.explicit = explicit; self.perApp = perApp
-    }
-}
-
 // MARK: - L5 Narrative (multi-resolution)
 
 public struct CActiveTask: Codable {
@@ -223,24 +212,6 @@ public struct CResourceRef: Codable {
     public let label: String?
     public let app: String?
     public let lastSeen: Date
-}
-
-// MARK: - L4 + L5 root models (one global JSON per kind on disk)
-
-public struct CL4Document: Codable {
-    public var prefs: CPreferences
-    public init(prefs: CPreferences = CPreferences()) { self.prefs = prefs }
-}
-
-public struct CL5Document: Codable {
-    public var activeTask: CActiveTask?
-    public var recentTasks: [CArchivedTask]
-    public var recentResources: [CResourceRef]
-    public init(activeTask: CActiveTask? = nil, recentTasks: [CArchivedTask] = [], recentResources: [CResourceRef] = []) {
-        self.activeTask = activeTask
-        self.recentTasks = recentTasks
-        self.recentResources = recentResources
-    }
 }
 
 // MARK: - Helper: type-erased Codable for `appSpecific` blob

@@ -80,17 +80,6 @@ public struct ContextDiagnostics: Sendable {
     }
 }
 
-public struct ContextDebugSnapshot: Identifiable, Sendable {
-    public let id: UUID
-    public let capturedAt: Date
-    public let trigger: ContextCaptureTrigger
-    public let appName: String
-    public let windowTitle: String
-    public let jpegData: Data
-    public let recognizedTextCount: Int
-    public let textPreview: String
-}
-
 public struct ContextRecognizedText: Codable, Sendable {
     public let text: String
     public let confidence: Float

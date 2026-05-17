@@ -57,7 +57,7 @@ public final class ContextCoordinator: RecentActivityContext {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
             }
         }
-        self.appSwitchMonitor = ContextAppSwitchMonitor { _ in
+        self.appSwitchMonitor = ContextAppSwitchMonitor {
             Task {
                 await ContextCoordinator.shared.capture(trigger: .appSwitch, cursorLocation: nil)
             }
@@ -80,29 +80,12 @@ public final class ContextCoordinator: RecentActivityContext {
     }
 
     @MainActor
-    public func stop() {
-        guard isStarted else { return }
-        isStarted = false
-        clickMonitor.stop()
-        appSwitchMonitor.stop()
-        if AgentInterfaces.context === self {
-            AgentInterfaces.context = nil
-        }
-    }
-
-    @MainActor
     @discardableResult
     public func toggleGatheringPaused() -> Bool {
-        setGatheringPaused(!isGatheringPaused)
-    }
-
-    @MainActor
-    @discardableResult
-    public func setGatheringPaused(_ paused: Bool) -> Bool {
-        isGatheringPaused = paused
+        isGatheringPaused.toggle()
 
         if isStarted {
-            if paused {
+            if isGatheringPaused {
                 clickMonitor.stop()
                 appSwitchMonitor.stop()
             } else {
@@ -111,7 +94,7 @@ public final class ContextCoordinator: RecentActivityContext {
             }
         }
 
-        log.info("context gathering \(paused ? "paused" : "resumed")")
+        log.info("context gathering \(isGatheringPaused ? "paused" : "resumed")")
         return isGatheringPaused
     }
 
@@ -137,6 +120,7 @@ public final class ContextCoordinator: RecentActivityContext {
 
     public func diagnostics() async -> ContextDiagnostics {
         let snapshots = await store.recentSnapshots()
+        let paused = await MainActor.run { isGatheringPaused }
         guard let latest = snapshots.last else {
             return ContextDiagnostics(
                 snapshotCount: 0,
@@ -144,7 +128,7 @@ public final class ContextCoordinator: RecentActivityContext {
                 latestWindowTitle: "Unknown window",
                 latestTrigger: nil,
                 latestRecognizedTextCount: 0,
-                isGatheringPaused: await MainActor.run { isGatheringPaused }
+                isGatheringPaused: paused
             )
         }
 
@@ -154,12 +138,12 @@ public final class ContextCoordinator: RecentActivityContext {
             latestWindowTitle: latest.windowTitle,
             latestTrigger: latest.trigger,
             latestRecognizedTextCount: latest.recognizedText.count,
-            isGatheringPaused: await MainActor.run { isGatheringPaused }
+            isGatheringPaused: paused
         )
     }
 
-    public func capture(trigger: ContextCaptureTrigger, cursorLocation: CGPoint?, bypassPause: Bool = false) async {
-        if !bypassPause, await MainActor.run(body: { isGatheringPaused }) {
+    func capture(trigger: ContextCaptureTrigger, cursorLocation: CGPoint?) async {
+        if await MainActor.run(body: { isGatheringPaused }) {
             log.debug("skipped \(trigger.rawValue) capture — gathering paused")
             return
         }
@@ -177,10 +161,8 @@ public final class ContextCoordinator: RecentActivityContext {
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.35)
-            // OCR on the FULL-RESOLUTION raw CGImage, not the downsampled JPEG.
-            // The 1568px downsample + JPEG-35 compression makes small UI text
-            // unreadable. Vision .accurate + the raw image gives clean OCR.
-            // Falls back to the JPEG path only if rawImage is nil.
+            // OCR the raw CGImage when available — the JPEG downsample makes
+            // small UI text unreadable.
             let recognizedText: [ContextRecognizedText]
             if let rawImage = snapshot.rawImage {
                 recognizedText = await ocrService.recognizeText(in: rawImage)
@@ -201,10 +183,8 @@ public final class ContextCoordinator: RecentActivityContext {
                 recognizedText: recognizedText
             )
 
-            // Record the current window as a generic resource so the long-press
-            // Selector can resolve deictic references like "the doc I had open"
-            // even after the user has switched apps. No adapter required.
-            // ResourceIndex dedups by URI and refreshes lastSeen on repeats.
+            // Record the current window as a generic resource so the Selector
+            // can resolve deictic references like "the doc I had open".
             let trimmedTitle = metadata.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedTitle.isEmpty {
                 let resource = CResourceRef(
@@ -217,8 +197,6 @@ public final class ContextCoordinator: RecentActivityContext {
                 ResourceIndex.shared.record(resource)
             }
 
-            // Dirty-region classification drives memory hygiene and the
-            // Dev Tools dirty pane; classification is a pure local signal.
             let signature = ContextDirtyDetector.signature(
                 from: snapshot.jpegData,
                 screenWidth: snapshot.width,
@@ -233,14 +211,7 @@ public final class ContextCoordinator: RecentActivityContext {
                 previousSnapshot: previousSnapshot
             )
 
-            switch classification.classification {
-            case .unchanged:
-                log.info("captured \(trigger.rawValue) for \(metadata.appName) — UNCHANGED")
-            case .minorChange:
-                log.info("captured \(trigger.rawValue) for \(metadata.appName) — MINOR_CHANGE")
-            case .majorChange:
-                log.info("captured \(trigger.rawValue) for \(metadata.appName) — MAJOR_CHANGE")
-            }
+            log.info("captured \(trigger.rawValue) for \(metadata.appName) — \(classification.classification.label.uppercased())")
 
             await dirtyThresholdsTracker.observe(classification.classification)
             await dirtyRing.append(DirtyComparisonRecord(
@@ -255,18 +226,11 @@ public final class ContextCoordinator: RecentActivityContext {
                 jpegData: snapshot.jpegData
             ))
 
-            // Phase 6+: continuous vision-based UI/UX learning.
-            // Only fires when the screen has genuinely changed (DirtyDetector
-            // said major), and is throttled internally to >=8s between calls.
-            // Detached so we never block the capture path.
-            //
-            // Gemini observer wants PNG (sharper UI text edges than the JPEG-35
-            // we keep for OCR/dirty/Claude). Re-encode from the raw CGImage
-            // when available; skip the observer for this turn if PNG encode
-            // fails or the raw image is missing.
+            // Fan out to Gemini observer on major changes only. Detached so we
+            // never block the capture path. Gemini wants PNG for sharper UI
+            // text edges than the JPEG-35 we keep for OCR/dirty/Claude.
             if classification.classification == .majorChange, let rawImage = snapshot.rawImage,
                let png = ScreenCapture.shared.pngEncode(rawImage) {
-                let observerBundleID = bundleID
                 Task.detached(priority: .utility) {
                     let hint = await MainActor.run {
                         NSWorkspace.shared.frontmostApplication?.localizedName
@@ -274,7 +238,7 @@ public final class ContextCoordinator: RecentActivityContext {
                     await GeminiObserver.shared.observe(
                         screenshotPNG: png,
                         frontmostHint: hint,
-                        bundleID: observerBundleID.isEmpty ? nil : observerBundleID
+                        bundleID: bundleID.isEmpty ? nil : bundleID
                     )
                 }
             }
@@ -309,7 +273,7 @@ public final class ContextCoordinator: RecentActivityContext {
         currentSnapshot: ContextSnapshot,
         previousSnapshot: ContextSnapshot?
     ) async -> DirtyClassificationResult {
-        // First capture in a session, or any startup capture: treat as major.
+        // First capture or startup: treat as major.
         guard trigger != .startup, let previousSnapshot, let previousSignature, let currentSignature else {
             return DirtyClassificationResult(classification: .majorChange, comparison: nil)
         }
@@ -324,8 +288,7 @@ public final class ContextCoordinator: RecentActivityContext {
             thresholds: thresholds
         )
 
-        // App or window switch always counts as a major change even if the
-        // pixels happen to look similar.
+        // App / window switch always counts as major regardless of pixels.
         if appChanged || windowChanged {
             return DirtyClassificationResult(
                 classification: .majorChange,

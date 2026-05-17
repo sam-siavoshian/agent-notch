@@ -8,7 +8,6 @@
 //
 
 import CoreGraphics
-import CoreImage
 import Foundation
 import ImageIO
 
@@ -367,88 +366,6 @@ public enum ContextDirtyDetector {
         let topY = Double(size - 1 - maxY) / Double(size)
         let rect = CGRect(x: xFraction, y: topY, width: widthFraction, height: heightFraction)
         return (fraction, rect)
-    }
-
-    // MARK: - Crop + thumbnail
-
-    /// Crop the full-screen image to the dirty bounding rect (normalized
-    /// 0...1, top-origin) with padding so the model has surrounding context.
-    /// Always expands the bbox to at least `minEdgePixels` square to keep the
-    /// crop interpretable. Returns PNG bytes, or nil if the image can't be
-    /// decoded or the bbox is degenerate.
-    public static func croppedPNG(
-        from imageData: Data,
-        normalizedBBox: CGRect,
-        paddingPixels: Int = 96,
-        minEdgePixels: Int = 384
-    ) -> Data? {
-        guard let cgImage = makeCGImage(from: imageData) else { return nil }
-        let w = CGFloat(cgImage.width)
-        let h = CGFloat(cgImage.height)
-        guard w > 0, h > 0 else { return nil }
-
-        let pad = CGFloat(paddingPixels)
-        let minEdge = CGFloat(minEdgePixels)
-        var x = normalizedBBox.minX * w - pad
-        var y = normalizedBBox.minY * h - pad
-        var width = normalizedBBox.width * w + pad * 2
-        var height = normalizedBBox.height * h + pad * 2
-
-        if width < minEdge {
-            let extra = (minEdge - width) / 2
-            x -= extra
-            width = minEdge
-        }
-        if height < minEdge {
-            let extra = (minEdge - height) / 2
-            y -= extra
-            height = minEdge
-        }
-        x = max(0, min(w - 1, x))
-        y = max(0, min(h - 1, y))
-        width = min(w - x, width)
-        height = min(h - y, height)
-
-        // CGImage origin is top-left, matching our normalized space.
-        let cropRect = CGRect(x: x, y: y, width: width, height: height).integral
-        guard cropRect.width > 1, cropRect.height > 1,
-              let cropped = cgImage.cropping(to: cropRect) else { return nil }
-        return encodePNG(cropped)
-    }
-
-    /// Downsample the full screenshot to a small thumbnail (longest edge ==
-    /// `maxEdge`) used as an orientation image alongside a focused crop.
-    public static func thumbnailPNG(from imageData: Data, maxEdge: Int = 480) -> Data? {
-        guard let cgImage = makeCGImage(from: imageData) else { return nil }
-        let w = cgImage.width, h = cgImage.height
-        guard w > 0, h > 0 else { return nil }
-        let scale = Double(maxEdge) / Double(max(w, h))
-        if scale >= 1.0 { return encodePNG(cgImage) }
-        let newW = max(1, Int(Double(w) * scale))
-        let newH = max(1, Int(Double(h) * scale))
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(
-                  data: nil,
-                  width: newW,
-                  height: newH,
-                  bitsPerComponent: 8,
-                  bytesPerRow: 0,
-                  space: colorSpace,
-                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              )
-        else { return nil }
-        context.interpolationQuality = .medium
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: newW, height: newH))
-        guard let scaled = context.makeImage() else { return nil }
-        return encodePNG(scaled)
-    }
-
-    private static func encodePNG(_ cgImage: CGImage) -> Data? {
-        let data = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(dest, cgImage, nil)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return data as Data
     }
 
     // MARK: - Decoding
