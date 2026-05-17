@@ -565,9 +565,18 @@ public final class ContextCoordinator: RecentActivityContext {
                         laneResults,
                         trigger: snapshot.trigger
                     )
-                    reducerPath = "gemini-llm"
+                    // The reducer service tries Claude Haiku first then falls back
+                    // to Gemini; infer the actual path from the recorded model.
+                    let observedModel = (reducerObservation?.model ?? "").lowercased()
+                    if observedModel.contains("claude") {
+                        reducerPath = "claude-haiku"
+                    } else if observedModel.contains("gemini") {
+                        reducerPath = "gemini"
+                    } else {
+                        reducerPath = "llm"
+                    }
                     let reducerElapsedMs = Int(Date().timeIntervalSince(reducerStartedAt) * 1000)
-                    log.info("reducer succeeded path=gemini-llm in \(reducerElapsedMs)ms")
+                    log.info("reducer succeeded path=\(reducerPath) in \(reducerElapsedMs)ms")
                 } catch {
                     let reducerElapsedMs = Int(Date().timeIntervalSince(reducerStartedAt) * 1000)
                     log.warning("reducer LLM failed in \(reducerElapsedMs)ms: \(error) — falling back to Swift reducer")
@@ -602,7 +611,7 @@ public final class ContextCoordinator: RecentActivityContext {
                 ))
                 return
             }
-            NSLog("[ContextCoordinator] Reducer path: \(reducerPath) for \(snapshot.appName)")
+            log.info("reducer path=\(reducerPath) app=\(snapshot.appName)")
 
             // Stash the reducer output so the dirty-region short-circuit and the
             // `.update` lane have a baseline to compare against on the next capture.

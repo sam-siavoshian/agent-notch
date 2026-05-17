@@ -47,6 +47,9 @@ public actor ContextGeminiCacheManager {
 
     private var entries: [Key: Entry] = [:]
     private var inflight: [Key: Task<String?, Never>] = [:]
+    /// Lane keys whose system instruction is permanently too small for caching
+    /// (Gemini requires >=1024 tokens). Skip the create call entirely for these.
+    private var permanentlyRejected: Set<Key> = []
     private let endpointBaseURL: URL
     private let session: URLSession
     private let ttlSeconds: Int
@@ -73,6 +76,7 @@ public actor ContextGeminiCacheManager {
         guard !Self.isDisabled else { return nil }
 
         let key = Key(lane: lane, model: model, promptVersion: promptVersion)
+        if permanentlyRejected.contains(key) { return nil }
         if let entry = entries[key], !entry.isLikelyExpired {
             return entry.name
         }
@@ -80,7 +84,7 @@ public actor ContextGeminiCacheManager {
             return await task.value
         }
 
-        let task = Task { [endpointBaseURL, session, ttlSeconds] () async -> String? in
+        let task = Task { [endpointBaseURL, session, ttlSeconds] () async -> CreateCachedContentResult in
             await ContextGeminiCacheManager.createCachedContent(
                 lane: lane,
                 model: model,
@@ -91,11 +95,16 @@ public actor ContextGeminiCacheManager {
                 apiKey: apiKey
             )
         }
-        inflight[key] = task
-        let name = await task.value
+        // Wrap into the legacy String? task-output for any other inflight waiters,
+        // but also keep the structured result locally for permanent-reject tracking.
+        let resultTask = Task { @Sendable [task] in
+            return await task.value.name
+        }
+        inflight[key] = resultTask
+        let result = await task.value
         inflight[key] = nil
 
-        if let name {
+        if let name = result.name {
             entries[key] = Entry(
                 name: name,
                 model: model,
@@ -103,8 +112,12 @@ public actor ContextGeminiCacheManager {
                 createdAt: Date(),
                 ttlSeconds: ttlSeconds
             )
+            return name
         }
-        return name
+        if result.permanentlyRejected {
+            permanentlyRejected.insert(key)
+        }
+        return nil
     }
 
     /// Invalidate a single lane's cache entry after a 404/expired response.
@@ -123,6 +136,13 @@ public actor ContextGeminiCacheManager {
 
     // MARK: - Network
 
+    struct CreateCachedContentResult: Sendable {
+        let name: String?
+        /// True iff the failure is permanent for this (lane, model, promptVersion)
+        /// — e.g. the system instruction is below Gemini's minimum cacheable size.
+        let permanentlyRejected: Bool
+    }
+
     private static func createCachedContent(
         lane: ContextGeminiObservationLane,
         model: String,
@@ -131,7 +151,7 @@ public actor ContextGeminiCacheManager {
         endpointBaseURL: URL,
         session: URLSession,
         apiKey: String
-    ) async -> String? {
+    ) async -> CreateCachedContentResult {
         let url = endpointBaseURL.appendingPathComponent("cachedContents")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
@@ -150,30 +170,38 @@ public actor ContextGeminiCacheManager {
             urlRequest.httpBody = try JSONEncoder().encode(payload)
         } catch {
             NSLog("[ContextGeminiCacheManager] Failed to encode cache request for \(lane.rawValue): \(error)")
-            return nil
+            return CreateCachedContentResult(name: nil, permanentlyRejected: false)
         }
 
         do {
             let (data, response) = try await session.data(for: urlRequest)
             guard let http = response as? HTTPURLResponse else {
                 NSLog("[ContextGeminiCacheManager] Cache create for \(lane.rawValue) returned non-HTTP response.")
-                return nil
+                return CreateCachedContentResult(name: nil, permanentlyRejected: false)
             }
             guard (200..<300).contains(http.statusCode) else {
                 let body = String(data: data, encoding: .utf8) ?? ""
-                NSLog("[ContextGeminiCacheManager] Cache create for \(lane.rawValue) failed (\(http.statusCode)): \(body.prefix(400))")
-                return nil
+                let lowerBody = body.lowercased()
+                // Treat "too small" / "min_total_token_count" 400s as permanent —
+                // the system instruction is below Gemini's minimum cacheable size
+                // and there's no point retrying for this (lane, prompt version).
+                let permanent = http.statusCode == 400 && (
+                    lowerBody.contains("too small") ||
+                    lowerBody.contains("min_total_token_count")
+                )
+                NSLog("[ContextGeminiCacheManager] Cache create for \(lane.rawValue) failed (\(http.statusCode))\(permanent ? " — marking permanently rejected" : ""): \(body.prefix(200))")
+                return CreateCachedContentResult(name: nil, permanentlyRejected: permanent)
             }
             let decoded = try JSONDecoder().decode(CreateCachedContentResponse.self, from: data)
             guard let name = decoded.name, !name.isEmpty else {
                 NSLog("[ContextGeminiCacheManager] Cache create for \(lane.rawValue) returned empty name.")
-                return nil
+                return CreateCachedContentResult(name: nil, permanentlyRejected: false)
             }
             NSLog("[ContextGeminiCacheManager] Created cache \(name) for \(lane.rawValue)")
-            return name
+            return CreateCachedContentResult(name: name, permanentlyRejected: false)
         } catch {
             NSLog("[ContextGeminiCacheManager] Cache create for \(lane.rawValue) threw: \(error)")
-            return nil
+            return CreateCachedContentResult(name: nil, permanentlyRejected: false)
         }
     }
 }
