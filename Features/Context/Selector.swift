@@ -341,8 +341,7 @@ public final class ContextSelector {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        let brief = (obj["brief"] as? String) ?? ""
-        guard !brief.isEmpty else { return nil }
+        guard let brief = obj["brief"] as? String, !brief.isEmpty else { return nil }
         var intent: CIntent
         if let intentAny = obj["intent"],
            let intentData = try? JSONSerialization.data(withJSONObject: intentAny),
