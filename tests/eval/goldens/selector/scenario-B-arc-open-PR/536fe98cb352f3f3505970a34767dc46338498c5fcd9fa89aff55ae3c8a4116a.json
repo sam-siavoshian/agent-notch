@@ -1,0 +1,12 @@
+{
+  "intent": {
+    "verb": "open",
+    "target": "the PR",
+    "resolved_target": "https://github.com/co/repo/pull/1342 (PR #1342, currently in active_task)",
+    "entities": [
+      {"label": "PR #1342", "kind": "url", "resolved_to": "https://github.com/co/repo/pull/1342"}
+    ],
+    "confidence": 0.95
+  },
+  "brief": "## What the user wants\nOpen pull request #1342 ('Add streaming TTS') in the current browser.\n\n## You are here\n- App: Arc — GitHub homepage tab\n- Other tab open: 'PR #1342 · Add streaming TTS' at https://github.com/co/repo/pull/1342\n\n## How to do it on Arc\nThe PR URL is known — use the fastest tool:\n\n1. **open_url** `https://github.com/co/repo/pull/1342`. This will navigate the current tab.\n2. (Alternative) Switch to the existing PR tab via `cmd+T`, type `1342`, `return`. (Recipe 'switch to existing tab' has seen_count 5.)\n\n## What \"the PR\" means\nPull request #1342 on github.com/co/repo — currently in active_task.resources and was last seen 30 min ago when the user merged it."
+}

@@ -1,0 +1,13 @@
+{
+  "intent": {
+    "verb": "send",
+    "target": "the latest draft",
+    "resolved_target": "Figma file 'Onboarding v3' (currently being edited)",
+    "entities": [
+      {"label": "Maya Chen", "kind": "person", "resolved_to": "@maya in Slack"},
+      {"label": "Onboarding v3", "kind": "file", "resolved_to": "https://figma.com/file/abc/Onboarding-v3"}
+    ],
+    "confidence": 0.88
+  },
+  "brief": "## What the user wants\nSend Maya the Figma file 'Onboarding v3' (the file the user has been editing for the last 40 min) via Slack DM.\n\n## You are here\n- App: Slack — channel #design composer\n- Focused: AXTextArea[Message #design] (empty)\n- Useful AX paths:\n  - AXTextArea[Message #design]\n  - AXButton[Send]\n- Recent clipboard (12s old): URL https://figma.com/file/abc/Onboarding-v3\n\n## How to do it on Slack\nYou're in a channel, not a DM. Switch to DM with Maya first, then send.\n\n1. **Open DM with Maya** — `cmd+K`, type `maya`, `return`. (User has done this 7× in the last hour — high confidence.)\n2. **Send the link** — `cmd+v` (URL already on clipboard), then `return`. If clipboard has changed, the URL is also in recent_resources: `https://figma.com/file/abc/Onboarding-v3`.\n\n## What \"the latest draft\" means\nThe Figma file 'Onboarding v3'. The user last edited 'Step 2 — verify email' 4 min ago.\n\n## What \"maya\" means\nSlack user @maya — appears as a participant in #design and is referenced in active_task entities."
+}
