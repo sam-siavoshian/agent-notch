@@ -51,9 +51,14 @@ public final class AudioDeviceManager: ObservableObject {
     }
 
     public func refresh() {
-        let all = Self.enumerateAllDevices()
-        inputs = all.filter { $0.hasInput }
-        outputs = all.filter { $0.hasOutput }
+        var ins: [AudioDevice] = []
+        var outs: [AudioDevice] = []
+        for d in Self.enumerateAllDevices() {
+            if d.hasInput { ins.append(d) }
+            if d.hasOutput { outs.append(d) }
+        }
+        inputs = ins
+        outputs = outs
     }
 
     public func input(forUID uid: String?) -> AudioDevice? {
