@@ -76,7 +76,8 @@ public actor ContextOCRService {
         guard text.count >= 2 else { return false }
         guard confidence >= 0.4 else { return false }
 
-        let alphanumeric = text.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.count
+        let alnumSet = CharacterSet.alphanumerics
+        let alphanumeric = text.unicodeScalars.filter { alnumSet.contains($0) }.count
         let total = text.unicodeScalars.count
         guard total > 0 else { return false }
         let alnumFraction = Double(alphanumeric) / Double(total)
