@@ -27,7 +27,7 @@ extension ContextDebugView {
                     }
                     .frame(maxWidth: .infinity, minHeight: 240)
                 } else {
-                    ForEach(Array(snapshots.reversed()), id: \.id) { snapshot in
+                    ForEach(snapshots.reversed(), id: \.id) { snapshot in
                         captureCard(snapshot)
                     }
                 }
