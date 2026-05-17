@@ -33,7 +33,7 @@ public enum IntentRouter {
         // Safety: never fast-path anything that mentions destructive verbs.
         let dangerous = ["delete", "erase", "format", "wipe", "remove", "uninstall", "shut down", "shutdown", "restart", "log out", "purchase", "buy", "pay", "send money"]
         let lower = transcript.lowercased()
-        for d in dangerous where lower.contains(d) {
+        if dangerous.contains(where: { lower.contains($0) }) {
             return .notMine
         }
 
