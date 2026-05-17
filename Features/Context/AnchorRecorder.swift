@@ -254,7 +254,7 @@ public final class AnchorRecorder {
                 if scalar.value >= 0x7F && scalar.value < 0xA0 { return false }
             }
             // Backspace-heavy → user is correcting mistakes, not running a recipe.
-            if value.filter({ $0 == "\u{08}" }).count > 1 { return false }
+            if value.lazy.filter({ $0 == "\u{08}" }).prefix(2).count > 1 { return false }
             return true
         }
     }
