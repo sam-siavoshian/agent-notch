@@ -56,7 +56,7 @@ No keys are hardcoded. Resolution order: environment variable → Keychain (per-
 | `OPENROUTER_API_KEY` | `MercuryClient` → Mercury 2 (`inception/mercury-2`) for the long-press Selector + `ActiveTaskUpdater` |
 | `GEMINI_API_KEY` | `GeminiObserver` → continuous background screen understanding via `gemini-3.1-flash-lite` (feeds `SurfaceMemoryStore`; long-press never calls Gemini directly) |
 
-Set these in your Xcode scheme's environment or your shell before launching.
+Set these in `.env` at the repo root (gitignored, bundled as a resource at build time by `Project.yml`). `EnvLoader.swift` loads it at launch — no Xcode scheme vars needed.
 
 **Demo without voice:** set `ANTHROPIC_NOTCH_DEMO_PROMPT` to a hardcoded prompt string. `VoiceRecordingService` will use it as the transcript when the model is still initializing or no mic input was captured.
 
