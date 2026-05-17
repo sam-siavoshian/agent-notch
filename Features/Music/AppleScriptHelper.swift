@@ -16,18 +16,12 @@ enum AppleScriptHelper {
                 var error: NSDictionary?
                 if let descriptor = script?.executeAndReturnError(&error) {
                     continuation.resume(returning: descriptor)
-                } else if let error {
-                    continuation.resume(throwing: NSError(
-                        domain: "AppleScriptError",
-                        code: 1,
-                        userInfo: error as? [String: Any]
-                    ))
                 } else {
-                    continuation.resume(throwing: NSError(
-                        domain: "AppleScriptError",
-                        code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "Unknown AppleScript error"]
-                    ))
+                    let info = (error as? [String: Any])
+                        ?? [NSLocalizedDescriptionKey: "Unknown AppleScript error"]
+                    continuation.resume(
+                        throwing: NSError(domain: "AppleScriptError", code: 1, userInfo: info)
+                    )
                 }
             }
         }

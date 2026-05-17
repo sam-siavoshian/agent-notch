@@ -2,9 +2,8 @@
 //  LyricsView.swift
 //  Agent in the Notch
 //
-//  Karaoke-style synced lyrics panel. Center-anchored 5-line scroller,
-//  top/bottom fade mask, active line in primary white, neighbors dimmed.
-//  See ~/.claude/skills/soft-pill-ui/references/live-lyrics.md.
+//  Karaoke-style synced lyrics panel. 5-line center-anchored scroller with
+//  active line in primary white, neighbors dimmed, top/bottom fade mask.
 //
 
 import SwiftUI
@@ -16,17 +15,16 @@ struct LyricsView: View {
 
     private let lineHeight: CGFloat = 18
     private let visibleHalf = 2     // 2 above + active + 2 below = 5
+    /// 250ms karaoke look-ahead so the highlight isn't perceived as late.
+    private static let lookAhead: Double = 0.25
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
         ZStack {
-            // Panel chrome — NOT masked. Sits behind the scrolling text so the
-            // background doesn't fade out at the edges along with the lyrics.
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            // Panel chrome lives outside the mask so edges don't fade with text.
+            shape
                 .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
-                )
+                .overlay(shape.stroke(Color.white.opacity(0.05), lineWidth: 0.5))
 
             Group {
                 if store.isLoading {
@@ -47,10 +45,6 @@ struct LyricsView: View {
         .opacity(isPlaying ? 1.0 : 0.6)
         .animation(.easeOut(duration: 0.18), value: isPlaying)
     }
-
-    /// 250ms look-ahead — the active line lights up SLIGHTLY before it is sung.
-    /// Karaoke convention; without it the highlight feels late on long lines.
-    private static let lookAhead: Double = 0.25
 
     private var activeIndex: Int {
         guard !store.lines.isEmpty else { return 0 }
