@@ -11,7 +11,9 @@ import Foundation
 enum ContextTextSignalFilter {
     static func usefulText(from recognizedText: [ContextRecognizedText], maxCount: Int) -> [String] {
         var seen = Set<String>()
+        seen.reserveCapacity(maxCount)
         var output: [String] = []
+        output.reserveCapacity(maxCount)
 
         for item in recognizedText {
             guard let text = cleaned(item.text, y: item.y) else { continue }
