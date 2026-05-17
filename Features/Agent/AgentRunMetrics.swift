@@ -26,11 +26,15 @@ public struct AgentRunMetricsRecord: Codable, Sendable {
     public let errorMessage: String?
 }
 
+private let metricsEncoder: JSONEncoder = {
+    let e = JSONEncoder()
+    e.dateEncodingStrategy = .iso8601
+    e.outputFormatting = [.sortedKeys]
+    return e
+}()
+
 public func printRunMetrics(_ r: AgentRunMetricsRecord) {
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    encoder.outputFormatting = [.sortedKeys]
-    if let data = try? encoder.encode(r), let json = String(data: data, encoding: .utf8) {
+    if let data = try? metricsEncoder.encode(r), let json = String(data: data, encoding: .utf8) {
         print("[INFO]  [metrics] run \(json)")
     }
     Task { await AgentRunMetricsStore.shared.append(r) }
