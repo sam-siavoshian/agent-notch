@@ -487,8 +487,10 @@ private struct ScrubBar: View {
     @State private var dragging: Double?
     @State private var hovered = false
 
-    private let green       = Color(red: 0.114, green: 0.725, blue: 0.329)
-    private let greenBright = Color(red: 0.30,  green: 0.92,  blue: 0.50)
+    private static let _green       = Color(red: 0.114, green: 0.725, blue: 0.329)
+    private static let _greenBright = Color(red: 0.30,  green: 0.92,  blue: 0.50)
+    private var green: Color       { Self._green }
+    private var greenBright: Color { Self._greenBright }
 
     private var displayed: Double { dragging ?? current }
     private var ratio: Double {
