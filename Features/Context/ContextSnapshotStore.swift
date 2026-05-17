@@ -13,8 +13,6 @@ public actor ContextSnapshotStore {
     private let maxSnapshots: Int
     private var snapshots: [ContextSnapshot] = []
     private var signatures: [UUID: ContextDirtySignature] = [:]
-    private var observationsBySurface: [String: ContextGeminiObservation] = [:]
-    private var cachedLastReducerObservation: ContextGeminiObservation?
 
     public init(maxSnapshots: Int = 20) {
         self.maxSnapshots = maxSnapshots
@@ -52,23 +50,8 @@ public actor ContextSnapshotStore {
         signatures[snapshotID]
     }
 
-    /// Persist the most recent reducer observation so the dirty-region
-    /// short-circuit and the `.update` lane can compare against it.
-    public func recordReducerObservation(
-        _ observation: ContextGeminiObservation,
-        surfaceKey: String
-    ) {
-        cachedLastReducerObservation = observation
-        observationsBySurface[surfaceKey] = observation
-    }
-
-    public func lastReducerObservation() -> ContextGeminiObservation? {
-        cachedLastReducerObservation
-    }
-
-    public func reducerObservation(forSurfaceKey key: String) -> ContextGeminiObservation? {
-        observationsBySurface[key]
-    }
+    // Phase 5b: Gemini reducer observation persistence removed — Phase 1-3
+    // monitors and the L5Store now own surface understanding.
 
     public func recentActivityContext(now: Date = Date(), learnedUIMemory: String = "") -> String {
         ContextActivationBuilder.build(

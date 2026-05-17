@@ -5,8 +5,11 @@
 //  Native context feature entry point. Owns click-triggered captures and
 //  exposes a compact text packet to AgentSession through AgentInterfaces.
 //
+//  Phase 5b: the legacy Gemini multi-lane observation fan-out and update lane
+//  were removed. Surface understanding now comes from the Phase 1-3 monitors
+//  (clicks, app switches, dirty detector) feeding the memory store directly.
+//
 
-import CryptoKit
 import Foundation
 import CoreGraphics
 import AppKit
@@ -19,9 +22,6 @@ public final class ContextCoordinator: RecentActivityContext {
     private let store = ContextSnapshotStore(maxSnapshots: 20)
     private let memoryStore: ContextMemoryStore
     private let ocrService: ContextOCRService
-    private let geminiObservationService: ContextGeminiObservationService
-    private let aiObservationLog: ContextAIObservationLog
-    private let geminiGate: ContextGeminiObservationGate
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
     private let appSwitchMonitor: ContextAppSwitchMonitor
@@ -54,17 +54,11 @@ public final class ContextCoordinator: RecentActivityContext {
     private init(
         capture: ScreenCapture = .shared,
         memoryStore: ContextMemoryStore = .shared,
-        ocrService: ContextOCRService = .shared,
-        geminiObservationService: ContextGeminiObservationService = .shared,
-        aiObservationLog: ContextAIObservationLog = .shared,
-        geminiGate: ContextGeminiObservationGate = ContextGeminiObservationGate()
+        ocrService: ContextOCRService = .shared
     ) {
         self.capture = capture
         self.memoryStore = memoryStore
         self.ocrService = ocrService
-        self.geminiObservationService = geminiObservationService
-        self.aiObservationLog = aiObservationLog
-        self.geminiGate = geminiGate
         self.clickMonitor = ContextClickMonitor { location in
             Task {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
@@ -134,37 +128,9 @@ public final class ContextCoordinator: RecentActivityContext {
         return await buildActivityContext()
     }
 
-    public func getRecentActivityContext(hint: ActivationContextHint?) async -> String {
-        let cursorLocation = await MainActor.run { NSEvent.mouseLocation }
-        await capture(trigger: .activation, cursorLocation: cursorLocation)
-
-        if hint == nil {
-            return await buildActivityContext()
-        }
-
-        let snapshots = await store.recentSnapshots()
-        let appName = snapshots.last?.appName ?? ""
-        let mainMemory = await memoryStore.appMemory(appName: appName)
-        let knownApps = await memoryStore.allKnownAppNames()
-        let lowerKnown = Dictionary(uniqueKeysWithValues: knownApps.map { ($0.lowercased(), $0) })
-        let mentioned = hint?.mentionedApps ?? []
-        var crossAppMemories: [ContextAppMemory] = []
-        for name in mentioned {
-            let lower = name.lowercased()
-            guard let canonical = lowerKnown[lower],
-                  canonical.caseInsensitiveCompare(appName) != .orderedSame else { continue }
-            if let mem = await memoryStore.appMemory(appName: canonical) {
-                crossAppMemories.append(mem)
-            }
-        }
-
-        let tailored = ContextMemoryRenderer.tailoredActivationSnippet(
-            for: mainMemory,
-            hint: hint,
-            otherApps: crossAppMemories
-        )
-        return await store.recentActivityContext(learnedUIMemory: tailored)
-    }
+    // Phase 5b: getRecentActivityContext(hint:) override removed. The default
+    // implementation in RecentActivityContext (which calls the hintless variant)
+    // is sufficient now that AgentSession routes through ContextSelector.
 
     public func diagnosticsSummary() async -> String {
         await diagnostics().summary
@@ -229,9 +195,8 @@ public final class ContextCoordinator: RecentActivityContext {
             let snapshot = try await capture.snapshot(quality: 0.35)
             // OCR on the FULL-RESOLUTION raw CGImage, not the downsampled JPEG.
             // The 1568px downsample + JPEG-35 compression makes small UI text
-            // unreadable (gives "•O <APII" instead of "API Keys"). Vision .accurate
-            // + the raw image gives clean OCR. Falls back to the JPEG path only
-            // if rawImage is nil (rare — capture failure edge case).
+            // unreadable. Vision .accurate + the raw image gives clean OCR.
+            // Falls back to the JPEG path only if rawImage is nil.
             let recognizedText: [ContextRecognizedText]
             if let rawImage = snapshot.rawImage {
                 recognizedText = await ocrService.recognizeText(in: rawImage)
@@ -252,9 +217,10 @@ public final class ContextCoordinator: RecentActivityContext {
                 recognizedText: recognizedText
             )
 
-            // Dirty-region classification. JPEG is the pixel source we ship to
-            // Gemini, so hashing the same bytes keeps the signature aligned
-            // with what the model actually sees.
+            // Dirty-region classification still drives memory hygiene and the
+            // Dev Tools dirty pane. Phase 5b removed the Gemini fan-out that
+            // used to fire on minor/major change; classification is now a
+            // pure local signal.
             let signature = ContextDirtyDetector.signature(
                 from: snapshot.jpegData,
                 screenWidth: snapshot.width,
@@ -272,41 +238,11 @@ public final class ContextCoordinator: RecentActivityContext {
 
             switch classification.classification {
             case .unchanged:
-                await recordUnchangedEvent(
-                    snapshot: contextSnapshot,
-                    comparison: classification.comparison
-                )
-                log.info("captured \(trigger.rawValue) for \(metadata.appName) — UNCHANGED, skipping Gemini fan-out")
+                log.info("captured \(trigger.rawValue) for \(metadata.appName) — UNCHANGED")
             case .minorChange:
-                if let previousObservation = await store.lastReducerObservation() {
-                    scheduleGeminiUpdate(
-                        for: contextSnapshot,
-                        imageData: snapshot.jpegData,
-                        mimeType: "image/jpeg",
-                        previousSnapshot: previousSnapshot,
-                        previousObservation: previousObservation,
-                        comparison: classification.comparison
-                    )
-                    log.info("captured \(trigger.rawValue) for \(metadata.appName) — MINOR_CHANGE, dispatching update lane only")
-                } else {
-                    scheduleGeminiObservation(
-                        for: contextSnapshot,
-                        imageData: snapshot.jpegData,
-                        mimeType: "image/jpeg",
-                        previousSnapshot: previousSnapshot,
-                        comparison: classification.comparison
-                    )
-                    log.info("captured \(trigger.rawValue) for \(metadata.appName) — minor change without baseline, full fan-out")
-                }
+                log.info("captured \(trigger.rawValue) for \(metadata.appName) — MINOR_CHANGE")
             case .majorChange:
-                scheduleGeminiObservation(
-                    for: contextSnapshot,
-                    imageData: snapshot.jpegData,
-                    mimeType: "image/jpeg",
-                    previousSnapshot: previousSnapshot,
-                    comparison: classification.comparison
-                )
-                log.info("captured \(trigger.rawValue) for \(metadata.appName) — MAJOR_CHANGE, full fan-out")
+                log.info("captured \(trigger.rawValue) for \(metadata.appName) — MAJOR_CHANGE")
             }
 
             await dirtyThresholdsTracker.observe(classification.classification)
@@ -382,24 +318,6 @@ public final class ContextCoordinator: RecentActivityContext {
         )
     }
 
-    private func recordUnchangedEvent(
-        snapshot: ContextSnapshot,
-        comparison: ContextDirtyComparison?
-    ) async {
-        let hamming = comparison?.hammingDistance ?? 0
-        let area = comparison?.changedAreaFraction ?? 0
-        let reason = "stable screen — hamming=\(hamming), changedArea=\(String(format: "%.3f", area)); skipped all Gemini lanes"
-        await aiObservationLog.record(ContextAIObservationEvent(
-            status: .skipped,
-            trigger: snapshot.trigger,
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            reason: reason,
-            laneName: "dirty-detector",
-            summary: reason
-        ))
-    }
-
     private struct DirtyClassificationResult: Sendable {
         let classification: ContextDirtyClassification
         let comparison: ContextDirtyComparison?
@@ -445,706 +363,11 @@ public final class ContextCoordinator: RecentActivityContext {
         }
     }
 
-    private func scheduleGeminiObservation(
-        for snapshot: ContextSnapshot,
-        imageData: Data,
-        mimeType: String,
-        previousSnapshot: ContextSnapshot?,
-        comparison: ContextDirtyComparison? = nil
-    ) {
-        let pending = ContextGeminiObservationGate.PendingObservation(
-            snapshot: snapshot,
-            imageData: imageData,
-            mimeType: mimeType,
-            previousSnapshot: previousSnapshot
-        )
-        let geminiGate = geminiGate
-        let aiObservationLog = aiObservationLog
-        let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
-        let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
-
-        Task(priority: .utility) { [pending] in
-            let action = await geminiGate.enqueueOrRun(
-                pending,
-                isAPIKeyConfigured: ContextGeminiObservationService.isAPIKeyConfigured
-            )
-
-            switch action {
-            case .run:
-                await ContextCoordinator.shared.runGeminiObservation(pending)
-            case .queued(let replacedSameApp):
-                let reason = replacedSameApp
-                    ? "coalesced with newer \(pending.snapshot.appName) snapshot"
-                    : "pending; awaiting in-flight observation to finish"
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .queued,
-                    trigger: pending.snapshot.trigger,
-                    appName: pending.snapshot.appName,
-                    windowTitle: pending.snapshot.windowTitle,
-                    reason: reason,
-                    attemptID: pending.attemptID,
-                    laneName: "modular",
-                    imageBytes: pending.imageData.count,
-                    requestMimeType: pending.mimeType,
-                    requestMediaResolution: mediaResolution,
-                    requestThinkingLevel: thinkingLevel,
-                    ocrCount: pending.snapshot.recognizedText.count
-                ))
-            case .skip(let reason):
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .skipped,
-                    trigger: pending.snapshot.trigger,
-                    appName: pending.snapshot.appName,
-                    windowTitle: pending.snapshot.windowTitle,
-                    reason: reason,
-                    attemptID: pending.attemptID,
-                    laneName: "modular",
-                    imageBytes: pending.imageData.count,
-                    requestMimeType: pending.mimeType,
-                    requestMediaResolution: mediaResolution,
-                    requestThinkingLevel: thinkingLevel,
-                    ocrCount: pending.snapshot.recognizedText.count
-                ))
-            }
-        }
-    }
-
-    private func runGeminiObservation(_ pending: ContextGeminiObservationGate.PendingObservation) async {
-        let snapshot = pending.snapshot
-        let imageData = pending.imageData
-        let mimeType = pending.mimeType
-        let previousSnapshot = pending.previousSnapshot
-        let attemptID = pending.attemptID
-
-        let geminiObservationService = geminiObservationService
-        let memoryStore = memoryStore
-        let aiObservationLog = aiObservationLog
-        let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
-        let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
-        let lanes = Self.geminiLanes(for: snapshot, previousSnapshot: previousSnapshot)
-        let input = ContextGeminiObservationInput(
-            imageData: imageData,
-            mimeType: mimeType,
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            width: snapshot.width,
-            height: snapshot.height,
-            recognizedText: snapshot.recognizedText,
-            metadata: Self.geminiMetadata(for: snapshot, previousSnapshot: previousSnapshot)
-        )
-
-        let startedAt = Date()
-        await aiObservationLog.record(ContextAIObservationEvent(
-            status: .queued,
-            trigger: snapshot.trigger,
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            reason: "queued modular screen understanding with \(lanes.count) lanes",
-            attemptID: attemptID,
-            laneName: "modular",
-            imageBytes: imageData.count,
-            requestMimeType: mimeType,
-            requestMediaResolution: mediaResolution,
-            requestThinkingLevel: thinkingLevel,
-            ocrCount: snapshot.recognizedText.count
-        ))
-
-        let laneResults = await withTaskGroup(of: ContextGeminiLaneObservation?.self) { group in
-            for lane in lanes {
-                group.addTask {
-                    await aiObservationLog.record(ContextAIObservationEvent(
-                        status: .queued,
-                        trigger: snapshot.trigger,
-                        appName: snapshot.appName,
-                        windowTitle: snapshot.windowTitle,
-                        reason: "queued \(lane.label) lane for \(lane.shortGoal)",
-                        attemptID: attemptID,
-                        laneName: lane.rawValue,
-                        imageBytes: imageData.count,
-                        requestMimeType: mimeType,
-                        requestMediaResolution: mediaResolution,
-                        requestThinkingLevel: thinkingLevel,
-                        ocrCount: snapshot.recognizedText.count
-                    ))
-
-                    let laneStartedAt = Date()
-                    let laneObservation = await geminiObservationService.observeLane(
-                        lane,
-                        input: input,
-                        previousSnapshot: previousSnapshot
-                    )
-                    let laneElapsedMilliseconds = Int(Date().timeIntervalSince(laneStartedAt) * 1000)
-
-                    guard let laneObservation else {
-                        await aiObservationLog.record(ContextAIObservationEvent(
-                            status: .failed,
-                            trigger: snapshot.trigger,
-                            appName: snapshot.appName,
-                            windowTitle: snapshot.windowTitle,
-                            reason: "\(lane.label) lane returned no valid observation",
-                            attemptID: attemptID,
-                            laneName: lane.rawValue,
-                            latencyMilliseconds: laneElapsedMilliseconds,
-                            imageBytes: imageData.count,
-                            requestMimeType: mimeType,
-                            requestMediaResolution: mediaResolution,
-                            requestThinkingLevel: thinkingLevel,
-                            ocrCount: snapshot.recognizedText.count
-                        ))
-                        return nil
-                    }
-
-                    let controls = Self.controlDescriptions(laneObservation.controls)
-                    await aiObservationLog.record(ContextAIObservationEvent(
-                        status: .completed,
-                        trigger: snapshot.trigger,
-                        appName: snapshot.appName,
-                        windowTitle: snapshot.windowTitle,
-                        reason: "\(lane.label) lane recorded \(laneObservation.controls.count) controls, \(laneObservation.entities.count) entities, \(laneObservation.memoryCards.count) memory cards",
-                        attemptID: attemptID,
-                        laneName: lane.rawValue,
-                        source: laneObservation.source.rawValue,
-                        latencyMilliseconds: laneElapsedMilliseconds,
-                        confidence: laneObservation.confidence,
-                        surfaceLabel: laneObservation.surfaceLabel,
-                        summary: laneObservation.summary,
-                        screenType: laneObservation.screenType,
-                        primaryTask: laneObservation.primaryTask,
-                        contentSummary: laneObservation.contentSummary,
-                        controls: controls,
-                        landmarks: laneObservation.layoutRegions,
-                        entities: laneObservation.entities,
-                        affordances: controls,
-                        stateIndicators: laneObservation.stateIndicators,
-                        navigationPaths: laneObservation.navigation,
-                        dataRegions: laneObservation.layoutRegions,
-                        workflowHints: laneObservation.workflows,
-                        negativeCues: laneObservation.negativeCues,
-                        memoryCandidates: laneObservation.memoryCards,
-                        uncertainty: laneObservation.uncertainty,
-                        imageBytes: imageData.count,
-                        requestMimeType: mimeType,
-                        requestMediaResolution: mediaResolution,
-                        requestThinkingLevel: thinkingLevel,
-                        ocrCount: snapshot.recognizedText.count,
-                        controlsCount: laneObservation.controls.count,
-                        affordancesCount: laneObservation.workflows.count,
-                        entitiesCount: laneObservation.entities.count
-                    ))
-                    return laneObservation
-                }
-            }
-
-            var observations: [ContextGeminiLaneObservation] = []
-            for await laneObservation in group {
-                if let laneObservation {
-                    observations.append(laneObservation)
-                }
-            }
-            return observations
-        }
-
-        let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
-        await finishGateAndDrainNext()
-
-        let reducerDebugPrefix = ContextGeminiObservationService.debugPaths(
-            for: imageData,
-            mimeType: mimeType,
-            laneName: ContextGeminiObservationLane.reducer.rawValue
-        ).artifactPrefix
-
-        guard let observation = ContextGeminiObservationService.reduceLaneObservations(
-            laneResults,
-            input: input,
-            imageHash: Self.sha256Hex(imageData)
-        ) else {
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .failed,
-                trigger: snapshot.trigger,
-                appName: snapshot.appName,
-                windowTitle: snapshot.windowTitle,
-                reason: "No modular Gemini lanes returned valid observations",
-                attemptID: attemptID,
-                laneName: ContextGeminiObservationLane.reducer.rawValue,
-                latencyMilliseconds: elapsedMilliseconds,
-                imageBytes: imageData.count,
-                requestMimeType: mimeType,
-                requestMediaResolution: mediaResolution,
-                requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count,
-                debugArtifactPrefix: reducerDebugPrefix
-            ))
-            return
-        }
-
-        await memoryStore.record(
-            observation,
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            capturedAt: snapshot.capturedAt
-        )
-        let controls = Self.controlDescriptions(observation.visibleControls)
-        await aiObservationLog.record(ContextAIObservationEvent(
-            status: .completed,
-            model: observation.model,
-            trigger: snapshot.trigger,
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            reason: "reduced \(laneResults.count) lanes into activation-ready memory",
-            attemptID: attemptID,
-            laneName: ContextGeminiObservationLane.reducer.rawValue,
-            source: observation.source.rawValue,
-            latencyMilliseconds: elapsedMilliseconds,
-            confidence: observation.confidence,
-            surfaceLabel: observation.surfaceLabel,
-            summary: observation.summary,
-            screenType: observation.screenType,
-            primaryTask: observation.primaryTask,
-            layoutSummary: observation.layoutSummary,
-            contentSummary: observation.contentSummary,
-            controls: controls,
-            landmarks: observation.landmarks,
-            entities: observation.entities,
-            affordances: observation.affordances,
-            stateIndicators: observation.stateIndicators,
-            navigationPaths: observation.navigationPaths,
-            dataRegions: observation.dataRegions,
-            workflowHints: observation.workflowHints,
-            negativeCues: observation.negativeCues,
-            memoryCandidates: observation.memoryCandidates,
-            uncertainty: observation.uncertainty,
-            imageBytes: imageData.count,
-            requestMimeType: mimeType,
-            requestMediaResolution: mediaResolution,
-            requestThinkingLevel: thinkingLevel,
-            ocrCount: snapshot.recognizedText.count,
-            controlsCount: observation.visibleControls.count,
-            affordancesCount: observation.affordances.count,
-            entitiesCount: observation.entities.count,
-            debugArtifactPrefix: reducerDebugPrefix
-        ))
-        log.info("Gemini learned \(observation.appLabel)/\(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
-    }
-
-    private func finishGateAndDrainNext() async {
-        let drain = await geminiGate.finishAndDrainNext()
-        let aiObservationLog = aiObservationLog
-        let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
-        let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
-        for stale in drain.stale {
-            let age = Int(Date().timeIntervalSince(stale.enqueuedAt))
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .skipped,
-                trigger: stale.snapshot.trigger,
-                appName: stale.snapshot.appName,
-                windowTitle: stale.snapshot.windowTitle,
-                reason: "dropped stale pending capture (\(age)s old > 12s)",
-                attemptID: stale.attemptID,
-                laneName: "modular",
-                imageBytes: stale.imageData.count,
-                requestMimeType: stale.mimeType,
-                requestMediaResolution: mediaResolution,
-                requestThinkingLevel: thinkingLevel,
-                ocrCount: stale.snapshot.recognizedText.count
-            ))
-        }
-        if let next = drain.next {
-            Task(priority: .utility) { [next] in
-                await ContextCoordinator.shared.runGeminiObservation(next)
-            }
-        }
-    }
-
-    private func scheduleGeminiUpdate(
-        for snapshot: ContextSnapshot,
-        imageData: Data,
-        mimeType: String,
-        previousSnapshot: ContextSnapshot?,
-        previousObservation: ContextGeminiObservation,
-        comparison: ContextDirtyComparison?
-    ) {
-        let geminiObservationService = geminiObservationService
-        let memoryStore = memoryStore
-        let aiObservationLog = aiObservationLog
-        let geminiGate = geminiGate
-        let store = store
-        let attemptID = UUID()
-        let lane = ContextGeminiObservationLane.update
-        let mediaResolution = "MEDIA_RESOLUTION_HIGH"
-        let thinkingLevel = "minimal"
-        let debugPaths = ContextGeminiObservationService.debugPaths(
-            for: imageData,
-            mimeType: mimeType,
-            laneName: lane.rawValue
-        )
-        let input = ContextGeminiObservationInput(
-            imageData: imageData,
-            mimeType: mimeType,
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            width: snapshot.width,
-            height: snapshot.height,
-            recognizedText: snapshot.recognizedText,
-            metadata: Self.geminiMetadata(for: snapshot, previousSnapshot: previousSnapshot)
-        )
-        let classificationLabel = (comparison?.classification ?? .minorChange).label
-        let surfaceKey = Self.surfaceKey(for: snapshot)
-
-        // The update lane is cheap (~3-5s) and only fires on minor changes that
-        // already passed dirty detection. Bypass the gate's coalescing queue —
-        // we want fresh deltas to merge in immediately, not wait for the
-        // in-flight modular fan-out to drain.
-        Task(priority: .utility) { [snapshot, imageData, input, previousObservation, comparison, classificationLabel] in
-            guard ContextGeminiObservationService.isAPIKeyConfigured else {
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .skipped,
-                    trigger: snapshot.trigger,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    reason: "GEMINI_API_KEY not configured (update lane)",
-                    attemptID: attemptID,
-                    laneName: lane.rawValue,
-                    imageBytes: imageData.count,
-                    requestMimeType: mimeType,
-                    requestMediaResolution: mediaResolution,
-                    requestThinkingLevel: thinkingLevel,
-                    ocrCount: snapshot.recognizedText.count
-                ))
-                return
-            }
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .queued,
-                trigger: snapshot.trigger,
-                appName: snapshot.appName,
-                windowTitle: snapshot.windowTitle,
-                reason: "queued cheap update lane against previous reducer observation (dirty=\(classificationLabel))",
-                attemptID: attemptID,
-                laneName: lane.rawValue,
-                imageBytes: imageData.count,
-                requestMimeType: mimeType,
-                requestMediaResolution: mediaResolution,
-                requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count
-            ))
-
-            let startedAt = Date()
-
-            // Tier 0 — OCR-delta fast path. If the dirty region is small and
-            // overlaps a single previously-known OCR text region whose text
-            // has changed, synthesize the delta locally and skip Gemini.
-            if let ocrDelta = Self.attemptOCRDelta(
-                comparison: comparison,
-                previousSnapshot: previousSnapshot,
-                currentSnapshot: snapshot
-            ) {
-                let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
-                let merged = ContextGeminiObservationService.mergeUpdate(
-                    previous: previousObservation,
-                    delta: ocrDelta
-                )
-                await store.recordReducerObservation(merged, surfaceKey: surfaceKey)
-                await memoryStore.record(
-                    merged,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    capturedAt: snapshot.capturedAt
-                )
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .completed,
-                    trigger: snapshot.trigger,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    reason: "OCR-delta fast path: \(ocrDelta.summary ?? "text change") in \(elapsedMs)ms (no LLM)",
-                    attemptID: attemptID,
-                    laneName: lane.rawValue,
-                    source: "ocr-delta",
-                    latencyMilliseconds: elapsedMs,
-                    summary: ocrDelta.summary,
-                    imageBytes: imageData.count,
-                    requestMimeType: mimeType,
-                    requestMediaResolution: "n/a",
-                    requestThinkingLevel: "n/a",
-                    ocrCount: snapshot.recognizedText.count,
-                ))
-                NSLog("[ContextCoordinator] OCR-delta fast path applied for \(snapshot.appName) in \(elapsedMs)ms")
-                return
-            }
-
-            // Tier 1 — build a focused crop + low-res thumbnail when we have a
-            // bounding rect. Falls back to the full image when the rect is
-            // unavailable or the crop covers most of the screen anyway.
-            let (thumbnail, crop) = Self.makeUpdateLaneImages(
-                imageData: imageData,
-                comparison: comparison
-            )
-            let delta = await geminiObservationService.observeUpdate(
-                previousObservation: previousObservation,
-                input: input,
-                thumbnailData: thumbnail,
-                cropData: crop
-            )
-            let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
-
-            guard let delta else {
-                // Gemini returned no_change, errored, or timed out. Record a
-                // skipped/completed event so dev tools shows what happened, but
-                // don't disturb the cached observation.
-                await aiObservationLog.record(ContextAIObservationEvent(
-                    status: .completed,
-                    trigger: snapshot.trigger,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    reason: "update lane reported no_change (or no delta produced) in \(elapsedMs)ms",
-                    attemptID: attemptID,
-                    laneName: lane.rawValue,
-                    source: ContextGeminiObservation.Source.gemini.rawValue,
-                    latencyMilliseconds: elapsedMs,
-                    summary: "no_change",
-                    imageBytes: imageData.count,
-                    requestMimeType: mimeType,
-                    requestMediaResolution: mediaResolution,
-                    requestThinkingLevel: thinkingLevel,
-                    ocrCount: snapshot.recognizedText.count,
-                ))
-                NSLog("[ContextCoordinator] Update lane reported no_change for \(snapshot.appName)")
-                return
-            }
-
-            let merged = ContextGeminiObservationService.mergeUpdate(
-                previous: previousObservation,
-                delta: delta
-            )
-            await store.recordReducerObservation(merged, surfaceKey: surfaceKey)
-            await memoryStore.record(
-                merged,
-                appName: snapshot.appName,
-                windowTitle: snapshot.windowTitle,
-                capturedAt: snapshot.capturedAt
-            )
-
-            let controls = merged.visibleControls.map { control -> String in
-                if let actionHint = control.actionHint, !actionHint.isEmpty {
-                    return "\(control.label) (\(control.role), \(control.region)): \(actionHint)"
-                }
-                return "\(control.label) (\(control.role), \(control.region))"
-            }
-
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .completed,
-                trigger: snapshot.trigger,
-                appName: snapshot.appName,
-                windowTitle: snapshot.windowTitle,
-                reason: "update lane merged delta into baseline observation in \(elapsedMs)ms",
-                attemptID: attemptID,
-                laneName: lane.rawValue,
-                source: delta.source.rawValue,
-                latencyMilliseconds: elapsedMs,
-                confidence: merged.confidence,
-                surfaceLabel: merged.surfaceLabel,
-                summary: merged.summary,
-                screenType: merged.screenType,
-                primaryTask: merged.primaryTask,
-                layoutSummary: merged.layoutSummary,
-                contentSummary: merged.contentSummary,
-                controls: controls,
-                landmarks: merged.landmarks,
-                entities: merged.entities,
-                affordances: merged.affordances,
-                stateIndicators: merged.stateIndicators,
-                navigationPaths: merged.navigationPaths,
-                dataRegions: merged.dataRegions,
-                workflowHints: merged.workflowHints,
-                negativeCues: merged.negativeCues,
-                memoryCandidates: merged.memoryCandidates,
-                uncertainty: merged.uncertainty,
-                imageBytes: imageData.count,
-                requestMimeType: mimeType,
-                requestMediaResolution: mediaResolution,
-                requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count,
-                controlsCount: merged.visibleControls.count,
-                affordancesCount: merged.affordances.count,
-                entitiesCount: merged.entities.count,
-            ))
-            NSLog("[ContextCoordinator] Update lane merged delta for \(snapshot.appName) in \(elapsedMs)ms")
-        }
-    }
-
-    private static func surfaceKey(for snapshot: ContextSnapshot) -> String {
-        let app = snapshot.appName.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let window = snapshot.windowTitle.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(app)::\(window)"
-    }
-
-    // MARK: - Dirty-rect crop + thumbnail helpers (Tier 1)
-
-    /// Returns (thumbnail, crop) PNG data for the update lane when the dirty
-    /// rect is meaningful AND localized. Returns (nil, nil) when there's no
-    /// rect or the dirty region covers most of the screen — in that case the
-    /// service falls back to sending the full image.
-    private static func makeUpdateLaneImages(
-        imageData: Data,
-        comparison: ContextDirtyComparison?
-    ) -> (Data?, Data?) {
-        guard let comparison,
-              let bbox = comparison.dirtyBoundingRect else { return (nil, nil) }
-
-        // If the dirty rect already covers >= 60% of either dimension, a crop
-        // wouldn't focus anything — skip the split and use the full image.
-        if bbox.width >= 0.6 || bbox.height >= 0.6 { return (nil, nil) }
-
-        guard let crop = ContextDirtyDetector.croppedPNG(from: imageData, normalizedBBox: bbox),
-              let thumbnail = ContextDirtyDetector.thumbnailPNG(from: imageData) else {
-            return (nil, nil)
-        }
-        return (thumbnail, crop)
-    }
-
-    // MARK: - OCR-delta fast path (Tier 0)
-
-    /// Attempt to synthesize a `ContextGeminiLaneObservation` delta from just
-    /// the OCR text inside the dirty bbox — no Gemini call. Conservative: only
-    /// fires when the dirty rect is small AND the OCR set inside that rect has
-    /// the same number of items in both snapshots (same layout) but at least
-    /// one text value differs (purely text-content change like a counter
-    /// updating, a value editing in place, a "saved 2s ago" timestamp).
-    static func attemptOCRDelta(
-        comparison: ContextDirtyComparison?,
-        previousSnapshot: ContextSnapshot?,
-        currentSnapshot: ContextSnapshot
-    ) -> ContextGeminiLaneObservation? {
-        guard let comparison, comparison.changedAreaFraction < 0.03,
-              let bbox = comparison.dirtyBoundingRect,
-              let previousSnapshot else { return nil }
-
-        let previousInside = ocrItems(insideNormalized: bbox, snapshot: previousSnapshot)
-        let currentInside = ocrItems(insideNormalized: bbox, snapshot: currentSnapshot)
-
-        // Both must have at least one item and the layout (count + sorted
-        // bbox positions) must match. Otherwise this is a layout change, not
-        // a text-only change — fall through to Gemini.
-        guard !previousInside.isEmpty,
-              previousInside.count == currentInside.count else { return nil }
-
-        let sortedPrev = previousInside.sorted { ocrSortKey($0) < ocrSortKey($1) }
-        let sortedCurr = currentInside.sorted { ocrSortKey($0) < ocrSortKey($1) }
-
-        var changes: [(String, String)] = []
-        for (prev, curr) in zip(sortedPrev, sortedCurr) {
-            // Require positions to match within ~1% of screen — anything more
-            // is a layout change.
-            if abs(prev.x - curr.x) > 0.01 || abs(prev.y - curr.y) > 0.01 {
-                return nil
-            }
-            if prev.text != curr.text {
-                changes.append((prev.text, curr.text))
-            }
-        }
-        guard !changes.isEmpty else { return nil }
-
-        let summaryText = changes
-            .prefix(3)
-            .map { "\"\($0.0)\" → \"\($0.1)\"" }
-            .joined(separator: "; ")
-        let stateIndicators = changes
-            .prefix(5)
-            .map { "Updated value: \($0.1)" }
-
-        return ContextGeminiLaneObservation(
-            id: UUID().uuidString,
-            observedAt: Date(),
-            source: .gemini,
-            model: "ocr-delta",
-            promptVersion: "tier0",
-            imageHash: "",
-            lane: .update,
-            appLabel: currentSnapshot.appName,
-            windowTitle: currentSnapshot.windowTitle,
-            surfaceID: "",
-            surfaceLabel: "",
-            screenType: "",
-            summary: "Local text update inside known region: \(summaryText)",
-            primaryTask: "",
-            contentSummary: "",
-            layoutRegions: [],
-            controls: [],
-            entities: [],
-            stateIndicators: stateIndicators,
-            workflows: [],
-            navigation: [],
-            negativeCues: [],
-            memoryCards: [],
-            uncertainty: ["Inferred from OCR diff inside dirty bbox; no LLM verification."],
-            confidence: 0.65
-        )
-    }
-
-    private static func ocrItems(insideNormalized bbox: CGRect, snapshot: ContextSnapshot) -> [ContextRecognizedText] {
-        snapshot.recognizedText.filter { item in
-            // Vision OCR origin is top-left, normalized 0...1.
-            let itemRect = CGRect(x: item.x, y: item.y, width: item.width, height: item.height)
-            return bbox.intersects(itemRect)
-        }
-    }
-
-    private static func ocrSortKey(_ item: ContextRecognizedText) -> Double {
-        // Sort top-to-bottom then left-to-right so zip(prev, curr) lines up.
-        item.y * 1000 + item.x
-    }
-
-    private static func geminiLanes(
-        for snapshot: ContextSnapshot,
-        previousSnapshot: ContextSnapshot?
-    ) -> [ContextGeminiObservationLane] {
-        var lanes: [ContextGeminiObservationLane] = [.activity, .uiMap, .entityContent]
-        if previousSnapshot != nil, snapshot.trigger == .click || snapshot.trigger == .appSwitch || snapshot.trigger == .manual {
-            lanes.append(.interaction)
-        }
-        return lanes
-    }
-
-    private static func geminiMetadata(
-        for snapshot: ContextSnapshot,
-        previousSnapshot: ContextSnapshot?
-    ) -> [String: String] {
-        var metadata = [
-            "captureTrigger": snapshot.trigger.rawValue
-        ]
-        if let cursorLocation = snapshot.cursorLocation {
-            metadata["cursor"] = "x=\(Int(cursorLocation.x)), y=\(Int(cursorLocation.y))"
-        }
-        if let previousSnapshot {
-            metadata["previousApp"] = previousSnapshot.appName
-            metadata["previousWindow"] = previousSnapshot.windowTitle
-            metadata["previousTrigger"] = previousSnapshot.trigger.rawValue
-        }
-        return metadata
-    }
-
-    private static func controlDescriptions(_ controls: [ContextGeminiObservation.VisibleControl]) -> [String] {
-        controls.map { control -> String in
-            if let actionHint = control.actionHint, !actionHint.isEmpty {
-                return "\(control.label) (\(control.role), \(control.region)): \(actionHint)"
-            }
-            return "\(control.label) (\(control.role), \(control.region))"
-        }
-    }
-
-    private static func textPreview(from snapshot: ContextSnapshot) -> String {
-        ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: 8)
-            .joined(separator: " | ")
-    }
-
     private static func shouldIgnoreCapture(_ metadata: ContextWindowMetadata) -> Bool {
         let appName = metadata.appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let windowTitle = metadata.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return appName == "agentnotch"
             || appName == "agent in the notch"
             || windowTitle.contains("agentnotch dev tools")
-    }
-
-    private static func sha256Hex(_ data: Data) -> String {
-        let digest = SHA256.hash(data: data)
-        return digest.compactMap { String(format: "%02x", $0) }.joined()
     }
 }
