@@ -6,6 +6,22 @@
 //  feed results back → loop until stop_reason != "tool_use". Updates
 //  AgentState as it goes so the notch UI reflects what's happening.
 //
+//  Optimizations layered on top of the basic loop:
+//  - Pre-flight IntentRouter handles obvious commands (open URL, Spotify,
+//    add reminder) WITHOUT any model call. Many tasks now complete in 0
+//    model turns.
+//  - Static system prompt cached server-side via cache_control. Dynamic
+//    context (activation packet, prefs, custom prompt) lives after the
+//    cache breakpoint.
+//  - Tools list also cached (one cache breakpoint on the last tool).
+//  - Rolling cache_control on the most recent tool_result so every
+//    subsequent turn reads the prior turns' state from cache instead of
+//    re-tokenizing the whole history.
+//  - max_tokens bumped to 4096 so the model can plan + describe + act
+//    without truncation.
+//  - The model is taught (in system prompt) a strict tool preference order
+//    so it picks fast paths (URL, AppleScript, AX) before vision+click.
+//
 
 import Foundation
 import AppKit
@@ -16,12 +32,21 @@ private let log = Log(category: "harness")
 public final class ComputerUseHarness {
     public static let shared = ComputerUseHarness()
 
-    public var modelID: String = AnthropicModel.sonnet46
-    public var fallbackModelID: String = AnthropicModel.sonnet46
+    public var modelID: String = AnthropicModel.haiku45
+    public var fallbackModelID: String = AnthropicModel.haiku45
     public var maxTurns: Int = 100
-    public var maxOutputTokens: Int = 1024
+    public var maxOutputTokens: Int = 4096
+
+    public private(set) var isRunning: Bool = false
+    private var stopRequested: Bool = false
 
     private init() {}
+
+    public func requestStop() {
+        guard isRunning else { return }
+        stopRequested = true
+        NSLog("[Harness] stop requested")
+    }
 
     public struct Input {
         public var transcript: String
@@ -53,26 +78,57 @@ public final class ComputerUseHarness {
         var completedTurns = 0
 
         let settings = AgentSettingsStore.shared.settings
+
+        AgentState.shared.set(.thinking)
+        CursorCompanion.shared.setThinking(true)
+        isRunning = true
+        stopRequested = false
+        await AXFastPath.shared.reset()
+        defer {
+            CursorCompanion.shared.setThinking(false)
+            isRunning = false
+            stopRequested = false
+        }
+
+        // Pre-flight fast path. If a deterministic handler can finish
+        // the task, skip the model loop entirely.
+        let routed = await IntentRouter.tryHandle(transcript: input.transcript)
+        if case .handled(let summary, let affirmation) = routed {
+            TextToSpeechService.shared.speak(affirmation)
+            AgentState.shared.set(.idle, detail: summary)
+            await AgentMetricsStore.shared.record(AgentRunMetricsRecord(
+                id: runID,
+                startedAt: startedAt,
+                endedAt: Date(),
+                durationMs: milliseconds(from: startedAt, to: Date()),
+                modelID: "fast_path",
+                fallbackModelID: fallbackModelID,
+                usedFallback: false,
+                transcriptLength: transcriptLength,
+                contextLength: contextLength,
+                contextIncluded: !input.contextSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                turnCount: 0,
+                toolCallCount: 0,
+                screenshotToolCallCount: 0,
+                actionCounts: ["fast_path": 1],
+                timeToFirstToolCallMs: nil,
+                timeToFirstNonScreenshotActionMs: nil,
+                finalStatus: "completed_fast_path",
+                errorMessage: nil
+            ))
+            return
+        }
+
         let displaySize = primaryDisplayPixelSize()
         let dispatcher = ToolDispatcher(displaySize: displaySize)
         let client = AnthropicClient(apiKey: apiKey)
 
-        let tools: [Tool] = [
-            .computer(
-                displayWidth: Int(displaySize.width),
-                displayHeight: Int(displaySize.height),
-                displayNumber: 1
-            )
-        ]
+        let tools = buildTools(displaySize: displaySize)
+        let system = buildSystemBlocks(settings: settings, contextSummary: input.contextSummary)
 
-        let system = buildSystemPrompt(settings: settings, contextSummary: input.contextSummary)
         var messages: [Message] = [
             Message(role: "user", content: [.text(input.transcript)])
         ]
-
-        AgentState.shared.set(.thinking)
-        CursorCompanion.shared.setThinking(true)
-        defer { CursorCompanion.shared.setThinking(false) }
 
         var currentModel = modelID
         var triedFallback = false
@@ -103,8 +159,19 @@ public final class ComputerUseHarness {
         }
 
         while turn < maxTurns {
+            if stopRequested {
+                AgentState.shared.set(.idle, detail: "Stopped")
+                await recordMetrics(status: "stopped_by_user")
+                return
+            }
             turn += 1
             log.info("harness.turn run_id=\(runID.uuidString) turn=\(turn) model=\(currentModel)")
+
+            // Move the cache breakpoint to the most recent tool_result so the
+            // next request reads everything before it from cache. Older
+            // breakpoints get stripped to stay within Anthropic's 4-marker cap.
+            applyRollingCacheMarker(to: &messages)
+
             let request = AnthropicMessageRequest(
                 model: currentModel,
                 maxTokens: maxOutputTokens,
@@ -135,6 +202,10 @@ public final class ComputerUseHarness {
                 AgentState.shared.set(.error(message: "Network error"))
                 recordMetrics(status: "network_error", errorMessage: "\(error)")
                 return
+            }
+
+            if let usage = response.usage {
+                NSLog("[Harness] usage turn=\(turn) in=\(usage.inputTokens ?? -1) out=\(usage.outputTokens ?? -1) cache_create=\(usage.cacheCreationInputTokens ?? -1) cache_read=\(usage.cacheReadInputTokens ?? -1)")
             }
 
             completedTurns = turn
@@ -168,7 +239,12 @@ public final class ComputerUseHarness {
 
             var resultBlocks: [ContentBlock] = []
             for use in toolUses {
-                let action = actionLabel(use.input)
+                if stopRequested {
+                    AgentState.shared.set(.idle, detail: "Stopped")
+                    await recordMetrics(status: "stopped_by_user")
+                    return
+                }
+                let action = actionLabel(use)
                 let now = Date()
                 if firstToolCallAt == nil {
                     firstToolCallAt = now
@@ -186,7 +262,7 @@ public final class ComputerUseHarness {
                 AgentState.shared.set(.toolCall(name: use.name), detail: action)
                 let result = await dispatcher.dispatch(toolUseId: use.id, name: use.name, input: use.input)
                 log.info("harness.tool_result run_id=\(runID.uuidString) action=\(action) is_error=\(result.isError)")
-                resultBlocks.append(.toolResult(toolUseId: result.toolUseId, content: result.content, isError: result.isError))
+                resultBlocks.append(.toolResult(toolUseId: result.toolUseId, content: result.content, isError: result.isError, cache: false))
             }
             messages.append(Message(role: "user", content: resultBlocks))
 
@@ -203,52 +279,185 @@ public final class ComputerUseHarness {
         recordMetrics(status: "max_turns", errorMessage: "Hit max turns (\(maxTurns))")
     }
 
+    // MARK: - Tools
+
+    private func buildTools(displaySize: CGSize) -> [Tool] {
+        let openURL: Tool = .custom(
+            name: "open_url",
+            description: "Open a URL via NSWorkspace. Accepts https://, mailto:, sms:, spotify:, shortcuts://, raycast://, things:///add, etc. Zero-click intent dispatch — strongly preferred over clicking through a browser. Returns immediately.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "url": .object(["type": .string("string"), "description": .string("Fully-qualified URL or app-scheme URL.")])
+                ]),
+                "required": .array([.string("url")])
+            ])
+        )
+        let applescript: Tool = .custom(
+            name: "applescript",
+            description: "Run an AppleScript via NSAppleScript. ALLOWLISTED target apps only: Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. Use for one-shot intents like 'tell application \"Spotify\" to play track \"...\"' or 'tell application \"Notes\" to make new note...'. Far faster than clicking the UI.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "script": .object(["type": .string("string"), "description": .string("AppleScript source.")])
+                ]),
+                "required": .array([.string("script")])
+            ])
+        )
+        let runShortcut: Tool = .custom(
+            name: "run_shortcut",
+            description: "Run a user-installed macOS Shortcut by name via `shortcuts run`. Optional text input piped to stdin. Returns stdout.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "name": .object(["type": .string("string")]),
+                    "input": .object(["type": .string("string"), "description": .string("Optional stdin text.")])
+                ]),
+                "required": .array([.string("name")])
+            ])
+        )
+        let axQuery: Tool = .custom(
+            name: "ax_query",
+            description: "Find Accessibility elements in the FRONTMOST app matching role and/or label substring. Returns up to `limit` matches with ids you can pass to ax_press / ax_set_value. Try this BEFORE taking a screenshot when the user names a button, link, field, or menu by label.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "role": .object(["type": .string("string"), "description": .string("AX role substring, e.g. 'Button', 'TextField', 'Link', 'MenuItem'.")]),
+                    "label_contains": .object(["type": .string("string"), "description": .string("Substring to match against the element's title/description/help text (case insensitive).")]),
+                    "value_contains": .object(["type": .string("string"), "description": .string("Substring to match against the element's value.")]),
+                    "limit": .object(["type": .string("integer"), "description": .string("Max matches. Default 8.")])
+                ])
+            ])
+        )
+        let axPress: Tool = .custom(
+            name: "ax_press",
+            description: "Perform AXPress on an element id returned by ax_query. No mouse movement, no focus steal.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object(["type": .string("string")])
+                ]),
+                "required": .array([.string("id")])
+            ])
+        )
+        let axSetValue: Tool = .custom(
+            name: "ax_set_value",
+            description: "Set the value attribute of an element id (text field, etc) without typing character by character.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "id": .object(["type": .string("string")]),
+                    "value": .object(["type": .string("string")])
+                ]),
+                "required": .array([.string("id"), .string("value")])
+            ])
+        )
+        let menuShortcut: Tool = .custom(
+            name: "menu_shortcut",
+            description: "Look up the keyboard shortcut for a menu item in the frontmost app by title substring (e.g. 'New Tab', 'Save', 'Find'), then send that keystroke. Faster than navigating the menu bar with the mouse.",
+            inputSchema: .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "title": .object(["type": .string("string"), "description": .string("Menu item title substring, case insensitive.")])
+                ]),
+                "required": .array([.string("title")])
+            ])
+        )
+        let computer: Tool = .computer(
+            displayWidth: Int(displaySize.width),
+            displayHeight: Int(displaySize.height),
+            displayNumber: 1,
+            cache: true
+        )
+
+        return [openURL, applescript, runShortcut, axQuery, axPress, axSetValue, menuShortcut, computer]
+    }
+
+    // MARK: - System prompt (split for caching)
+
+    private func buildSystemBlocks(settings: AgentSettings, contextSummary: String) -> [SystemBlock] {
+        let staticText = """
+        You are an on-screen computer-use agent on macOS. You control the user's machine via several tools.
+
+        ALWAYS prefer tools in this order, falling back only when the prior tool cannot do the task:
+          1. open_url — for any URL (https, mailto, sms, spotify, shortcuts, raycast, things). Zero clicks. Use this FIRST whenever the goal is "go to / open <thing>".
+          2. applescript — for Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. One call, no UI traversal.
+          3. run_shortcut — for user-installed macOS Shortcuts.
+          4. ax_query + ax_press / ax_set_value — for buttons, links, and text fields you can name. Faster and more reliable than clicking pixels.
+          5. menu_shortcut — for any menu item; sends the registered keyboard shortcut instead of clicking the menu.
+          6. computer — vision + click/type/scroll. ONLY when nothing above applies. Do NOT screenshot first if a fast path works.
+
+        Plan-then-act: on turn 1, output one short sentence stating the goal and your first concrete action, THEN your spoken affirmation, THEN call the tool. Keep the spoken affirmation under 15 words — it will be read aloud (e.g. "Opening Anthropic's site now.").
+
+        Screenshots are expensive. DO NOT take a screenshot before a tool call unless prior tool results are ambiguous AND no fast path applies. The activation context provided separately already tells you the frontmost app and recent on-screen text.
+
+        Typing: for entering text > 4 chars into a normal field, the computer.type action pastes via the pasteboard automatically — no extra steps needed. For text fields you can address via AX, prefer ax_set_value.
+
+        Refuse irreversible destructive actions (delete files, format drives, send payments, send messages to people you cannot confirm) without explicit user confirmation. If a fast-path tool would cause one of these, decline and ask first.
+        """
+
+        var blocks: [SystemBlock] = [SystemBlock(text: staticText, cache: true)]
+
+        var dynamicParts: [String] = []
+        if !contextSummary.isEmpty {
+            dynamicParts.append("""
+            Local activation context (recent on-screen state — treat as a hint, not exact coordinates; refresh via screenshot only if it looks stale):
+            \(contextSummary)
+            """)
+        }
+        if !settings.preferences.isEmpty {
+            dynamicParts.append("User preferences:\n\(settings.preferences)")
+        }
+        if !settings.systemPrompt.isEmpty {
+            dynamicParts.append(settings.systemPrompt)
+        }
+        dynamicParts.append("Reasoning effort: \(settings.reasoningEffort.rawValue).")
+
+        if !dynamicParts.isEmpty {
+            blocks.append(SystemBlock(text: dynamicParts.joined(separator: "\n\n"), cache: false))
+        }
+        return blocks
+    }
+
+    // MARK: - Cache marker management
+
+    private func applyRollingCacheMarker(to messages: inout [Message]) {
+        var latestIdx: Int?
+        for i in stride(from: messages.count - 1, through: 0, by: -1) {
+            if messages[i].role == "user",
+               messages[i].content.contains(where: { if case .toolResult = $0 { return true } else { return false } }) {
+                latestIdx = i
+                break
+            }
+        }
+        guard let latestIdx else { return }
+
+        for i in messages.indices {
+            guard messages[i].role == "user" else { continue }
+            let shouldMark = (i == latestIdx)
+            messages[i].content = messages[i].content.map { block in
+                if case .toolResult = block { return block.withCache(shouldMark) }
+                return block
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func shouldFallback(_ err: AnthropicClient.Error) -> Bool {
         guard let status = err.status else { return false }
-        // 400 on a Haiku request with computer-use tool = model doesn't support it.
-        // 404 also possible if the model ID is unknown to the API.
         return status == 400 || status == 404
     }
 
-    private func actionLabel(_ input: JSON) -> String {
-        input.objectValue?["action"]?.stringValue ?? "tool"
+    private func actionLabel(_ use: (id: String, name: String, input: JSON)) -> String {
+        if use.name == "computer" {
+            return use.input.objectValue?["action"]?.stringValue ?? "tool"
+        }
+        return use.name
     }
 
     private func milliseconds(from start: Date, to end: Date) -> Int {
         max(0, Int(end.timeIntervalSince(start) * 1000))
-    }
-
-    private func buildSystemPrompt(settings: AgentSettings, contextSummary: String) -> String {
-        var parts: [String] = []
-        parts.append("""
-        You are an on-screen computer-use agent on macOS. You control the user's machine via the computer tool. \
-        You can click, type, scroll, take screenshots, and press keys. Always take a screenshot before acting if you're unsure of the screen state. \
-        Refuse to perform irreversible destructive actions (deleting files, formatting drives, sending payments) without explicit confirmation. \
-        Before executing any tool calls, always begin your response with a brief natural one-sentence spoken acknowledgment of what you're about to do — e.g. "Opening Chrome now." or "Sure, I'll click that." Keep it under 15 words. This sentence will be read aloud to the user.
-        """)
-
-        if !contextSummary.isEmpty {
-            parts.append("""
-            Local activation context:
-            \(contextSummary)
-
-            Use this context to reduce UI exploration and choose a better first action. Treat it as recent learned context, not exact coordinates. If the current screen is ambiguous or the context looks stale, take a screenshot before acting.
-            """)
-        }
-
-        if !settings.preferences.isEmpty {
-            parts.append("User preferences:\n\(settings.preferences)")
-        }
-
-        if !settings.systemPrompt.isEmpty {
-            parts.append(settings.systemPrompt)
-        }
-
-        parts.append("Reasoning effort: \(settings.reasoningEffort.rawValue).")
-
-        return parts.joined(separator: "\n\n")
     }
 
     private func primaryDisplayPixelSize() -> CGSize {

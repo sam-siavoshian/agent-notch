@@ -2,12 +2,16 @@
 //  ToolDispatcher.swift
 //  Agent in the Notch
 //
-//  Maps Anthropic computer-use tool calls to CGEvent / ScreenCapture actions.
+//  Maps Anthropic computer-use tool calls + our custom fast-path tools to
+//  CGEvent / AXUIElement / NSWorkspace / AppleScript actions.
 //
-//  Coordinate system: Anthropic computer-use uses top-left origin in display
-//  pixels. AppKit also uses top-left in CGEvent calls (CGWarpMouseCursor,
-//  CGEventCreateMouseEvent), so coordinates map 1:1 for the primary display.
-//  Multi-monitor / scaled displays are deliberately out of scope for v1.
+//  Tool order taught to the model (system prompt enforces preference):
+//    open_url, applescript, run_shortcut, ax_query+ax_press, menu_shortcut,
+//    then computer (vision+click) as the universal fallback.
+//
+//  Coordinate system for `computer`: Anthropic uses top-left pixels.
+//  CGWarpMouseCursor / CGEventCreateMouseEvent also top-left for primary
+//  display, so 1:1 on a single monitor.
 //
 //  Reference: https://docs.anthropic.com/en/docs/agents-and-tools/computer-use
 //
@@ -35,108 +39,226 @@ public actor ToolDispatcher {
     }
 
     public func dispatch(toolUseId: String, name: String, input: JSON) async -> DispatchedToolResult {
-        guard name == "computer" else {
-            log.error("dispatcher.unsupported_tool tool=\(name)")
-            return errorResult(toolUseId, "Unsupported tool: \(name)")
-        }
-        guard let action = input.objectValue?["action"]?.stringValue else {
-            log.error("dispatcher.missing_action input=\(input)")
-            return errorResult(toolUseId, "Missing 'action' in tool input")
-        }
-
-        log.info("dispatcher.action action=\(action)")
+        log.info("dispatcher.dispatch tool=\(name)")
         do {
-            switch action {
-            case "screenshot":
-                let snap = try await capture.snapshot()
-                let b64 = snap.jpegData.base64EncodedString()
-                return DispatchedToolResult(
-                    toolUseId: toolUseId,
-                    content: [.image(mediaType: "image/jpeg", base64: b64)],
-                    isError: false
-                )
-
-            case "left_click":
-                let p = try requireCoordinate(input)
-                postMouseClick(at: p, button: .left)
-                return ok(toolUseId, "clicked at \(Int(p.x)),\(Int(p.y))")
-
-            case "right_click":
-                let p = try requireCoordinate(input)
-                postMouseClick(at: p, button: .right)
-                return ok(toolUseId, "right-clicked at \(Int(p.x)),\(Int(p.y))")
-
-            case "middle_click":
-                let p = try requireCoordinate(input)
-                postMouseClick(at: p, button: .center)
-                return ok(toolUseId, "middle-clicked at \(Int(p.x)),\(Int(p.y))")
-
-            case "double_click":
-                let p = try requireCoordinate(input)
-                postMouseClick(at: p, button: .left, clickCount: 2)
-                return ok(toolUseId, "double-clicked at \(Int(p.x)),\(Int(p.y))")
-
-            case "left_click_drag":
-                let from = NSEvent.mouseLocationFlipped(displayHeight: displaySize.height)
-                let to = try requireCoordinate(input)
-                postDrag(from: from, to: to)
-                return ok(toolUseId, "dragged to \(Int(to.x)),\(Int(to.y))")
-
-            case "mouse_move":
-                let p = try requireCoordinate(input)
-                CGWarpMouseCursorPosition(p)
-                CGAssociateMouseAndMouseCursorPosition(1)
-                return ok(toolUseId, "moved to \(Int(p.x)),\(Int(p.y))")
-
-            case "cursor_position":
-                let loc = NSEvent.mouseLocationFlipped(displayHeight: displaySize.height)
-                return ok(toolUseId, "X=\(Int(loc.x)) Y=\(Int(loc.y))")
-
-            case "type":
-                guard let text = input.objectValue?["text"]?.stringValue else {
-                    throw DispatchError("Missing 'text' for type action")
-                }
-                postType(text)
-                return ok(toolUseId, "typed \(text.count) chars")
-
-            case "key":
-                guard let combo = input.objectValue?["text"]?.stringValue else {
-                    throw DispatchError("Missing 'text' for key action")
-                }
-                try postKeyCombo(combo)
-                return ok(toolUseId, "pressed \(combo)")
-
-            case "scroll":
-                let p = try requireCoordinate(input)
-                let dy = input.objectValue?["scroll_amount"]?.intValue ?? 3
-                let direction = input.objectValue?["scroll_direction"]?.stringValue ?? "down"
-                postScroll(at: p, direction: direction, amount: dy)
-                return ok(toolUseId, "scrolled \(direction) by \(dy)")
-
-            case "wait":
-                let ms = input.objectValue?["duration"]?.intValue ?? 250
-                try await Task.sleep(for: .milliseconds(ms))
-                return ok(toolUseId, "waited \(ms)ms")
-
-            case "hold_key":
-                guard let combo = input.objectValue?["text"]?.stringValue else {
-                    throw DispatchError("Missing 'text' for hold_key action")
-                }
-                let dur = input.objectValue?["duration"]?.intValue ?? 100
-                try await postHoldKey(combo, durationMs: dur)
-                return ok(toolUseId, "held \(combo) for \(dur)ms")
-
+            switch name {
+            case "computer":
+                return try await dispatchComputer(toolUseId: toolUseId, input: input)
+            case "open_url":
+                return try await dispatchOpenURL(toolUseId: toolUseId, input: input)
+            case "applescript":
+                return try await dispatchAppleScript(toolUseId: toolUseId, input: input)
+            case "run_shortcut":
+                return try await dispatchShortcut(toolUseId: toolUseId, input: input)
+            case "ax_query":
+                return try await dispatchAXQuery(toolUseId: toolUseId, input: input)
+            case "ax_press":
+                return try await dispatchAXPress(toolUseId: toolUseId, input: input)
+            case "ax_set_value":
+                return try await dispatchAXSetValue(toolUseId: toolUseId, input: input)
+            case "menu_shortcut":
+                return try await dispatchMenuShortcut(toolUseId: toolUseId, input: input)
             default:
-                log.error("dispatcher.unsupported_action action=\(action)")
-                return errorResult(toolUseId, "Unsupported action: \(action)")
+                log.error("dispatcher.unsupported_tool tool=\(name)")
+                return errorResult(toolUseId, "Unsupported tool: \(name)")
             }
         } catch let e as DispatchError {
-            log.error("dispatcher.dispatch_error action=\(action) message=\(e.message)")
+            log.error("dispatcher.dispatch_error tool=\(name) message=\(e.message)")
             return errorResult(toolUseId, e.message)
         } catch {
-            log.error("dispatcher.unexpected_error action=\(action) error=\(error)")
+            log.error("dispatcher.unexpected_error tool=\(name) error=\(error)")
             return errorResult(toolUseId, "Dispatch failed: \(error)")
         }
+    }
+
+    // MARK: - computer tool
+
+    private func dispatchComputer(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let action = input.objectValue?["action"]?.stringValue else {
+            throw DispatchError("Missing 'action' in computer tool input")
+        }
+        switch action {
+        case "screenshot":
+            let snap = try await capture.snapshot()
+            let b64 = snap.jpegData.base64EncodedString()
+            return DispatchedToolResult(
+                toolUseId: toolUseId,
+                content: [.image(mediaType: "image/jpeg", base64: b64, cache: false)],
+                isError: false
+            )
+
+        case "left_click":
+            let p = try requireCoordinate(input)
+            postMouseClick(at: p, button: .left)
+            return ok(toolUseId, "clicked at \(Int(p.x)),\(Int(p.y))")
+
+        case "right_click":
+            let p = try requireCoordinate(input)
+            postMouseClick(at: p, button: .right)
+            return ok(toolUseId, "right-clicked at \(Int(p.x)),\(Int(p.y))")
+
+        case "middle_click":
+            let p = try requireCoordinate(input)
+            postMouseClick(at: p, button: .center)
+            return ok(toolUseId, "middle-clicked at \(Int(p.x)),\(Int(p.y))")
+
+        case "double_click":
+            let p = try requireCoordinate(input)
+            postMouseClick(at: p, button: .left, clickCount: 2)
+            return ok(toolUseId, "double-clicked at \(Int(p.x)),\(Int(p.y))")
+
+        case "left_click_drag":
+            let from = NSEvent.mouseLocationFlipped(displayHeight: displaySize.height)
+            let to = try requireCoordinate(input)
+            postDrag(from: from, to: to)
+            return ok(toolUseId, "dragged to \(Int(to.x)),\(Int(to.y))")
+
+        case "mouse_move":
+            let p = try requireCoordinate(input)
+            CGWarpMouseCursorPosition(p)
+            CGAssociateMouseAndMouseCursorPosition(1)
+            return ok(toolUseId, "moved to \(Int(p.x)),\(Int(p.y))")
+
+        case "cursor_position":
+            let loc = NSEvent.mouseLocationFlipped(displayHeight: displaySize.height)
+            return ok(toolUseId, "X=\(Int(loc.x)) Y=\(Int(loc.y))")
+
+        case "type":
+            guard let text = input.objectValue?["text"]?.stringValue else {
+                throw DispatchError("Missing 'text' for type action")
+            }
+            let viaPaste = input.objectValue?["via_paste"]?.boolValue
+            await postType(text, viaPaste: viaPaste)
+            return ok(toolUseId, "typed \(text.count) chars")
+
+        case "key":
+            guard let combo = input.objectValue?["text"]?.stringValue else {
+                throw DispatchError("Missing 'text' for key action")
+            }
+            try postKeyCombo(combo)
+            return ok(toolUseId, "pressed \(combo)")
+
+        case "scroll":
+            let p = try requireCoordinate(input)
+            let dy = input.objectValue?["scroll_amount"]?.intValue ?? 3
+            let direction = input.objectValue?["scroll_direction"]?.stringValue ?? "down"
+            postScroll(at: p, direction: direction, amount: dy)
+            return ok(toolUseId, "scrolled \(direction) by \(dy)")
+
+        case "wait":
+            let ms = input.objectValue?["duration"]?.intValue ?? 250
+            try await Task.sleep(for: .milliseconds(ms))
+            return ok(toolUseId, "waited \(ms)ms")
+
+        case "hold_key":
+            guard let combo = input.objectValue?["text"]?.stringValue else {
+                throw DispatchError("Missing 'text' for hold_key action")
+            }
+            let dur = input.objectValue?["duration"]?.intValue ?? 100
+            try await postHoldKey(combo, durationMs: dur)
+            return ok(toolUseId, "held \(combo) for \(dur)ms")
+
+        default:
+            throw DispatchError("Unsupported computer action: \(action)")
+        }
+    }
+
+    // MARK: - Fast-path tools
+
+    private func dispatchOpenURL(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let urlString = input.objectValue?["url"]?.stringValue,
+              let url = URL(string: urlString) else {
+            throw DispatchError("Missing or invalid 'url'")
+        }
+        let opened = NSWorkspace.shared.open(url)
+        if !opened { throw DispatchError("NSWorkspace.open returned false for \(urlString)") }
+        return ok(toolUseId, "opened \(urlString)")
+    }
+
+    private func dispatchAppleScript(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let script = input.objectValue?["script"]?.stringValue, !script.isEmpty else {
+            throw DispatchError("Missing 'script'")
+        }
+        let result = try await AppleScriptBridge.run(script)
+        return ok(toolUseId, result.isEmpty ? "applescript ok" : result)
+    }
+
+    private func dispatchShortcut(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let shortcutName = input.objectValue?["name"]?.stringValue, !shortcutName.isEmpty else {
+            throw DispatchError("Missing 'name'")
+        }
+        let inputText = input.objectValue?["input"]?.stringValue
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+        var args = ["run", shortcutName]
+        if inputText != nil { args.append(contentsOf: ["-i", "-"]) }
+        process.arguments = args
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        if let inputText {
+            let stdin = Pipe()
+            process.standardInput = stdin
+            try process.run()
+            stdin.fileHandleForWriting.write(inputText.data(using: .utf8) ?? Data())
+            try? stdin.fileHandleForWriting.close()
+        } else {
+            try process.run()
+        }
+        process.waitUntilExit()
+        let out = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if process.terminationStatus != 0 {
+            let err = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw DispatchError("shortcuts run failed: \(err.isEmpty ? "exit \(process.terminationStatus)" : err)")
+        }
+        return ok(toolUseId, out.isEmpty ? "shortcut '\(shortcutName)' ok" : out)
+    }
+
+    private func dispatchAXQuery(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        let role = input.objectValue?["role"]?.stringValue
+        let label = input.objectValue?["label_contains"]?.stringValue
+        let value = input.objectValue?["value_contains"]?.stringValue
+        let limit = input.objectValue?["limit"]?.intValue ?? 8
+        let matches = try await AXFastPath.shared.query(
+            role: role,
+            labelContains: label,
+            valueContains: value,
+            limit: limit
+        )
+        let json = matches.map { m -> String in
+            let frame = m.frame.map { "[\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width))x\(Int($0.height))]" } ?? ""
+            return "id=\(m.id) role=\(m.role ?? "?") title=\(m.title ?? "") desc=\(m.description ?? "") enabled=\(m.enabled) \(frame)"
+        }.joined(separator: "\n")
+        return ok(toolUseId, matches.isEmpty ? "no matches" : json)
+    }
+
+    private func dispatchAXPress(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let id = input.objectValue?["id"]?.stringValue else {
+            throw DispatchError("Missing 'id'")
+        }
+        try await AXFastPath.shared.press(id: id)
+        return ok(toolUseId, "ax_pressed \(id)")
+    }
+
+    private func dispatchAXSetValue(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let id = input.objectValue?["id"]?.stringValue,
+              let value = input.objectValue?["value"]?.stringValue else {
+            throw DispatchError("Missing 'id' or 'value'")
+        }
+        try await AXFastPath.shared.setValue(id: id, value: value)
+        return ok(toolUseId, "ax_set_value \(id)")
+    }
+
+    private func dispatchMenuShortcut(toolUseId: String, input: JSON) async throws -> DispatchedToolResult {
+        guard let title = input.objectValue?["title"]?.stringValue else {
+            throw DispatchError("Missing 'title'")
+        }
+        guard let combo = try await AXFastPath.shared.menuBarShortcut(forTitle: title) else {
+            throw DispatchError("No menu item matched '\(title)' or no shortcut registered")
+        }
+        postKeyCode(combo.keyCode, flags: combo.flags)
+        return ok(toolUseId, "menu shortcut '\(title)' sent")
     }
 
     // MARK: - Helpers
@@ -212,14 +334,48 @@ public actor ToolDispatcher {
         }
     }
 
-    private func postType(_ text: String) {
-        for scalar in text.unicodeScalars {
-            postUnicode(scalar)
+    /// Type text. For strings > 4 chars with only ASCII OR `viaPaste == true`,
+    /// use the pasteboard (one Cmd+V event total) instead of posting one
+    /// keyDown/keyUp pair per character. Pasteboard contents are preserved.
+    private func postType(_ text: String, viaPaste: Bool? = nil) async {
+        let shouldPaste: Bool = {
+            if let viaPaste { return viaPaste }
+            if text.count <= 4 { return false }
+            return text.allSatisfy { $0.isASCII }
+        }()
+        if shouldPaste {
+            await pasteText(text)
+        } else {
+            for scalar in text.unicodeScalars {
+                postUnicode(scalar)
+            }
+        }
+    }
+
+    /// Save pasteboard, write `text`, post Cmd+V, restore. Restore is delayed
+    /// so the receiving app has time to read our string before it's clobbered.
+    private func pasteText(_ text: String) async {
+        let pb = NSPasteboard.general
+        let snapshot = pb.pasteboardItems?.compactMap { item -> NSPasteboardItem? in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        }
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        do { try postKeyCombo("cmd+v") } catch { NSLog("[ToolDispatcher] paste cmd+v failed: \(error)") }
+        try? await Task.sleep(for: .milliseconds(200))
+        if let snapshot {
+            pb.clearContents()
+            pb.writeObjects(snapshot)
         }
     }
 
     private func postUnicode(_ scalar: Unicode.Scalar) {
-        // Non-BMP scalars (emoji, some CJK) require a UTF-16 surrogate pair.
         let chars: [UniChar]
         if scalar.value <= 0xFFFF {
             chars = [UniChar(scalar.value)]
@@ -262,6 +418,10 @@ public actor ToolDispatcher {
         guard let kc = keyCode else {
             throw DispatchError("No key code in combo: \(combo)")
         }
+        postKeyCode(kc, flags: flags)
+    }
+
+    private func postKeyCode(_ kc: CGKeyCode, flags: CGEventFlags) {
         if let down = CGEvent(keyboardEventSource: nil, virtualKey: kc, keyDown: true) {
             down.flags = flags
             down.post(tap: .cghidEventTap)
@@ -302,7 +462,6 @@ public actor ToolDispatcher {
     }
 
     private func keyCodeForName(_ name: String) -> CGKeyCode? {
-        // Subset that's actually useful for computer-use. Extend as needed.
         switch name {
         case "return", "enter":   return CGKeyCode(kVK_Return)
         case "tab":               return CGKeyCode(kVK_Tab)

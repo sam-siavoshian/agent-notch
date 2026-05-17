@@ -169,7 +169,7 @@ public final class ContextCoordinator: RecentActivityContext {
 
         do {
             let snapshot = try await capture.snapshot(quality: 0.35)
-            let recognizedText = await ocrService.recognizeText(in: snapshot.pngData)
+            let recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
             let previousSnapshot = await store.recentSnapshots().last
             let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
@@ -186,8 +186,8 @@ public final class ContextCoordinator: RecentActivityContext {
             await memoryStore.record(contextSnapshot)
             scheduleGeminiObservation(
                 for: contextSnapshot,
-                imageData: snapshot.pngData,
-                mimeType: "image/png",
+                imageData: snapshot.jpegData,
+                mimeType: "image/jpeg",
                 previousSnapshot: previousSnapshot
             )
             log.info("captured \(trigger.rawValue) for \(metadata.appName) with \(recognizedText.count) OCR items")
