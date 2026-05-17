@@ -111,9 +111,7 @@ enum ContextTextSignalFilter {
 
         let lower = text.lowercased()
         if menuOrStatusText.contains(lower) { return nil }
-        if lower.hasPrefix("sat ") || lower.hasPrefix("sun ") || lower.hasPrefix("mon ") ||
-            lower.hasPrefix("tue ") || lower.hasPrefix("wed ") || lower.hasPrefix("thu ") ||
-            lower.hasPrefix("fri ") {
+        if dayPrefixes.contains(where: { lower.hasPrefix($0) }) {
             return nil
         }
         if looksLikeClockText(lower) || lower.contains("cpu") {
@@ -184,6 +182,10 @@ enum ContextTextSignalFilter {
         guard lower.contains(":") else { return false }
         return lower.hasSuffix("am") || lower.hasSuffix("pm") || lower.contains(" am") || lower.contains(" pm")
     }
+
+    private static let dayPrefixes: [String] = [
+        "sat ", "sun ", "mon ", "tue ", "wed ", "thu ", "fri "
+    ]
 
     private static let menuOrStatusText: Set<String> = [
         "file",
