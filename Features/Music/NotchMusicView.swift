@@ -2,25 +2,23 @@
 //  NotchMusicView.swift
 //  Agent in the Notch
 //
-//  Music tab. Three states:
-//    1. Disconnected — Spotify mark + Connect button. No assumption that
-//       Spotify is installed. Tapping Connect persists the choice + starts
-//       listening for the system playback notification.
-//    2. Connected, Spotify not running — Spotify mark + "Open Spotify" button.
-//    3. Connected, Spotify playing/paused — full now-playing card with
-//       artwork, title, artist, prev/play-pause/next, scrub bar.
+//  Music tab. Three states: disconnected / connected-but-idle / playing.
 //
 
 import AppKit
 import SwiftUI
+
+/// Spotify brand green (#1DB954). Trademark of Spotify AB; used per
+/// third-party brand guidelines to indicate integration.
+private let spotifyGreen = Color(red: 0.114, green: 0.725, blue: 0.329)
 
 struct NotchMusicView: View {
     @ObservedObject private var controller = SpotifyController.shared
     @StateObject private var lyrics = LyricsStore()
 
     /// Wall-clock anchor for predicted elapsed time between Spotify
-    /// notification refreshes. Source-of-truth `currentTime` only updates
-    /// on play/pause/seek/track-change — we predict in-between.
+    /// notification refreshes (source-of-truth `currentTime` only updates on
+    /// play/pause/seek/track-change).
     @State private var anchorWall: Date = Date()
     @State private var anchorElapsed: Double = 0
 
@@ -53,14 +51,13 @@ struct NotchMusicView: View {
         .onChange(of: controller.state.isPlaying) { _, nowPlaying in
             anchorWall = Date()
             anchorElapsed = controller.state.currentTime
-            // Spotify only broadcasts on play/pause/track-change. When the user
-            // hits play after a long pause the cached currentTime may be stale,
-            // so kick a refresh to re-anchor against the real player position.
+            // Re-anchor against real player position; cached time may be stale
+            // after a long pause (no notification fires until next track).
             if nowPlaying { Task { await controller.refreshNow() } }
         }
         .onChange(of: controller.state.duration) { _, _ in
-            // Duration arrives after title/artist sometimes — once we have it,
-            // re-fetch with /api/get for an exact match.
+            // Duration sometimes arrives after title/artist; re-fetch /api/get
+            // for an exact match once we have it.
             if lyrics.lines.isEmpty { refetchLyrics() }
         }
         .onAppear {
@@ -70,15 +67,10 @@ struct NotchMusicView: View {
         }
     }
 
-    /// Kick off a lyrics fetch from current controller state. Idempotent —
-    /// LyricsStore short-circuits when the track key hasn't changed.
     private func refetchLyrics() {
-        let t = controller.state.title
-        let a = controller.state.artist
-        let al = controller.state.album
-        let d = controller.state.duration
-        if !t.isEmpty, !a.isEmpty {
-            lyrics.fetch(title: t, artist: a, album: al, duration: d)
+        let s = controller.state
+        if !s.title.isEmpty, !s.artist.isEmpty {
+            lyrics.fetch(title: s.title, artist: s.artist, album: s.album, duration: s.duration)
         } else {
             lyrics.reset()
         }
@@ -87,8 +79,7 @@ struct NotchMusicView: View {
     /// Predicted elapsed seconds — base + wall-clock delta when playing.
     private func predictedElapsed() -> Double {
         guard controller.state.isPlaying else { return anchorElapsed }
-        let delta = Date().timeIntervalSince(anchorWall)
-        let raw = anchorElapsed + delta
+        let raw = anchorElapsed + Date().timeIntervalSince(anchorWall)
         let dur = controller.state.duration
         return dur > 0 ? min(max(raw, 0), dur) : max(raw, 0)
     }
@@ -160,16 +151,16 @@ struct NotchMusicView: View {
             }
 
             HStack(spacing: 8) {
-                controlButton(system: "backward.fill") {
+                TransportButton(system: "backward.fill") {
                     Task { await controller.previousTrack() }
                 }
-                controlButton(
+                TransportButton(
                     system: controller.state.isPlaying ? "pause.fill" : "play.fill",
                     big: true
                 ) {
                     Task { await controller.togglePlay() }
                 }
-                controlButton(system: "forward.fill") {
+                TransportButton(system: "forward.fill") {
                     Task { await controller.nextTrack() }
                 }
                 Spacer(minLength: 4)
@@ -180,10 +171,8 @@ struct NotchMusicView: View {
         }
     }
 
-    /// Live lyrics — always renders when track loaded; LyricsView handles
-    /// loading / empty / no-match states internally so user sees the panel
-    /// even when LRClib returns no match.
-    /// `TimelineView` re-runs every ~250ms to drive predicted elapsed.
+    /// LyricsView handles its own loading / empty / no-match states.
+    /// TimelineView re-runs ~4x/s to drive predicted elapsed.
     @ViewBuilder
     private var lyricsPanel: some View {
         if controller.state.hasTrack {
@@ -200,8 +189,10 @@ struct NotchMusicView: View {
     }
 
     private var trackCard: some View {
-        let showAlbum = !controller.state.album.isEmpty
-            && controller.state.album.caseInsensitiveCompare(controller.state.title) != .orderedSame
+        let s = controller.state
+        let showAlbum = !s.album.isEmpty
+            && s.album.caseInsensitiveCompare(s.title) != .orderedSame
+        let cardShape = RoundedRectangle(cornerRadius: 13, style: .continuous)
 
         return HStack(spacing: 10) {
             artwork
@@ -209,19 +200,19 @@ struct NotchMusicView: View {
                 .shadow(color: spotifyGreen.opacity(0.22), radius: 6, y: 2)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(controller.state.title.isEmpty ? "—" : controller.state.title)
+                Text(s.title.isEmpty ? "—" : s.title)
                     .font(.system(size: 13, weight: .semibold))
                     .tracking(-0.1)
                     .foregroundStyle(SoftPill.Text.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(controller.state.artist)
+                Text(s.artist)
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(SoftPill.Text.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if showAlbum {
-                    Text(controller.state.album)
+                    Text(s.album)
                         .font(.system(size: 9.5))
                         .foregroundStyle(SoftPill.Text.muted)
                         .lineLimit(1)
@@ -251,8 +242,7 @@ struct NotchMusicView: View {
                     glow: spotifyGreen,
                     cornerRadius: 13
                 )
-                // top inner highlight — sells the dimension
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                cardShape
                     .stroke(
                         LinearGradient(
                             colors: [Color.white.opacity(0.10), .clear],
@@ -264,40 +254,34 @@ struct NotchMusicView: View {
                     .allowsHitTesting(false)
             }
         )
-        .overlay(
-            // resting green ambient — faint, only on the card edge
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .stroke(spotifyGreen.opacity(0.08), lineWidth: 0.5)
-        )
+        .overlay(cardShape.stroke(spotifyGreen.opacity(0.08), lineWidth: 0.5))
     }
 
     // MARK: - Pieces
 
     private var artwork: some View {
-        Group {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        return Group {
             if let data = controller.state.artwork, let img = NSImage(data: data) {
                 Image(nsImage: img).resizable().interpolation(.medium).scaledToFill()
             } else {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                shape
                     .fill(SoftPill.Surface.inset)
                     .overlay(Image(systemName: "music.note")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(SoftPill.Text.muted))
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
-        )
+        .clipShape(shape)
+        .overlay(shape.stroke(Color.white.opacity(0.10), lineWidth: 0.5))
     }
 
     private var openSpotifyButton: some View {
-        OpenSpotifyPill(action: { controller.openSpotify() })
+        OpenSpotifyPill(action: controller.openSpotify)
     }
 
     private var disconnectButton: some View {
-        Button { controller.disconnect() } label: {
+        Button(action: controller.disconnect) {
             Text("Disconnect")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(SoftPill.Text.muted)
@@ -310,23 +294,13 @@ struct NotchMusicView: View {
         }
         .buttonStyle(.plain)
     }
-
-    private func controlButton(system: String, big: Bool = false,
-                                action: @escaping () -> Void) -> some View {
-        TransportButton(system: system, big: big,
-                        spotifyGreen: spotifyGreen, action: action)
-    }
-
-    private static let _spotifyGreen = Color(red: 0.114, green: 0.725, blue: 0.329) // #1DB954
-    private var spotifyGreen: Color { Self._spotifyGreen }
 }
 
 // MARK: - Transport button (prev / play / next)
 
 private struct TransportButton: View {
     let system: String
-    let big: Bool
-    let spotifyGreen: Color
+    var big: Bool = false
     let action: () -> Void
 
     @State private var hovered = false
@@ -384,7 +358,7 @@ private struct TransportButton: View {
             Circle().fill(
                 RadialGradient(
                     colors: [
-                        spotifyGreen.opacity(1.0),
+                        spotifyGreen,
                         Color(red: 0x16/255, green: 0xA3/255, blue: 0x4A/255)
                     ],
                     center: .topLeading, startRadius: 2, endRadius: 36
@@ -402,8 +376,6 @@ private struct OpenSpotifyPill: View {
     let action: () -> Void
     @State private var hovered = false
     @State private var pressed = false
-    private static let _green = Color(red: 0.114, green: 0.725, blue: 0.329)
-    private var green: Color { Self._green }
 
     var body: some View {
         Button(action: action) {
@@ -420,9 +392,9 @@ private struct OpenSpotifyPill: View {
                     .fill(hovered ? SoftPill.Surface.hover : SoftPill.Surface.inset)
                     .overlay(
                         Capsule(style: .continuous)
-                            .stroke(green.opacity(hovered ? 0.35 : 0.0), lineWidth: 0.8)
+                            .stroke(spotifyGreen.opacity(hovered ? 0.35 : 0.0), lineWidth: 0.8)
                     )
-                    .shadow(color: green.opacity(hovered ? 0.35 : 0.0),
+                    .shadow(color: spotifyGreen.opacity(hovered ? 0.35 : 0.0),
                             radius: hovered ? 8 : 0, y: hovered ? 2 : 0)
             )
             .scaleEffect(pressed ? 0.96 : (hovered ? 1.02 : 1.0))
@@ -441,17 +413,11 @@ private struct OpenSpotifyPill: View {
 
 // MARK: - Spotify brand mark
 //
-// Renders the official Spotify glyph from an inline SVG (single-path,
-// even-odd fill — the sound-wave cutouts are baked into the path). Loaded
-// via NSImage(data:) which natively decodes SVG on macOS 13+. The image
-// is templated so .foregroundStyle controls the color.
-//
-// Trademark of Spotify AB. Used per Spotify's third-party brand guidelines
-// to indicate integration with the Spotify desktop app.
+// Inline SVG (single-path, even-odd fill) decoded once via NSImage(data:).
+// Templated so .foregroundStyle controls the color.
 
 struct SpotifyMark: View {
     var size: CGFloat = 24
-    private let green = Color(red: 0.114, green: 0.725, blue: 0.329)
 
     var body: some View {
         Image(nsImage: Self.glyph)
@@ -460,10 +426,9 @@ struct SpotifyMark: View {
             .interpolation(.high)
             .scaledToFit()
             .frame(width: size, height: size)
-            .foregroundStyle(green)
+            .foregroundStyle(spotifyGreen)
     }
 
-    // Decode once, share across all instances.
     private static let glyph: NSImage = {
         let svg = """
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
@@ -487,10 +452,7 @@ private struct ScrubBar: View {
     @State private var dragging: Double?
     @State private var hovered = false
 
-    private static let _green       = Color(red: 0.114, green: 0.725, blue: 0.329)
-    private static let _greenBright = Color(red: 0.30,  green: 0.92,  blue: 0.50)
-    private var green: Color       { Self._green }
-    private var greenBright: Color { Self._greenBright }
+    private let greenBright = Color(red: 0.30, green: 0.92, blue: 0.50)
 
     private var displayed: Double { dragging ?? current }
     private var ratio: Double {
@@ -517,19 +479,19 @@ private struct ScrubBar: View {
                     Capsule()
                         .fill(
                             LinearGradient(
-                                colors: [greenBright, green],
+                                colors: [greenBright, spotifyGreen],
                                 startPoint: .leading, endPoint: .trailing
                             )
                         )
                         .frame(width: filled, height: 4)
-                        .shadow(color: green.opacity(isInteracting ? 0.7 : 0.45),
+                        .shadow(color: spotifyGreen.opacity(isInteracting ? 0.7 : 0.45),
                                 radius: isInteracting ? 6 : 3, y: 0)
 
                     // Thumb — appears on hover/drag
                     Circle()
                         .fill(Color.white)
                         .frame(width: 9, height: 9)
-                        .overlay(Circle().stroke(green.opacity(0.6), lineWidth: 0.5))
+                        .overlay(Circle().stroke(spotifyGreen.opacity(0.6), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                         .offset(x: filled - 4.5)
                         .opacity(isInteracting ? 1 : 0)

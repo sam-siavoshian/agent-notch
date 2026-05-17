@@ -13,10 +13,6 @@ struct LyricLine: Equatable, Identifiable {
     let id = UUID()
     let time: Double   // seconds from track start
     let text: String
-
-    static func == (lhs: LyricLine, rhs: LyricLine) -> Bool {
-        lhs.id == rhs.id && lhs.time == rhs.time && lhs.text == rhs.text
-    }
 }
 
 @MainActor
@@ -24,7 +20,6 @@ final class LyricsStore: ObservableObject {
     @Published private(set) var lines: [LyricLine] = []
     @Published private(set) var plain: String = ""
     @Published private(set) var isLoading: Bool = false
-    @Published private(set) var lastError: String? = nil
 
     /// Track key currently loaded. Skip re-fetch if unchanged.
     private var loadedKey: String? = nil
@@ -39,8 +34,7 @@ final class LyricsStore: ObservableObject {
     /// Fetch lyrics for the given track. No-op if the key matches the
     /// currently-loaded set. Cancels any in-flight fetch on key change.
     /// Pass `duration` (seconds) when available so we can hit LRClib's exact
-    /// `/api/get` endpoint, which returns the right version on the first try
-    /// (`/api/search` returns fuzzy matches, often the wrong recording).
+    /// `/api/get` endpoint (`/api/search` returns fuzzy matches).
     func fetch(title: String, artist: String, album: String = "", duration: Double = 0) {
         let key = normalize("\(title)|\(artist)")
         guard !title.isEmpty, !artist.isEmpty else {
@@ -52,7 +46,6 @@ final class LyricsStore: ObservableObject {
         if let hit = cache[key] {
             self.lines = hit.lines
             self.plain = hit.plain
-            self.lastError = nil
             self.isLoading = false
             return
         }
@@ -61,7 +54,6 @@ final class LyricsStore: ObservableObject {
         isLoading = true
         lines = []
         plain = ""
-        lastError = nil
 
         fetchTask = Task { [weak self, key, title, artist, album, duration] in
             let result = await LRClibClient.fetch(title: title, artist: artist,
@@ -69,13 +61,10 @@ final class LyricsStore: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
                 guard self.loadedKey == key else { return }
-                switch result {
-                case .success(let parsed):
+                if case .success(let parsed) = result {
                     self.cache[key] = parsed
                     self.lines = parsed.lines
                     self.plain = parsed.plain
-                case .failure(let err):
-                    self.lastError = err.localizedDescription
                 }
                 self.isLoading = false
             }
@@ -88,7 +77,6 @@ final class LyricsStore: ObservableObject {
         lines = []
         plain = ""
         isLoading = false
-        lastError = nil
     }
 
     private func normalize(_ s: String) -> String {
@@ -115,10 +103,6 @@ enum LRClibClient {
     }
 
     private struct Hit: Decodable {
-        let id: Int
-        let trackName: String?
-        let artistName: String?
-        let albumName: String?
         let duration: Double?
         let plainLyrics: String?
         let syncedLyrics: String?

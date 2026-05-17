@@ -9,9 +9,6 @@
 //    2. AppleScript pulls current track + position when the notification fires.
 //  Controls are AppleScript tells: "tell application Spotify to <command>".
 //
-//  Ported from boring.notch (MIT). Trimmed to single-controller, no protocol,
-//  no Combine, plain @Published ObservableObject so it slots into our notch.
-//
 
 import AppKit
 import Foundation
@@ -24,9 +21,6 @@ struct SpotifyPlaybackState: Equatable {
     var album: String = ""
     var currentTime: Double = 0
     var duration: Double = 0
-    var isShuffled: Bool = false
-    var isRepeating: Bool = false
-    var volume: Double = 0.5
     var artworkURL: String = ""
     var artwork: Data?
 
@@ -63,10 +57,6 @@ final class SpotifyController: ObservableObject {
         connect()
     }
 
-    /// Back-compat: AppDelegate boot path. Equivalent to
-    /// `startIfPreviouslyConnected()` — never auto-opts-in.
-    func start() { startIfPreviouslyConnected() }
-
     /// User tapped Connect. Begins listening + persists the choice.
     func connect() {
         guard !isConnected else { return }
@@ -81,18 +71,15 @@ final class SpotifyController: ObservableObject {
                 await self?.refresh()
             }
         }
-        // Poll running state every 3s so the view reacts when Spotify
-        // launches or quits (no system notification for that).
+        // No system notification fires when Spotify itself launches/quits.
         runningPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
                 await self?.refreshRunningStateAndMaybeFetch()
             }
         }
-        // Poll player position every 2s while playing. Spotify only broadcasts
-        // PlaybackStateChanged on play/pause/track-change — without this poll
-        // our cached currentTime drifts when the user seeks externally and the
-        // lyrics anchor goes stale. Cheap: one AppleScript call, ~5ms.
+        // PlaybackStateChanged doesn't fire on external seeks, so poll position
+        // while playing so the lyrics anchor stays accurate.
         positionPollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
@@ -103,9 +90,8 @@ final class SpotifyController: ObservableObject {
         Task { await refresh() }
     }
 
-    /// View can force a fresh AppleScript pull (used when user resumes play
-    /// after a long pause — the cached currentTime is stale until the next
-    /// notification fires, which may be never until the next track change).
+    /// View can force a fresh AppleScript pull (cached currentTime may be stale
+    /// after a long pause; no notification fires until the next track change).
     func refreshNow() async { await refresh() }
 
     private func shouldPollPosition() -> Bool {
@@ -140,12 +126,6 @@ final class SpotifyController: ObservableObject {
     func nextTrack() async { await sendAndRefresh("next track") }
     func previousTrack() async { await sendAndRefresh("previous track") }
     func seek(to time: Double) async { await sendAndRefresh("set player position to \(time)") }
-    func setVolume(_ level: Double) async {
-        let v = Int((max(0, min(1, level)) * 100).rounded())
-        await sendCommand("set sound volume to \(v)")
-        try? await Task.sleep(for: commandDelay)
-        await refresh()
-    }
 
     func openSpotify() {
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.spotify.client") {
@@ -168,7 +148,7 @@ final class SpotifyController: ObservableObject {
             return
         }
         guard let descriptor = try? await fetchPlayback(),
-              descriptor.numberOfItems >= 10 else { return }
+              descriptor.numberOfItems >= 7 else { return }
 
         let new = SpotifyPlaybackState(
             isPlaying: descriptor.atIndex(1)?.booleanValue ?? false,
@@ -178,14 +158,11 @@ final class SpotifyController: ObservableObject {
             currentTime: descriptor.atIndex(5)?.doubleValue ?? 0,
             // Spotify's `duration of current track` returns milliseconds.
             duration: (descriptor.atIndex(6)?.doubleValue ?? 0) / 1000,
-            isShuffled: descriptor.atIndex(7)?.booleanValue ?? false,
-            isRepeating: descriptor.atIndex(8)?.booleanValue ?? false,
-            volume: Double(descriptor.atIndex(9)?.int32Value ?? 50) / 100.0,
-            artworkURL: descriptor.atIndex(10)?.stringValue ?? "",
-            artwork: state.artwork // keep prior bytes; replaced after fetch below
+            artworkURL: descriptor.atIndex(7)?.stringValue ?? "",
+            artwork: state.artwork
         )
 
-        // If the artwork URL is unchanged, keep the existing bytes — no flash.
+        // Same URL → keep existing bytes to avoid an artwork flash.
         if new.artworkURL == lastArtworkURL && state.artwork != nil {
             state = new
             return
@@ -235,13 +212,10 @@ final class SpotifyController: ObservableObject {
                 set currentTrackAlbum to album of current track
                 set trackPosition to player position
                 set trackDuration to duration of current track
-                set shuffleState to shuffling
-                set repeatState to repeating
-                set currentVolume to sound volume
                 set artworkURL to artwork url of current track
-                return {playerState, currentTrackName, currentTrackArtist, currentTrackAlbum, trackPosition, trackDuration, shuffleState, repeatState, currentVolume, artworkURL}
+                return {playerState, currentTrackName, currentTrackArtist, currentTrackAlbum, trackPosition, trackDuration, artworkURL}
             on error
-                return {false, "", "", "", 0, 0, false, false, 50, ""}
+                return {false, "", "", "", 0, 0, ""}
             end try
         end tell
         """
