@@ -1,0 +1,4 @@
+{
+  "expected_surface": "Slack #design composer",
+  "expected_controls": ["Send", "Attach file", "Emoji"]
+}
