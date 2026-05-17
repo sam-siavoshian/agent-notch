@@ -30,11 +30,21 @@ public struct ChatCompletionRequest: Encodable {
 
 public struct Message: Codable {
     public let role: String  // "system" | "user" | "assistant"
-    public let content: String
+    public let content: String  // Always sent as a string on request; null responses are normalized to ""
     public init(role: String, content: String) {
         self.role = role
         self.content = content
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.role = try c.decode(String.self, forKey: .role)
+        // Some providers (Mercury 2 via OpenRouter for very short replies) return content: null.
+        // Normalize to empty string so callers don't fail on an otherwise-well-formed response.
+        self.content = (try? c.decode(String.self, forKey: .content)) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey { case role, content }
 }
 
 public enum ResponseFormat: Encodable {
