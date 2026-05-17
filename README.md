@@ -1,5 +1,10 @@
 # Agent Notch
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black.svg)](#)
+[![Swift 5.10](https://img.shields.io/badge/swift-5.10-orange.svg)](#)
+[![Built with Claude Haiku 4.5](https://img.shields.io/badge/computer--use-Claude%20Haiku%204.5-7c3aed.svg)](https://www.anthropic.com/)
+
 macOS computer-use agent that lives in the notch.
 
 Long-press the cursor companion, talk, Claude Haiku 4.5 drives the mouse. The notch shows what it is doing. Screen context (OCR + Gemini) builds a persistent UI map; Mercury 2 distills it into a brief before every agent turn.
@@ -87,3 +92,13 @@ Details in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md). Product spec i
 Swift, SwiftUI, Claude Haiku 4.5 (computer-use), Mercury 2 via OpenRouter (context selector), Gemini Flash Lite (background screen observer), OpenAI Whisper + TTS, Vision OCR, CGEvent, ScreenCaptureKit, XcodeGen.
 
 Built at TritonHacks 2026.
+
+---
+
+## Contributing
+
+PRs welcome. Conventions live in [`AGENTS.md`](AGENTS.md). Run `xcodegen generate` after pulling. Keep diffs minimal and stay out of `vendored/`.
+
+## License
+
+[MIT](LICENSE).
