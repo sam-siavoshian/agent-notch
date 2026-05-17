@@ -165,14 +165,7 @@ public final class ContextSelector {
     preferences, the user's active task and recent activity, and per-app operational
     recipes the agent can use.
 
-    You may receive a `current_screen.vision` field with structured JSON describing
-    what a vision model sees on the screen. When present, use it ALONGSIDE the AX
-    elements to write a more grounded brief — especially for icons, non-native UI
-    (Electron/Tauri/canvas), or visual state that AX/OCR don't capture. AX is
-    authoritative for tool-callable paths; vision is authoritative for "what's
-    actually on screen" and the focal point.
-
-    You may also receive `learned_surfaces`: accumulated per-surface UI knowledge
+    You may receive `learned_surfaces`: accumulated per-surface UI knowledge
     built up over many prior passive observations of this app. Each entry has
     {app, surface, controls[], observation_count, last_seen}. Treat this as the
     canonical map of "how this app's surfaces actually work" — when the current

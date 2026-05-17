@@ -25,9 +25,6 @@ public struct AgentSettings: Equatable, Sendable {
     public var collectionPaused: Bool
     public var neverLogApps: [String]
     public var mercuryEnabled: Bool
-    /// Optional Gemini Flash Lite vision call at long-press time. Defaults on;
-    /// gracefully no-ops if `GEMINI_API_KEY` is unset.
-    public var geminiVisionEnabled: Bool
     /// Continuous, throttled (>=8s) background Gemini observer that watches the
     /// screen after major-change captures and accumulates per-surface UI/UX
     /// memory. Defaults on; no-ops without `GEMINI_API_KEY`.
@@ -50,7 +47,6 @@ public struct AgentSettings: Equatable, Sendable {
         collectionPaused: false,
         neverLogApps: AgentSettings.defaultNeverLogApps,
         mercuryEnabled: true,
-        geminiVisionEnabled: true,
         geminiObserverEnabled: true
     )
 }
@@ -59,7 +55,7 @@ public struct AgentSettings: Equatable, Sendable {
 extension AgentSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
-        case collectionPaused, neverLogApps, mercuryEnabled, geminiVisionEnabled
+        case collectionPaused, neverLogApps, mercuryEnabled
         case geminiObserverEnabled
     }
 
@@ -73,7 +69,6 @@ extension AgentSettings: Codable {
         collectionPaused     = (try? c.decode(Bool.self,                 forKey: .collectionPaused))     ?? false
         neverLogApps         = (try? c.decode([String].self,             forKey: .neverLogApps))         ?? AgentSettings.defaultNeverLogApps
         mercuryEnabled       = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))       ?? true
-        geminiVisionEnabled  = (try? c.decode(Bool.self,                 forKey: .geminiVisionEnabled))  ?? true
         geminiObserverEnabled = (try? c.decode(Bool.self,                forKey: .geminiObserverEnabled)) ?? true
     }
 
@@ -87,7 +82,6 @@ extension AgentSettings: Codable {
         try c.encode(collectionPaused,     forKey: .collectionPaused)
         try c.encode(neverLogApps,         forKey: .neverLogApps)
         try c.encode(mercuryEnabled,       forKey: .mercuryEnabled)
-        try c.encode(geminiVisionEnabled,  forKey: .geminiVisionEnabled)
         try c.encode(geminiObserverEnabled, forKey: .geminiObserverEnabled)
     }
 }
@@ -164,13 +158,6 @@ public final class AgentSettingsStore: ObservableObject {
         get { settings.mercuryEnabled }
         // mercuryEnabled has no runtime consumer yet — Phase 4 will honor it.
         set { update { $0.mercuryEnabled = newValue } }
-    }
-
-    /// Toggle for the long-press vision pre-processor. When off, L2Snapshotter
-    /// skips the Gemini call entirely (no key needed, no latency).
-    public var geminiVisionEnabled: Bool {
-        get { settings.geminiVisionEnabled }
-        set { update { $0.geminiVisionEnabled = newValue } }
     }
 
     /// Toggle for the continuous background screen observer. When off,

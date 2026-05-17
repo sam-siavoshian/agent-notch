@@ -1,15 +1,14 @@
 import Foundation
 
-/// Single-call Gemini client for vision pre-processing at long-press time.
+/// Single-call Gemini client for vision pre-processing.
 /// Sends a screenshot + a short user prompt; receives structured text back.
 ///
 /// Endpoint: https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent
 /// Model:    gemini-3.1-flash-lite (cheap, fast, multimodal)
 ///
-/// This is a deliberate REPLACEMENT for the old Gemini observation pipeline
-/// (deleted in Phase 5b). That one fanned out across 6 lanes per screenshot.
-/// This one is one call, one screenshot, structured JSON out. Used by
-/// `VisionEnricher` and only at long-press time.
+/// One call, one screenshot, structured JSON out. Used by `GeminiObserver`
+/// as the only vision path — long-press never calls into Gemini directly;
+/// it reads the accumulated `SurfaceMemoryStore` instead.
 public final class GeminiVisionClient {
 
     public static let shared = GeminiVisionClient()
