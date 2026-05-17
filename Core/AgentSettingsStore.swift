@@ -22,6 +22,10 @@ public struct AgentSettings: Equatable, Sendable {
     public var systemPrompt: String
     public var cursorColor: CursorColor
     public var ttsVoice: TTSVoice
+    /// Persistent CoreAudio device UID for voice input. nil = system default.
+    public var voiceInputDeviceUID: String?
+    /// Persistent CoreAudio device UID for TTS output. nil = system default.
+    public var voiceOutputDeviceUID: String?
     public var collectionPaused: Bool
     public var neverLogApps: [String]
     public var mercuryEnabled: Bool
@@ -44,6 +48,8 @@ public struct AgentSettings: Equatable, Sendable {
         systemPrompt: "",
         cursorColor: .blue,
         ttsVoice: .nova,
+        voiceInputDeviceUID: nil,
+        voiceOutputDeviceUID: nil,
         collectionPaused: false,
         neverLogApps: AgentSettings.defaultNeverLogApps,
         mercuryEnabled: true,
@@ -55,6 +61,7 @@ public struct AgentSettings: Equatable, Sendable {
 extension AgentSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
+        case voiceInputDeviceUID, voiceOutputDeviceUID
         case collectionPaused, neverLogApps, mercuryEnabled
         case geminiObserverEnabled
     }
@@ -66,6 +73,8 @@ extension AgentSettings: Codable {
         systemPrompt         = (try? c.decode(String.self,               forKey: .systemPrompt))         ?? ""
         cursorColor          = (try? c.decode(CursorColor.self,          forKey: .cursorColor))          ?? .blue
         ttsVoice             = (try? c.decode(TTSVoice.self,             forKey: .ttsVoice))             ?? .nova
+        voiceInputDeviceUID  = try? c.decode(String.self,                forKey: .voiceInputDeviceUID)
+        voiceOutputDeviceUID = try? c.decode(String.self,                forKey: .voiceOutputDeviceUID)
         collectionPaused     = (try? c.decode(Bool.self,                 forKey: .collectionPaused))     ?? false
         neverLogApps         = (try? c.decode([String].self,             forKey: .neverLogApps))         ?? AgentSettings.defaultNeverLogApps
         mercuryEnabled       = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))       ?? true
@@ -79,6 +88,8 @@ extension AgentSettings: Codable {
         try c.encode(systemPrompt,         forKey: .systemPrompt)
         try c.encode(cursorColor,          forKey: .cursorColor)
         try c.encode(ttsVoice,             forKey: .ttsVoice)
+        try c.encodeIfPresent(voiceInputDeviceUID,  forKey: .voiceInputDeviceUID)
+        try c.encodeIfPresent(voiceOutputDeviceUID, forKey: .voiceOutputDeviceUID)
         try c.encode(collectionPaused,     forKey: .collectionPaused)
         try c.encode(neverLogApps,         forKey: .neverLogApps)
         try c.encode(mercuryEnabled,       forKey: .mercuryEnabled)
@@ -136,6 +147,16 @@ public final class AgentSettingsStore: ObservableObject {
     public var ttsVoice: TTSVoice {
         get { settings.ttsVoice }
         set { update { $0.ttsVoice = newValue } }
+    }
+
+    public var voiceInputDeviceUID: String? {
+        get { settings.voiceInputDeviceUID }
+        set { update { $0.voiceInputDeviceUID = newValue } }
+    }
+
+    public var voiceOutputDeviceUID: String? {
+        get { settings.voiceOutputDeviceUID }
+        set { update { $0.voiceOutputDeviceUID = newValue } }
     }
 
     public var collectionPaused: Bool {
