@@ -334,9 +334,9 @@ public final class ComputerUseHarness {
             log.info("harness.response run_id=\(runID.uuidString) turn=\(turn) stop_reason=\(response.stopReason ?? "nil") tool_uses=\(toolUses.count)")
 
             if toolUses.isEmpty {
-                let text = response.content.compactMap { block -> String? in
-                    if case .text(let t) = block { return t } else { return nil }
-                }.joined(separator: " ")
+                var textParts: [String] = []
+                for case .text(let t) in response.content { textParts.append(t) }
+                let text = textParts.joined(separator: " ")
 
                 // Pre-stop verification — catch the "opened Spotify, said done,
                 // never played Taylor Swift" failure mode. Verifier diffs the
