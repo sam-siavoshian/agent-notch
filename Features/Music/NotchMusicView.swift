@@ -402,7 +402,8 @@ private struct OpenSpotifyPill: View {
     let action: () -> Void
     @State private var hovered = false
     @State private var pressed = false
-    private let green = Color(red: 0.114, green: 0.725, blue: 0.329)
+    private static let _green = Color(red: 0.114, green: 0.725, blue: 0.329)
+    private var green: Color { Self._green }
 
     var body: some View {
         Button(action: action) {
