@@ -133,13 +133,15 @@ public final class KeystrokeMonitor {
 
         // Regular character key — accumulate.
         queue.sync {
-            if pendingStarted == nil {
-                pendingStarted = Date()
-                pendingFocusedElement = focusedElementProvider?()
-                pendingModifiers = modifiers
-            } else if Date().timeIntervalSince(pendingStarted!) > 2.0 {
-                // Too old — flush before adding.
-                flushPending(reason: "idle_timeout")
+            if let started = pendingStarted {
+                if Date().timeIntervalSince(started) > 2.0 {
+                    // Too old — flush before adding.
+                    flushPending(reason: "idle_timeout")
+                    pendingStarted = Date()
+                    pendingFocusedElement = focusedElementProvider?()
+                    pendingModifiers = modifiers
+                }
+            } else {
                 pendingStarted = Date()
                 pendingFocusedElement = focusedElementProvider?()
                 pendingModifiers = modifiers
