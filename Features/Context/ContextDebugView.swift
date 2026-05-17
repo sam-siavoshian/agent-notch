@@ -127,10 +127,7 @@ public struct ContextDebugView: View {
         let snapCount = diagnostics?.snapshotCount ?? snapshots.count
         let timeText: String = {
             guard lastRefreshed > .distantPast else { return "—" }
-            let formatter = DateFormatter()
-            formatter.dateStyle = .none
-            formatter.timeStyle = .medium
-            return formatter.string(from: lastRefreshed)
+            return ContextDebugFormat.absoluteTimestamp(lastRefreshed)
         }()
         return HStack(spacing: 6) {
             Circle()
