@@ -121,17 +121,17 @@ private struct GlowDot: View {
 private struct WaveformBars: View {
     let color: Color
     @State private var phase = false
-    private let durations: [Double] = [0.38, 0.44, 0.36]
-    private let baseH: [CGFloat]   = [3, 7, 4]
-    private let altH: [CGFloat]    = [8, 3, 7]
+    private static let durations: [Double] = [0.38, 0.44, 0.36]
+    private static let baseH: [CGFloat]   = [3, 7, 4]
+    private static let altH: [CGFloat]    = [8, 3, 7]
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(0..<3, id: \.self) { i in
                 RoundedRectangle(cornerRadius: 1)
                     .fill(color.opacity(0.85))
-                    .frame(width: 1.5, height: phase ? altH[i] : baseH[i])
-                    .animation(.easeInOut(duration: durations[i]).repeatForever(autoreverses: true), value: phase)
+                    .frame(width: 1.5, height: phase ? Self.altH[i] : Self.baseH[i])
+                    .animation(.easeInOut(duration: Self.durations[i]).repeatForever(autoreverses: true), value: phase)
             }
         }
         .onAppear { phase = true }
