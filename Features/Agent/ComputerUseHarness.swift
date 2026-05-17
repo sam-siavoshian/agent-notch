@@ -525,10 +525,11 @@ public final class ComputerUseHarness {
             dynamicParts.append(Self.renderResolvedIntent(intent))
         }
         if !contextSummary.isEmpty {
-            dynamicParts.append("""
-            Local activation context (recent on-screen state — treat as a hint, not exact coordinates; refresh via screenshot only if it looks stale):
-            \(contextSummary)
-            """)
+            // The contextSummary is the Mercury/local-renderer brief itself — already
+            // structured ("## What the user wants" / "## You are here" / ...). Phase 4
+            // moved authority from raw "activation context" prose into the selector's brief,
+            // so we emit it as-is without wrapper text.
+            dynamicParts.append(contextSummary)
         }
         if !settings.preferences.isEmpty {
             dynamicParts.append("User preferences:\n\(settings.preferences)")
