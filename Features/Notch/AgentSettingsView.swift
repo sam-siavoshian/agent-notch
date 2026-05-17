@@ -27,6 +27,7 @@ struct AgentSettingsView: View {
             cursorColorRow
             preferencesRow
             advancedSection
+            quitRow
             savedBadge
         }
         .onChange(of: store.settings) { _, _ in
@@ -114,6 +115,25 @@ struct AgentSettingsView: View {
                 minHeight: 44,
                 maxHeight: 64
             )
+        }
+    }
+
+    private var quitRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                GhostPill(tint: SoftPill.Status.red) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "power")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Quit")
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Quit Agent in the Notch")
         }
     }
 

@@ -6,8 +6,12 @@
 #   ./dev.sh --clean                           # nuke DerivedData, then build + run
 #   ./dev.sh --build-only                      # build, don't launch
 #   ./dev.sh --reset-tcc                       # tccutil reset com.agentnotch.app, then build + run
+#   ./dev.sh --show-onboarding                 # force-show the permissions onboarding window on launch
 #   ./dev.sh --rotate-key sk-ant-...           # update keychain entry, then build + run
 #   ./dev.sh --rotate-gemini-key AIza...       # update optional Gemini key, then build + run
+#   ./dev.sh --install                         # build, copy to /Applications, launch from there
+#                                              # (stable path → TCC grants survive close+reopen
+#                                              #  as long as you don't rebuild)
 #
 # Secrets: reads ANTHROPIC_API_KEY from macOS keychain (service: AgentNotch,
 # account: anthropic). Reads optional GEMINI_API_KEY from the same service
@@ -27,13 +31,18 @@ DERIVED="${REPO_ROOT}/.build/DerivedData"
 CLEAN=0
 BUILD_ONLY=0
 RESET_TCC=0
+SHOW_ONBOARDING=0
+INSTALL=0
 DEMO_PROMPT=""
+INSTALL_PATH="/Applications/AgentNotch.app"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=1; shift ;;
     --build-only) BUILD_ONLY=1; shift ;;
     --reset-tcc) RESET_TCC=1; shift ;;
+    --show-onboarding) SHOW_ONBOARDING=1; shift ;;
+    --install) INSTALL=1; shift ;;
     --rotate-key)
       shift
       if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-key needs the key as next arg"; exit 1; fi
@@ -232,6 +241,25 @@ if [[ -n "$PRIOR" ]]; then
   sleep 0.4
 fi
 
+# ---------- install (opt-in) ----------
+# Copy built app to a stable path under /Applications. TCC grants are bound
+# to (signature, bundle path). With Apple Development certs the cdhash
+# changes on every rebuild, so grants still drop after a rebuild — but
+# subsequent close+reopen cycles WITHOUT a rebuild keep grants intact when
+# launching from the same path. Run dev.sh --install once per code change;
+# after that just `open /Applications/AgentNotch.app` to relaunch without
+# losing permissions.
+if [[ $INSTALL -eq 1 ]]; then
+  echo "→ Installing to $INSTALL_PATH"
+  if [[ -d "$INSTALL_PATH" ]]; then
+    rm -rf "$INSTALL_PATH"
+  fi
+  /bin/cp -R "$APP_PATH" "$INSTALL_PATH"
+  /usr/bin/xattr -cr "$INSTALL_PATH" 2>/dev/null || true
+  APP_PATH="$INSTALL_PATH"
+  echo "→ Installed: $APP_PATH"
+fi
+
 # ---------- launch ----------
 # Direct exec (not `open`) so env vars propagate to the app process.
 # `open` hands off to launchd, which strips the calling shell's environment.
@@ -245,6 +273,10 @@ echo "→ Launching $SCHEME"
 if [[ -n "$DEMO_PROMPT" ]]; then
   echo "  DEMO PROMPT: \"$DEMO_PROMPT\""
   export ANTHROPIC_NOTCH_DEMO_PROMPT="$DEMO_PROMPT"
+fi
+if [[ $SHOW_ONBOARDING -eq 1 ]]; then
+  echo "  FORCING onboarding window"
+  export AGENTNOTCH_FORCE_ONBOARDING=1
 fi
 
 echo ""
