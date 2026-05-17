@@ -100,7 +100,7 @@ public final class AnchorRecorder {
             // Modifier-key shortcut. SubmitKey "shortcut" is set by KeystrokeMonitor
             // for cmd/ctrl/alt keypresses. Also any non-empty modifier set
             // (excluding bare shift, which is just capitalization).
-            return submitKey == "shortcut" || !modifiers.filter({ $0 != "shift" }).isEmpty
+            return submitKey == "shortcut" || modifiers.contains(where: { $0 != "shift" })
         case let .click(elementLabel, axRole, _):
             // Click on a labeled control with a meaningful role.
             guard let label = elementLabel, !label.isEmpty else { return false }
