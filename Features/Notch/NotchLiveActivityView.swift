@@ -25,12 +25,13 @@ struct NotchLiveActivityView: View {
                 .frame(width: 16, height: 16)
                 .shadow(color: store.cursorColor.swatch.opacity(0.55), radius: 3)
 
-            Text(statusText)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .id(statusText)
+            ShiningText(
+                text: statusText,
+                font: .system(size: 11, weight: .medium)
+            )
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .id(statusText)
 
             Spacer(minLength: 0)
         }
