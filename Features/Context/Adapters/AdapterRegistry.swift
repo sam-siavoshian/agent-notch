@@ -28,18 +28,14 @@ public final class AdapterRegistry {
     public func allRegistered() -> [AppContextAdapter] {
         queue.sync {
             var seen: Set<ObjectIdentifier> = []
+            seen.reserveCapacity(byBundleID.count)
             var out: [AppContextAdapter] = []
+            out.reserveCapacity(byBundleID.count)
             for adapter in byBundleID.values {
                 // ObjectIdentifier dedup only works for class types. AppContextAdapters
-                // are typically classes (AppleScript adapters need to hold state). If
-                // a value-type adapter slips in, treat each entry as distinct.
-                if let obj = adapter as AnyObject as? AnyObject {
-                    let id = ObjectIdentifier(obj)
-                    if !seen.contains(id) {
-                        seen.insert(id)
-                        out.append(adapter)
-                    }
-                } else {
+                // are typically classes (AppleScript adapters need to hold state).
+                let id = ObjectIdentifier(adapter as AnyObject)
+                if seen.insert(id).inserted {
                     out.append(adapter)
                 }
             }
