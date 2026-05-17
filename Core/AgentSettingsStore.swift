@@ -40,11 +40,13 @@ public struct KillSwitchShortcut: Codable, Equatable, Sendable {
     public var displayString: String {
         let mods = NSEvent.ModifierFlags(rawValue: modifiers)
         var s = ""
+        s.reserveCapacity(8)
         if mods.contains(.control) { s += "⌃" }
         if mods.contains(.option)  { s += "⌥" }
         if mods.contains(.shift)   { s += "⇧" }
         if mods.contains(.command) { s += "⌘" }
-        return s + keyLabel.uppercased()
+        s += keyLabel.uppercased()
+        return s
     }
 }
 
