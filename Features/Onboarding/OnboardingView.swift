@@ -2,20 +2,11 @@
 //  OnboardingView.swift
 //  Agent in the Notch
 //
-//  Soft-pill UI. Responsive (480-760pt), interactive (hover lift, press
-//  spring, animated SF Symbols), warm two-layer shadows, gradient CTA.
-//
-//  Lucide animated icons are web-only. macOS equivalent: SF Symbols with
-//  .symbolEffect — .pulse (continuous), .bounce (on transition),
-//  .variableColor.iterative (loading shimmer). All native, all 60fps.
-//
-//  The app icon is still a real Finder-style drag source.
+//  Soft-pill UI for the first-launch permission prompts.
 //
 
-import Darwin
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 // MARK: - Design tokens
 
@@ -44,11 +35,8 @@ private enum Pill {
 
 // MARK: - Shared modifiers / styles
 
-/// White-pill background. Three states with distinct visual language:
-/// - rest: inset highlight (top) + inset floor (bottom), 2-layer outer shadow
-/// - hover: ADD ring, ADD tinted glow, scale up, brighten — light leaks in
-/// - pressed: FLIP insets (dark top, bright bottom rim), kill glow + ambient,
-///            scale DOWN. Reads as a real button punched into the canvas.
+/// White-pill background. Rest: inset highlight + 2-layer outer shadow.
+/// Hover: ring + tinted glow + scale up. Pressed: flip insets, kill glow, scale down.
 private struct SoftPillBg: ViewModifier {
     var fill: Color = Pill.surface
     var radius: CGFloat = 999
@@ -61,7 +49,6 @@ private struct SoftPillBg: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         return content
             .background(shape.fill(fill))
-            // Inset edges only when pressed. REST/HOVER: no border ring.
             .overlay(
                 shape.strokeBorder(
                     LinearGradient(
@@ -76,7 +63,6 @@ private struct SoftPillBg: ViewModifier {
                 )
                 .opacity(pressed ? 1 : 0)
             )
-            // Outer shadows. Hover lifts via deeper ambient + tinted glow.
             .shadow(color: pressed ? Color.black.opacity(0.10) : Pill.shadowContact,
                     radius: 1, x: 0, y: 1)
             .shadow(color: pressed
@@ -110,9 +96,7 @@ private extension View {
     }
 }
 
-/// Real-button press: scales DOWN below rest, brightens DOWN, fast ease-out.
-/// Inset/shadow inversion lives in SoftPillBg — this style is for buttons
-/// whose label is the whole tap target (no backing pill on its own).
+/// Scale-down press for buttons whose label is the whole tap target.
 private struct PressSpringStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -125,9 +109,8 @@ private struct PressSpringStyle: ButtonStyle {
     }
 }
 
-/// Button style that wraps its label in a SoftPillBg and pipes press state
-/// straight into it — so the inset flips, glow dies, and scale drops in one
-/// place. Pass `hovered` from the caller's @State.
+/// Wraps its label in a SoftPillBg and pipes press state in so the inset
+/// flips and the glow dies in one place. Pass `hovered` from the caller.
 private struct OnbSoftPillButtonStyle: ButtonStyle {
     var hovered: Bool = false
     var fill: Color = Pill.surface
@@ -157,8 +140,8 @@ struct OnboardingView: View {
     private var grantedCount: Int {
         checker.statuses.values.count(where: { $0 == .granted })
     }
+    /// Screen Recording grants take effect only after a relaunch.
     private var needsRelaunch: Bool {
-        // Screen Recording grants take effect only after a relaunch.
         checker.statuses[.screenRecording] == .granted
     }
 
@@ -180,8 +163,8 @@ struct OnboardingView: View {
         .onAppear {
             checker.startPolling()
             pulseScale = 2.4
-            // When user comes back from Settings after granting AX/SR, the
-            // in-process TCC cache is stale. Auto-relaunch to flush it.
+            // When the user comes back from Settings after granting AX/SR,
+            // the in-process TCC cache is stale. Auto-relaunch to flush it.
             activateObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.didBecomeActiveNotification,
                 object: nil,
@@ -191,13 +174,11 @@ struct OnboardingView: View {
                 let stillDenied =
                     checker.statuses[.accessibility] != .granted ||
                     checker.statuses[.screenRecording] != .granted
+                pendingRelaunch = false
                 if stillDenied {
-                    pendingRelaunch = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                        relaunch()
+                        AppRelaunch.relaunch()
                     }
-                } else {
-                    pendingRelaunch = false
                 }
             }
         }
@@ -211,7 +192,7 @@ struct OnboardingView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 18) {
-            DraggableAppIcon(pulse: grantedCount < 4)
+            DraggableAppIcon()
                 .frame(width: 84, height: 84)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -296,7 +277,7 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: Footer — responsive (wraps to two rows on narrow widths)
+    // MARK: Footer — wraps to two rows on narrow widths
 
     private var footer: some View {
         ViewThatFits(in: .horizontal) {
@@ -329,7 +310,7 @@ struct OnboardingView: View {
                 .help("Skip setup — you can grant later from settings")
         }
         if needsRelaunch {
-            ghostPill(label: "Relaunch", icon: .rotateCW, dashed: false, action: relaunch)
+            ghostPill(label: "Relaunch", icon: .rotateCW, dashed: false, action: AppRelaunch.relaunch)
                 .help("Restart so new grants take effect")
         }
     }
@@ -367,7 +348,7 @@ struct OnboardingView: View {
         Button(action: action) {
             HStack(spacing: 7) {
                 if let icon {
-                    LucideIcon(name: icon, size: 13, lineWidth: 2, animate: false)
+                    LucideIcon(name: icon, size: 13, lineWidth: 2)
                 }
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
@@ -388,34 +369,6 @@ struct OnboardingView: View {
         }
         .buttonStyle(PressSpringStyle())
     }
-
-    private func relaunch() {
-        let path = Bundle.main.bundleURL.path
-        let pid = ProcessInfo.processInfo.processIdentifier
-        let escaped = path.replacingOccurrences(of: "'", with: "'\\''")
-        // Helper waits until our PID actually exits before spawning a fresh
-        // instance. Without the wait, LaunchServices dedupes against the
-        // dying process and `open -n` silently no-ops.
-        let cmd = """
-        while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.1; done
-        /usr/bin/open -n '\(escaped)'
-        """
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", cmd]
-        task.standardOutput = nil
-        task.standardError = nil
-        do {
-            try task.run()
-        } catch {
-            fputs("[ERROR] [onboarding] relaunch helper spawn failed: \(error)\n", Darwin.stderr)
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            NSApp.terminate(nil)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { exit(0) }
-        }
-    }
 }
 
 // MARK: - Continue CTA
@@ -428,7 +381,7 @@ private struct ContinueCTA: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 7) {
-                LucideIcon(name: .sparkles, size: 14, lineWidth: 2, animate: true)
+                LucideIcon(name: .sparkles, size: 14, lineWidth: 2)
                     .foregroundStyle(.white)
                 Text(allGranted ? "Continue" : "Continue anyway")
                     .font(.system(size: 14, weight: .semibold))
@@ -446,11 +399,8 @@ private struct ContinueCTA: View {
     }
 }
 
-/// Continue CTA visual. Three states:
-/// - rest: pink→orange gradient, glassy top inset, warm bottom inset, soft bloom
-/// - hover: brightness up, gradient flips diagonal, bloom 2x, white halo ring
-/// - pressed: scale 0.97, FLIP insets (dark warm top, white bottom rim),
-///            kill bloom + ambient — looks pressed into the canvas
+/// Continue CTA visual. Rest: pink→orange gradient + glassy inset + bloom.
+/// Hover: brighter, gradient flips, halo doubles. Pressed: scale 0.97 + flip insets.
 private struct CTAStyle: ButtonStyle {
     let hover: Bool
 
@@ -464,7 +414,6 @@ private struct CTAStyle: ButtonStyle {
                     endPoint: hover ? .bottomLeading : .bottomTrailing
                 )
             )
-            // Inset edge: only when pressed (warm top + bright bottom rim).
             .overlay(
                 Capsule().strokeBorder(
                     LinearGradient(
@@ -480,7 +429,6 @@ private struct CTAStyle: ButtonStyle {
                 .opacity(pressed ? 1 : 0)
             )
             .clipShape(Capsule())
-            // Contact shadow always; ambient + bloom only when not pressed.
             .shadow(color: Pill.ctaShadow1, radius: 2, x: 0, y: 1)
             .shadow(color: pressed ? .clear : Pill.ctaShadow2,
                     radius: hover ? 24 : 20,
@@ -516,7 +464,7 @@ private struct PermPill: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
-                    LucideIcon(name: icon, size: 14, lineWidth: 2, animate: hover)
+                    LucideIcon(name: icon, size: 14, lineWidth: 2)
                         .foregroundStyle(Pill.muted)
                     Text(title)
                         .font(.system(size: 14, weight: .semibold))
@@ -552,7 +500,7 @@ private struct PermPill: View {
     private var actionArea: some View {
         if status == .granted {
             HStack(spacing: 6) {
-                LucideIcon(name: .check, size: 12, lineWidth: 2.5, trigger: status)
+                LucideIcon(name: .check, size: 12, lineWidth: 2.5)
                 Text("Granted")
                     .font(.system(size: 12, weight: .semibold))
             }
@@ -593,7 +541,7 @@ private struct GrantButton: View {
     }
 }
 
-// MARK: - Animated status badge
+// MARK: - Status badge
 
 private struct PermStatusBadge: View {
     let status: PermissionChecker.Status
@@ -601,11 +549,7 @@ private struct PermStatusBadge: View {
     var body: some View {
         ZStack {
             Circle().fill(fill)
-            LucideIcon(name: lucideName,
-                       size: 14,
-                       lineWidth: 2.4,
-                       animate: status == .unknown,
-                       trigger: status)
+            LucideIcon(name: lucideName, size: 14, lineWidth: 2.4)
                 .foregroundStyle(.white)
         }
     }
@@ -627,14 +571,14 @@ private struct PermStatusBadge: View {
     }
 }
 
-// MARK: - Settings cog button (own hover state so the cog spins on hover)
+// MARK: - Settings cog button (own hover state)
 
 private struct SettingsCogButton: View {
     let action: () -> Void
     @State private var hover = false
     var body: some View {
         Button(action: action) {
-            LucideIcon(name: .settings, size: 16, lineWidth: 2, animate: hover)
+            LucideIcon(name: .settings, size: 16, lineWidth: 2)
                 .foregroundStyle(Pill.muted)
                 .frame(width: 32, height: 32)
         }
@@ -649,10 +593,9 @@ private struct SettingsCogButton: View {
     }
 }
 
-// MARK: - Draggable app icon (animated marching-ants outline while pending)
+// MARK: - Draggable app icon
 
 private struct DraggableAppIcon: View {
-    let pulse: Bool
     @State private var hover = false
 
     var body: some View {
