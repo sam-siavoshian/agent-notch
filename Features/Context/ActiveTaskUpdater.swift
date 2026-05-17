@@ -16,6 +16,8 @@ public final class ActiveTaskUpdater {
     private var timer: Timer?
     private var lastUpdateAt: Date = .distantPast
     private var lastEventSeqAtUpdate: Int = 0
+    private var lastAppSwitchTrigger: Date = .distantPast
+    private static let appSwitchDebounceInterval: TimeInterval = 10.0
     private let queue = DispatchQueue(label: "AgentNotch.ActiveTaskUpdater.queue")
 
     private init() {}
@@ -45,6 +47,13 @@ public final class ActiveTaskUpdater {
     }
 
     @objc private func handleAppSwitch(_ notification: Notification) {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastAppSwitchTrigger)
+        guard elapsed >= Self.appSwitchDebounceInterval else {
+            // Debounced — too soon since last app-switch-triggered tick.
+            return
+        }
+        lastAppSwitchTrigger = now
         Task { await self.tick() }
     }
 
