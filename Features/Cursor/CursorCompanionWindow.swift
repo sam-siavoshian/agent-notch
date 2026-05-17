@@ -14,6 +14,7 @@ final class CursorCompanionWindow {
     /// Panel is bigger than the sprite so the listening halo + thinking ring
     /// don't clip. Must match the outer frame of CursorCompanionView.
     private static let panelSize: CGFloat = 50
+    private static let halfPanelSize: CGFloat = panelSize / 2
 
     /// Where the sprite center sits relative to the user's real cursor tip
     /// (screen coords, AppKit: +x right, +y up). Offset clears the real
@@ -65,7 +66,7 @@ final class CursorCompanionWindow {
             x: point.x + Self.spriteOffsetFromCursor.x,
             y: point.y + Self.spriteOffsetFromCursor.y
         )
-        let origin = CGPoint(x: center.x - Self.panelSize / 2, y: center.y - Self.panelSize / 2)
+        let origin = CGPoint(x: center.x - Self.halfPanelSize, y: center.y - Self.halfPanelSize)
         panel.setFrameOrigin(origin)
     }
 }
