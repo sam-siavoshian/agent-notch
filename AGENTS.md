@@ -78,7 +78,7 @@ Features/Context/
 └── ContextPerformanceReporter.swift
 
 Features/Agent/
-├── VoiceRecordingService.swift — records mic on .longPressBegan; runs WhisperKit (whisper-tiny) on .longPressEnded; posts .transcriptReady
+├── VoiceRecordingService.swift — records mic on .longPressBegan; uploads to OpenAI Whisper API (whisper-1) on .longPressEnded; posts .transcriptReady
 ├── AgentSession.swift          — subscribes to .transcriptReady; reads lastTranscript; fires one harness turn
 ├── ComputerUseHarness.swift    — multi-turn Claude computer-use loop (model: claude-sonnet-4-6)
 ├── ComputerUseModels.swift     — Codable API types

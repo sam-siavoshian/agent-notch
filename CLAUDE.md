@@ -34,6 +34,7 @@ No keys are hardcoded. Resolution order: environment variable → nil.
 |---|---|
 | `ANTHROPIC_API_KEY` | `AnthropicClient` → Claude Sonnet agent |
 | `GEMINI_API_KEY` | `ContextGeminiObservationService` → screenshot analysis |
+| `OPENAI_API_KEY` | `VoiceRecordingService` → OpenAI Whisper API (`whisper-1`) transcription |
 
 Set these in your Xcode scheme's environment or your shell before launching.
 
@@ -48,7 +49,7 @@ Set these in your Xcode scheme's environment or your shell before launching.
 - **Notch UI**: the agent's home, a fresh SwiftUI app. Shows live agent state and settings.
 - **Cursor Companion**: a PNG sprite that follows the real cursor. Long-press activates voice. This is the agent's body.
 
-The agent (Claude Sonnet) receives: voice transcript (WhisperKit, on-device) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
+The agent (Claude Sonnet) receives: voice transcript (OpenAI Whisper API, `whisper-1`) + a compact text summary of recent screen activity (OCR + Gemini pipeline) + user preferences. It then drives computer-use actions via CGEvent.
 
 Full spec: `PRD.md`.
 
@@ -134,7 +135,7 @@ All features should use these — never duplicate them.
 
 | File | What it is |
 |---|---|
-| `VoiceRecordingService.swift` | Records mic on longPressBegan; runs WhisperKit on longPressEnded; posts `.transcriptReady` |
+| `VoiceRecordingService.swift` | Records mic on longPressBegan; uploads audio to OpenAI Whisper API (`whisper-1`) on longPressEnded; posts `.transcriptReady` |
 | `AgentSession.swift` | Subscribes to `.transcriptReady`; fires one harness turn |
 | `ComputerUseHarness.swift` | Multi-turn Claude computer-use loop (model: `claude-sonnet-4-6`) |
 | `ComputerUseModels.swift` | Codable types for the Anthropic computer-use API |
@@ -187,6 +188,6 @@ AppDelegate.applicationDidFinishLaunching
           → CursorCompanion.shared.start()          // registers AgentInterfaces.cursor
           → ContextCoordinator.shared.start()       // registers AgentInterfaces.context
           → ContextDevToolsWindowController.install() // optional telemetry window
-          → VoiceRecordingService.shared.start()    // mic recording + WhisperKit init
+          → VoiceRecordingService.shared.start()    // mic recording (OpenAI Whisper API on flush)
           → AgentSession.shared.start()             // subscribes to .transcriptReady
 ```
