@@ -1,0 +1,7 @@
+{
+  "response_shape": "update",
+  "active_task_label_contains": ["onboarding"],
+  "active_task_kind_in": ["design_iteration", "design_work"],
+  "narrative_must_contain": ["Step 2", "Figma"],
+  "resources_must_include": ["figma://file/abc/Onboarding-v3#frame:Step-2"]
+}

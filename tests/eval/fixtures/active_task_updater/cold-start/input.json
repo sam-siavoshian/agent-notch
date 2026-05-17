@@ -1,0 +1,13 @@
+{
+  "current": null,
+  "events": [
+    {"kind": "app_switch", "t": "2026-05-17T10:00:00Z", "to_bundle": "com.figma.Desktop"},
+    {"kind": "screen", "t": "2026-05-17T10:00:05Z", "app": "Figma", "window": "Onboarding v3", "surface": "frame: Step 1"},
+    {"kind": "dwell", "t": "2026-05-17T10:02:00Z", "app": "Figma", "duration_s": 115, "signal": "deep focus"},
+    {"kind": "input", "t": "2026-05-17T10:02:10Z", "app": "Figma", "text": "Enter your email"},
+    {"kind": "screen", "t": "2026-05-17T10:02:30Z", "app": "Figma", "surface": "frame: Step 1 (editing copy)"}
+  ],
+  "resources": [
+    {"kind": "url", "uri": "figma://file/abc/Onboarding-v3", "label": "Onboarding v3", "app": "Figma", "lastSeen": "2026-05-17T10:00:05Z"}
+  ]
+}

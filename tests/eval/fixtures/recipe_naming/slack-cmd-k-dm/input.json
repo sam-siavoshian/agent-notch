@@ -1,0 +1,33 @@
+{
+  "app": "Slack",
+  "bundle_id": "com.tinyspeck.slackmacgap",
+  "sequences": [
+    {
+      "before": {"surface": "Slack channel composer"},
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+k"},
+        {"kind": "type", "value": "maya"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "after": {"surface": "Slack DM with Maya"}
+    },
+    {
+      "before": {"surface": "Slack channel composer"},
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+k"},
+        {"kind": "type", "value": "wyatt"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "after": {"surface": "Slack DM with Wyatt"}
+    },
+    {
+      "before": {"surface": "Slack channel composer"},
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+k"},
+        {"kind": "type", "value": "arshan"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "after": {"surface": "Slack DM with Arshan"}
+    }
+  ]
+}

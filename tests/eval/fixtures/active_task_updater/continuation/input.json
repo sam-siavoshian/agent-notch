@@ -1,0 +1,33 @@
+{
+  "current": {
+    "id": "t_2026-05-17_10",
+    "startedAt": "2026-05-17T10:00:00Z",
+    "label": "Iterate Onboarding v3 in Figma",
+    "kind": "design_iteration",
+    "narrative": "User has been editing the Onboarding v3 file in Figma for the last 15 minutes. Started on Step 1, iterating on the email-capture copy.",
+    "actionsTaken": [
+      {"t": "2026-05-17T10:02:10Z", "what": "edited Step 1 email-capture copy"}
+    ],
+    "resources": [
+      "figma://file/abc/Onboarding-v3",
+      "figma://file/abc/Onboarding-v3#frame:Step-1"
+    ],
+    "entities": [
+      {"label": "Onboarding v3", "kind": "file", "resolvedTo": "figma://file/abc/Onboarding-v3"}
+    ],
+    "blockedOn": null,
+    "likelyNextSteps": ["move to Step 2", "review copy with team"]
+  },
+  "events": [
+    {"kind": "screen", "t": "2026-05-17T10:14:00Z", "app": "Figma", "window": "Onboarding v3", "surface": "frame: Step 2"},
+    {"kind": "input", "t": "2026-05-17T10:14:30Z", "app": "Figma", "text": "Verify your email"},
+    {"kind": "dwell", "t": "2026-05-17T10:16:00Z", "app": "Figma", "duration_s": 90, "signal": "deep focus"},
+    {"kind": "input", "t": "2026-05-17T10:16:45Z", "app": "Figma", "text": "Check your inbox for a 6-digit code"},
+    {"kind": "screen", "t": "2026-05-17T10:17:10Z", "app": "Figma", "surface": "frame: Step 2 (editing helper text)"}
+  ],
+  "resources": [
+    {"kind": "url", "uri": "figma://file/abc/Onboarding-v3", "label": "Onboarding v3", "app": "Figma", "lastSeen": "2026-05-17T10:17:10Z"},
+    {"kind": "url", "uri": "figma://file/abc/Onboarding-v3#frame:Step-1", "label": "Step 1", "app": "Figma", "lastSeen": "2026-05-17T10:13:50Z"},
+    {"kind": "url", "uri": "figma://file/abc/Onboarding-v3#frame:Step-2", "label": "Step 2", "app": "Figma", "lastSeen": "2026-05-17T10:17:10Z"}
+  ]
+}

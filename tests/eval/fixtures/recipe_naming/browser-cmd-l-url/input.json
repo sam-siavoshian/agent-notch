@@ -1,0 +1,33 @@
+{
+  "app": "Arc",
+  "bundle_id": "company.thebrowser.Browser",
+  "sequences": [
+    {
+      "before": {"surface": "Arc tab: GitHub - dashboard"},
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+l"},
+        {"kind": "type", "value": "https://github.com/anthropics/claude-code"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "after": {"surface": "Arc tab: github.com/anthropics/claude-code"}
+    },
+    {
+      "before": {"surface": "Arc tab: github.com/anthropics/claude-code"},
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+l"},
+        {"kind": "type", "value": "https://figma.com/files/recent"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "after": {"surface": "Arc tab: figma.com/files/recent"}
+    },
+    {
+      "before": {"surface": "Arc tab: figma.com/files/recent"},
+      "steps": [
+        {"kind": "shortcut", "keys": "cmd+l"},
+        {"kind": "type", "value": "https://news.ycombinator.com"},
+        {"kind": "key", "keys": "return"}
+      ],
+      "after": {"surface": "Arc tab: news.ycombinator.com"}
+    }
+  ]
+}

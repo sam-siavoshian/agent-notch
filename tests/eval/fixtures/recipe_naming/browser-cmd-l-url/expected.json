@@ -1,0 +1,4 @@
+{
+  "name_must_contain_any": ["navigate", "open", "go", "url", "visit"],
+  "trigger_pattern_must_contain_any": ["go to", "open", "navigate", "<url"]
+}

@@ -1,0 +1,35 @@
+{
+  "current": {
+    "id": "t_2026-05-17_10",
+    "startedAt": "2026-05-17T10:00:00Z",
+    "label": "Iterate Onboarding v3 in Figma",
+    "kind": "design_iteration",
+    "narrative": "User has been editing the Onboarding v3 file in Figma for the last 30 minutes. Worked through Step 1 and Step 2 helper text, finalized the email-capture flow.",
+    "actionsTaken": [
+      {"t": "2026-05-17T10:02:10Z", "what": "edited Step 1 email-capture copy"},
+      {"t": "2026-05-17T10:17:10Z", "what": "edited Step 2 helper text"}
+    ],
+    "resources": [
+      "figma://file/abc/Onboarding-v3",
+      "figma://file/abc/Onboarding-v3#frame:Step-1",
+      "figma://file/abc/Onboarding-v3#frame:Step-2"
+    ],
+    "entities": [
+      {"label": "Onboarding v3", "kind": "file", "resolvedTo": "figma://file/abc/Onboarding-v3"}
+    ],
+    "blockedOn": null,
+    "likelyNextSteps": ["review with team", "export frames"]
+  },
+  "events": [
+    {"kind": "app_switch", "t": "2026-05-17T10:30:00Z", "to_bundle": "com.googlecode.iterm2"},
+    {"kind": "screen", "t": "2026-05-17T10:30:02Z", "app": "iTerm2", "window": "~/code/agent-notch", "surface": "shell prompt"},
+    {"kind": "input", "t": "2026-05-17T10:30:08Z", "app": "iTerm2", "text": "git status"},
+    {"kind": "app_switch", "t": "2026-05-17T10:30:45Z", "to_bundle": "com.microsoft.VSCode"},
+    {"kind": "screen", "t": "2026-05-17T10:31:00Z", "app": "Visual Studio Code", "window": "ActiveTaskUpdater.swift — agent-notch", "surface": "editor: ActiveTaskUpdater.swift"}
+  ],
+  "resources": [
+    {"kind": "url", "uri": "figma://file/abc/Onboarding-v3", "label": "Onboarding v3", "app": "Figma", "lastSeen": "2026-05-17T10:17:10Z"},
+    {"kind": "cwd", "uri": "file:///Users/arshan/code/agent-notch", "label": "agent-notch", "app": "iTerm2", "lastSeen": "2026-05-17T10:30:08Z"},
+    {"kind": "file", "uri": "file:///Users/arshan/code/agent-notch/Features/Context/ActiveTaskUpdater.swift", "label": "ActiveTaskUpdater.swift", "app": "Visual Studio Code", "lastSeen": "2026-05-17T10:31:00Z"}
+  ]
+}

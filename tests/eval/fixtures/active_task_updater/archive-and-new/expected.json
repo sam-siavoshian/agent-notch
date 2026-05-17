@@ -1,0 +1,8 @@
+{
+  "response_shape": "archive_and_start_new",
+  "ended_outcome_must_contain": ["Figma"],
+  "new_task_label_contains": ["agent-notch"],
+  "new_task_kind_in": ["coding", "engineering", "development"],
+  "narrative_must_contain": ["VSCode", "ActiveTaskUpdater"],
+  "resources_must_include": ["file:///Users/arshan/code/agent-notch/Features/Context/ActiveTaskUpdater.swift"]
+}

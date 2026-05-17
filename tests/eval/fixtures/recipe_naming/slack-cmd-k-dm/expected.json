@@ -1,0 +1,4 @@
+{
+  "name_must_contain_any": ["dm", "message", "open"],
+  "trigger_pattern_must_contain_any": ["dm", "message", "<person"]
+}
