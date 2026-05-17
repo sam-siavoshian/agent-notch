@@ -23,7 +23,11 @@ struct AgentSettingsView: View {
             quitRow
             savedBadge
         }
-        .frame(maxWidth: .infinity, minHeight: 360, alignment: .topLeading)
+        // idealHeight (not minHeight) propagates through the parent's
+        // .fixedSize(vertical:true) so the notch GeometryReader measures
+        // a tall settings frame and grows the notch accordingly.
+        .frame(maxWidth: .infinity, idealHeight: 420, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
         .onChange(of: store.settings) { _, _ in
             savedOpacity = 1
             withAnimation(.easeOut(duration: 0.4).delay(1.0)) {
