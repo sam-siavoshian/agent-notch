@@ -643,6 +643,8 @@ public final class ComputerUseHarness {
 
         Typing: for entering text > 4 chars into a normal field, the computer.type action pastes via the pasteboard automatically — no extra steps needed. For text fields you can address via AX, prefer ax_set_value.
 
+        Scrolling: `scroll_amount` is a count of mouse-wheel "clicks", each ≈ 100px on screen. Defaults are too small — when you need to move the page, use scroll_amount 5-10 (≈ half a screen) and 15-20 (≈ a full screen). NEVER scroll with amount=1 or 2 expecting visible motion; you will get stuck repeating tiny scrolls. If after one scroll the target still is not on screen, double the amount on the next call instead of repeating the same value.
+
         Refuse irreversible destructive actions (delete files, format drives, send payments, send messages to people you cannot confirm) without explicit user confirmation. If a fast-path tool would cause one of these, decline and ask first.
 
         When in doubt: take a screenshot, then act. Default to action over asking. Default to one tool call over a paragraph of prose.
