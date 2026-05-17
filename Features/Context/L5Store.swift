@@ -92,6 +92,7 @@ public final class L5Store {
         queue.sync {
             var out: [CArchivedTask] = []
             var cursor = start
+            let cal = Calendar.current
             while cursor <= end {
                 let day = Self.dayFormatter.string(from: cursor)
                 let url = Self.taskArchiveRoot.appendingPathComponent("\(day).jsonl")
@@ -103,7 +104,7 @@ public final class L5Store {
                         }
                     }
                 }
-                cursor = Calendar.current.date(byAdding: .day, value: 1, to: cursor) ?? end.addingTimeInterval(86_400)
+                cursor = cal.date(byAdding: .day, value: 1, to: cursor) ?? end.addingTimeInterval(86_400)
             }
             return out
         }
