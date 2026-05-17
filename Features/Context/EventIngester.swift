@@ -1,9 +1,8 @@
 import Foundation
 import AppKit
 
-/// Single ingest point for all monitors. Monitors call `ingest(...)` with a partial event;
-/// EventIngester fills in the envelope (seq, sourceMonitor, frontmost-app metadata),
-/// runs it through PrivacyGate, and forwards surviving events to EventLog.
+/// Single ingest point for all monitors. Fills the envelope (seq, sourceMonitor, frontmost-app),
+/// runs PrivacyGate, and forwards survivors to EventLog.
 public final class EventIngester {
 
     public static let shared = EventIngester()
@@ -11,11 +10,7 @@ public final class EventIngester {
     private init() {}
 
     /// Ingest a payload from a monitor.
-    ///
     /// - Parameters:
-    ///   - kind: event kind
-    ///   - sourceMonitor: which subsystem produced this (e.g. "KeystrokeMonitor")
-    ///   - payload: the typed payload
     ///   - explicitApp: when set, overrides the frontmost-app autofill (e.g. for app_switch events)
     @discardableResult
     public func ingest(
@@ -60,15 +55,12 @@ public final class EventIngester {
         }
     }
 
-    static func frontmostAppContext() -> AppContext? {
+    private static func frontmostAppContext() -> AppContext? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         return AppContext(
             name: app.localizedName,
             bundleID: app.bundleIdentifier,
-            pid: Int(app.processIdentifier),
-            windowTitle: nil,   // window title would need CGWindowList query; optional autofill
-            windowID: nil,
-            displayID: nil      // display ID likewise; monitors that know better can pass explicitApp
+            pid: Int(app.processIdentifier)
         )
     }
 }

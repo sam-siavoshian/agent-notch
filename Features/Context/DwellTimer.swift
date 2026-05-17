@@ -1,9 +1,8 @@
 import Foundation
 import AppKit
 
-/// Tracks how long the user is focused in each (app, window) pair. When focus moves
-/// elsewhere AND stays away ≥10 s, emits a `.dwell` CEvent with the accumulated duration.
-/// Dwells shorter than 15 s are discarded as navigation noise.
+/// Tracks focus duration per (app, window). When focus moves elsewhere AND stays away ≥10s,
+/// emits a `.dwell` CEvent with the accumulated duration. Dwells <15s are discarded as noise.
 public final class DwellTimer {
 
     public static let shared = DwellTimer()
@@ -11,7 +10,7 @@ public final class DwellTimer {
     private struct Key: Hashable { let bundleID: String; let windowTitle: String }
     private struct DwellState {
         var enteredAt: Date
-        var accumulated: TimeInterval     // accumulated focused time
+        var accumulated: TimeInterval
         var lastLeftAt: Date?             // nil = still focused
     }
 
@@ -24,16 +23,13 @@ public final class DwellTimer {
     private init() {}
 
     public func start() {
-        // Subscribe to focus changes
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(handleAppActivated(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil
         )
-        // Periodically sweep for dwells that have aged out (left ≥10s ago)
         sweepTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             self?.sweep()
         }
-        // Bootstrap from current frontmost
         if let app = NSWorkspace.shared.frontmostApplication {
             handleFocusEntered(bundleID: app.bundleIdentifier ?? "<unknown>", windowTitle: app.localizedName ?? "<unknown>")
         }
@@ -47,7 +43,7 @@ public final class DwellTimer {
 
     @objc private func handleAppActivated(_ notification: Notification) {
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-        // We don't poll window title here (would require AX/CGWindow query); use localized name.
+        // Use localized name as window title (avoids AX/CGWindow query).
         let bundleID = app.bundleIdentifier ?? "<unknown>"
         let windowTitle = app.localizedName ?? "<unknown>"
         handleFocusEntered(bundleID: bundleID, windowTitle: windowTitle)
@@ -56,7 +52,6 @@ public final class DwellTimer {
     private func handleFocusEntered(bundleID: String, windowTitle: String) {
         let now = Date()
         queue.sync {
-            // Leave the previous one
             if let prev = current, prev.bundleID != bundleID || prev.windowTitle != windowTitle {
                 if var state = states[prev] {
                     state.accumulated += now.timeIntervalSince(state.enteredAt)
@@ -64,7 +59,6 @@ public final class DwellTimer {
                     states[prev] = state
                 }
             }
-            // Enter the new one
             let key = Key(bundleID: bundleID, windowTitle: windowTitle)
             if var state = states[key] {
                 // Resume — clear lastLeftAt, reset entered timer
