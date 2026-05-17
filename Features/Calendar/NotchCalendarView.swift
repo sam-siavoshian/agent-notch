@@ -723,10 +723,11 @@ private struct WeekStrip: View {
     }
 
     var body: some View {
-        let today = Calendar.current.startOfDay(for: Date())
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
         HStack(spacing: 4) {
             ForEach(days, id: \.self) { day in
-                let isToday = Calendar.current.isDate(day, inSameDayAs: today)
+                let isToday = cal.isDate(day, inSameDayAs: today)
                 DayCell(date: day, isToday: isToday, accent: accent)
                     .frame(maxWidth: .infinity)
             }
