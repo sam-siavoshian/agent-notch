@@ -19,6 +19,8 @@ struct NotchCalendarView: View {
             }
         }
         .onReceive(ticker) { now = $0 }
+        .frame(maxWidth: .infinity, idealHeight: 320, alignment: .topLeading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Request access (editorial layout)
