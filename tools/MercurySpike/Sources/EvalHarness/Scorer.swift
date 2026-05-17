@@ -45,15 +45,24 @@ public struct ModelOutput {
     }
 
     /// Parse a Mercury response shaped `{"intent": {...}, "brief": "..."}`.
+    ///
+    /// The brief is extracted via JSONSerialization *independently* of intent decoding,
+    /// so a brief that's well-formed still reaches scorers even when the Intent struct
+    /// can't be decoded (e.g., when Mercury emits unexpected entity shapes).
     public static func parse(_ raw: String) throws -> ModelOutput {
         guard let data = raw.data(using: .utf8) else {
             throw NSError(domain: "ModelOutput", code: 1, userInfo: [NSLocalizedDescriptionKey: "non-utf8"])
         }
-        struct Envelope: Decodable {
-            let intent: Intent?
-            let brief: String?
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "ModelOutput", code: 2, userInfo: [NSLocalizedDescriptionKey: "rawJSON not an object"])
         }
-        let env = try JSONDecoder().decode(Envelope.self, from: data)
-        return ModelOutput(intent: env.intent, brief: env.brief ?? "", rawJSON: raw)
+        let brief = (obj["brief"] as? String) ?? ""
+        var intent: Intent? = nil
+        if let intentAny = obj["intent"] {
+            if let intentData = try? JSONSerialization.data(withJSONObject: intentAny) {
+                intent = try? JSONDecoder().decode(Intent.self, from: intentData)
+            }
+        }
+        return ModelOutput(intent: intent, brief: brief, rawJSON: raw)
     }
 }
