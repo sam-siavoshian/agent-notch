@@ -175,8 +175,8 @@ struct OnboardingView: View {
             .padding(.vertical, 24)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        .frame(minWidth: 480, idealWidth: 620, maxWidth: 760,
-               minHeight: 460, idealHeight: 520)
+        .frame(minWidth: 560, idealWidth: 760, maxWidth: 900,
+               minHeight: 560, idealHeight: 760)
         .onAppear {
             checker.startPolling()
             pulseScale = 2.4
