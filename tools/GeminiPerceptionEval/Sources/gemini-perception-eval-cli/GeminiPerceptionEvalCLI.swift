@@ -60,7 +60,7 @@ struct GeminiPerceptionEvalCLI {
 
         var report = "# Gemini Perception Eval\n\n"
         report += "Generated: \(ISO8601DateFormatter().string(from: Date()))\n\n"
-        report += "Fixtures: `\(fixturesURL.path)`  ·  Variants: `\(variants.map { $0.name }.joined(separator: ", "))`\n\n"
+        report += "Fixtures: `\(fixturesURL.path)`  ·  Variants: `\(variants.map(\.name).joined(separator: ", "))`\n\n"
 
         do {
             if apiKey?.isEmpty ?? true {
