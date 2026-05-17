@@ -59,7 +59,7 @@ public final class TerminalAdapter: AppContextAdapter {
 
     public func recentResources(bundleID: String) async -> [CResourceRef] {
         guard let cwd = readCwdViaOSC7() else { return [] }
-        let appLabel = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleID }?.localizedName ?? bundleID
+        let appLabel = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
         return [
             CResourceRef(
                 kind: "cwd",
