@@ -679,7 +679,7 @@ Local fallback path is ~200 lines of Swift. The agent always receives *some* use
 | `ActiveTaskUpdater.swift` | ~5K | Periodic + on-demand Mercury task synthesis. |
 | `Selector.swift` | ~4K | Long-press entry. Mercury call + fallback. |
 | `LocalBriefRenderer.swift` | ~3K | Fallback brief generator (no network/Mercury). |
-| `MercuryClient.swift` | ~4K | URLSession wrapper for Mercury 2 API. |
+| `MercuryClient.swift` | ~4K | URLSession wrapper hitting **OpenRouter** (`https://openrouter.ai/api/v1/chat/completions`) with `model: "inception/mercury-2-..."` (exact slug confirmed at spike time). OpenAI-compatible request/response shape, so the client is small. Auth via `OPENROUTER_API_KEY` env var. Mirrors `AnthropicClient` shape otherwise. |
 | `Adapters/AppContextAdapter.swift` | ~1K | Protocol. |
 | `Adapters/BrowserAdapter.swift` | ~5K | Arc/Chrome/Safari/Brave via AppleScript. |
 | `Adapters/TerminalAdapter.swift` | ~4K | Terminal/iTerm2 + OSC 7 fallback. |
@@ -708,7 +708,7 @@ Local fallback path is ~200 lines of Swift. The agent always receives *some* use
 |---|:---:|---|
 | `AgentInterfaces.swift` | **K+** | Add `Selector.shared` slot. |
 | `AgentSettingsStore.swift` | **K+** | + `collectionPaused: Bool`, `neverLogApps: [String]`, `mercuryEnabled: Bool`. |
-| `Secrets.swift` | **K+** | + `Secrets.mercuryAPIKey` (env `MERCURY_API_KEY`). Drop `geminiAPIKey`. |
+| `Secrets.swift` | **K+** | + `Secrets.openRouterAPIKey` (env `OPENROUTER_API_KEY`) — Mercury is accessed via OpenRouter, not directly. Drop `geminiAPIKey`. |
 | `AgentState.swift` | **K+** | + `lastBriefDegraded: Bool`, `contextDegraded: Bool`. |
 
 ### Storage migration
@@ -751,7 +751,7 @@ End-to-end long-press → harness start: **1–1.5s typical, 3–3.5s worst case
 
 ## 10. Risks & open questions
 
-1. **Mercury 2 API spike — required before phase 4 of the implementation plan.** Spec assumes JSON-completion-style API, text-only modality, latency comparable to Haiku, and reliable JSON-mode. None of this is verified. **Action:** before any selector/task-updater code is written, build a throwaway `MercuryClient.swift` that hits the actual endpoint with a representative payload and measures: (a) auth/request/response shape, (b) JSON-mode reliability (strict-schema returns vs free-form), (c) median + p95 latency at 5K input / 600 output, (d) rate limits, (e) cost. Findings update §9 cost/latency table and §11 acceptance criteria. If results disqualify Mercury for any of the three roles, re-open the model question.
+1. **Mercury 2 via OpenRouter — spike required before phase 4 of the implementation plan.** Mercury 2 is accessed through OpenRouter's API (`https://openrouter.ai/api/v1/chat/completions`, OpenAI-compatible request/response). Spec assumes reliable JSON-mode, text-only modality, latency comparable to Haiku. None of this is verified. **Action:** before any selector/task-updater code is written, build a throwaway `MercuryClient.swift` against OpenRouter and measure: (a) exact model slug (`inception/mercury-2-coder` vs other variants), (b) JSON-mode reliability via OpenRouter's `response_format` parameter (strict-schema returns vs free-form), (c) median + p95 latency at 5K input / 600 output, (d) OpenRouter rate limits + Mercury upstream limits, (e) per-token cost. Findings update §9 cost/latency table and §11 acceptance criteria. If results disqualify Mercury for any of the three roles, re-open the model question (Haiku via Anthropic is the obvious fallback since `AnthropicClient` already exists).
 2. **`IntentRouter.swift`.** Unread during this spec. Could be demo-prompt routing, could overlap with `ContextIntentResolver`. **Action:** first read of phase-2 implementation; fold or delete then.
 3. **Input Monitoring TCC permission.** CGEvent taps for keystrokes require this permission on macOS 14+, separate from Accessibility. **Action:** add the permission card to `Features/Onboarding/OnboardingView.swift` follow-up, and `PermissionChecker.swift` needs an `inputMonitoring: Bool` field. Without it, `KeystrokeMonitor` runs in degraded mode (no `input` events; AX still works) but recipe inference loses fidelity.
 4. **AppleScript Automation permissions per adapter.** Each adapter triggers one per-app prompt (Arc, Chrome, Safari, Brave, Terminal, iTerm2, Xcode, VSCode, Cursor) on first invocation. App needs `com.apple.security.automation.apple-events` entitlement (already in `AgentNotch.entitlements`). `AppleScriptBridge.swift` allowlist currently does *not* include the new adapter bundle IDs — must be extended in phase 3. Onboarding should pre-warm or explain these — **follow-up in `Features/Onboarding/`**.
@@ -814,19 +814,84 @@ Each criterion below names a concrete fixture, scorer, or measurement procedure.
 - Slack/iMessage adapter (would unlock claims like "last DM N min ago" in briefs).
 - Full Spaces support (per-Space frontmost tracking).
 
-## 13. Suggested phase breakdown for the implementation plan
+## 13. Offline benchmark & evaluation harness
+
+**Requirement:** every Mercury prompt (Selector, ActiveTaskUpdater, Recipe Naming) must be tested against a fixture suite with mock inputs and graded outputs **before being wired into the live path**. This is a hard precondition for shipping each phase that introduces a Mercury role.
+
+### Structure
+
+```
+tests/eval/
+  fixtures/
+    selector/
+      scenario-A-slack-dm-with-person/
+        input.json              # full selector input payload
+        expected_intent.json    # ground-truth resolved intent
+        expected_brief_must_contain.json   # ["cmd+K", "maya", "return", "figma.com"]
+        expected_brief_must_not_contain.json  # ["bbox", "pixel", "[0-9]{3}, [0-9]{3}"]
+        notes.md
+      scenario-B-arc-open-PR/
+        ...
+      scenario-C-iterm-run-tests/
+        ...
+    active_task_updater/
+      task-from-cold-start/         # empty active_task + 8 events → new active_task
+      task-continuation/            # existing task + 5 new in-domain events → updated
+      task-archive-and-new/         # existing task + 5 out-of-domain events → archive + new
+    recipe_naming/
+      slack-cmd-k-dm/               # 3 sequences → expected name "open DM with person"
+      browser-cmd-l-url/            # 3 sequences → expected name "navigate to URL"
+  goldens/
+    selector/<scenario>/golden_output.json   # snapshot of a known-good run, updated manually
+  harness/
+    EvalHarness.swift               # loads fixtures, runs prompts, computes scores
+    Scorers.swift                   # the actual scorers (see below)
+    OfflineRunner.swift             # CLI entry point, no network mode + mock-LLM mode
+```
+
+### Scorers (deterministic, no LLM-as-judge for v1)
+
+| Scorer | What it checks |
+|---|---|
+| `must_contain` | All strings in `expected_brief_must_contain` appear in the generated brief (case-insensitive) |
+| `must_not_contain` | None of the strings/regexes in `expected_brief_must_not_contain` appear |
+| `intent_match` | Intent JSON matches expected on: `verb` (exact), `resolved_target` (substring), `entities[].resolved_to` (set match) |
+| `pixel_coord_grep` | Regex scan of brief for `\b\d{2,4}\s*,\s*\d{2,4}\b` — fails on any hit |
+| `token_budget` | Brief ≤ 600 tokens (tokenized via a Swift tiktoken port or character heuristic for v1) |
+| `schema_valid` | Strict JSON schema validation of the response |
+| `latency_p95` | Aggregated across the run, asserted against §11 targets |
+
+### Two modes
+
+- **Mock-LLM mode.** `MercuryClient` swapped for a fixture-replay client that returns pre-recorded responses keyed by input hash. Lets the rest of the pipeline (Selector input assembly, brief parsing, harness integration) be tested without network calls. Used in CI and during the Phase 1–3 buildout.
+- **Live-Mercury mode.** Real OpenRouter calls against fixture inputs, with results stored to `tests/eval/results/<run-id>/`. Run manually before each phase rollout and on prompt changes. Compares against `goldens/` to detect regressions; new responses appended to a review queue if they differ meaningfully (Levenshtein/cosine on brief text).
+
+### Acceptance gate
+
+A Mercury role does not go live until:
+1. All `must_contain` / `must_not_contain` / `intent_match` / `pixel_coord_grep` / `schema_valid` scorers pass on all fixtures.
+2. p95 latency in `Live-Mercury` mode meets §11 targets.
+3. Mock-LLM mode passes in CI on the integration tests that consume the role's output.
+
+### When to update fixtures
+
+- **Add a fixture** when a new failure mode is observed in dev or with real users — capture the input + the desired brief.
+- **Update goldens** only after manual review of why the output drifted (prompt change, model change, data shape change). Never auto-update.
+- **Retire a fixture** when its scenario is covered by another and the scorers are redundant.
+
+## 14. Suggested phase breakdown for the implementation plan
 
 Decomposition is the writing-plans skill's job, but as guidance to whoever picks that up:
 
-**Phase 0 — Mercury spike.** Throwaway `MercuryClient.swift` validates auth, JSON-mode, latency, cost. Findings drop into §9 and §11.
+**Phase 0 — Mercury spike + eval harness foundation.** Throwaway `MercuryClient.swift` against OpenRouter validates model slug, JSON-mode reliability, latency, cost. Findings drop into §9 and §11. **Also in phase 0:** scaffold `tests/eval/` per §13 with the EvalHarness, Scorers, and OfflineRunner. Write the first 3 selector fixtures (Slack DM, Arc URL, iTerm tests). Record initial Mock-LLM goldens from manual ideal-output construction.
 
 **Phase 1 — Foundation: events + privacy + storage.** New `ContextModels.swift`, `EventLog.swift`, `EventIngester.swift`, `PrivacyGate.swift`, `KeystrokeMonitor.swift`, `AXObserver.swift`, `ClipboardWatcher.swift`, `DwellTimer.swift`. Rewrite `ContextMemoryStore.swift` schema. Onboarding card for Input Monitoring TCC. **Verifiable independently** via PrivacyGate fixtures from §11.
 
 **Phase 2 — One adapter end-to-end.** `BrowserAdapter` (highest leverage) + `AdapterRegistry` + `AppContextAdapter` protocol. Plumbs `app_specific` into L2 and `recent_resources` into L5. Verifies the adapter abstraction.
 
-**Phase 3 — Synthesis: anchors + active_task.** `AnchorRecorder.swift`, `ActiveTaskUpdater.swift`. Now memory is continuous. Local-only at this point (no Selector yet).
+**Phase 3 — Synthesis: anchors + active_task.** `AnchorRecorder.swift`, `ActiveTaskUpdater.swift`. Now memory is continuous. Add ActiveTaskUpdater + Recipe Naming fixtures to `tests/eval/`; both Mercury roles must pass scorers in Mock-LLM mode and Live-Mercury mode before going live. Local-only at this point (no Selector yet).
 
-**Phase 4 — Selection.** `Selector.swift`, `LocalBriefRenderer.swift`, plus `AgentSession.swift` rewrite and the small `ComputerUseHarness` system-block edit. **First end-to-end demo possible at end of phase 4.**
+**Phase 4 — Selection.** `Selector.swift`, `LocalBriefRenderer.swift`, plus `AgentSession.swift` rewrite and the small `ComputerUseHarness` system-block edit. Selector prompt must pass §13 fixture suite in Live-Mercury mode before this phase flips the harness path. **First end-to-end demo possible at end of phase 4.**
 
 **Phase 5 — Remaining adapters + cuts.** `TerminalAdapter` (with OSC 7 script), `IDEAdapter`. Delete the Gemini service, intent resolver, memory renderer, activation builder, debug+AI/Cache views. Final size budget check from §11.
 
