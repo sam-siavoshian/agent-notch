@@ -150,6 +150,13 @@ public final class AgentSettingsStore: ObservableObject {
     private let fileURL: URL
     private var saveTask: Task<Void, Never>?
 
+    private static let sharedDecoder = JSONDecoder()
+    private static let sharedEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return e
+    }()
+
     private init() {
         let fm = FileManager.default
         let appSupport = (try? fm.url(
@@ -252,8 +259,8 @@ public final class AgentSettingsStore: ObservableObject {
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL) else { return }
-        guard let decoded = try? JSONDecoder().decode(AgentSettings.self, from: data) else { return }
+        guard let data = try? Data(contentsOf: fileURL),
+              let decoded = try? Self.sharedDecoder.decode(AgentSettings.self, from: data) else { return }
         settings = decoded
     }
 
@@ -264,9 +271,7 @@ public final class AgentSettingsStore: ObservableObject {
         saveTask = Task.detached(priority: .utility) {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            guard let data = try? encoder.encode(snapshot) else { return }
+            guard let data = try? Self.sharedEncoder.encode(snapshot) else { return }
             try? data.write(to: url, options: [.atomic])
         }
     }
