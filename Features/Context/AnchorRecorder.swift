@@ -319,7 +319,8 @@ public final class AnchorRecorder {
     /// slot when it looks like a person/file/url/query, otherwise keep literal.
     private static func normalizeSlot(text: String, focused: String?) -> String {
         // URL
-        if text.lowercased().hasPrefix("http://") || text.lowercased().hasPrefix("https://") {
+        let lowerText = text.lowercased()
+        if lowerText.hasPrefix("http://") || lowerText.hasPrefix("https://") {
             return "<url>"
         }
         // Search-shaped focused element
