@@ -12,9 +12,20 @@ import SwiftUI
 
 struct ToolCallStrip: View {
     @ObservedObject private var state = AgentState.shared
+    @StateObject private var frontmost = FrontmostAppObserver()
 
     var body: some View {
         HStack(spacing: 0) {
+            if let icon = frontmost.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    .padding(.trailing, 7)
+            }
+
             if let live = liveEntry {
                 LiveLabel(name: prettify(live.name))
             }
