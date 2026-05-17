@@ -43,6 +43,7 @@ public enum Keychain {
 
     @discardableResult
     public static func delete(_ account: String) -> Bool {
+        guard !account.isEmpty else { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
