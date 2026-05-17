@@ -57,12 +57,12 @@ public final class AudioDeviceManager: ObservableObject {
     }
 
     public func input(forUID uid: String?) -> AudioDevice? {
-        guard let uid else { return nil }
+        guard let uid, !uid.isEmpty else { return nil }
         return inputs.first { $0.uid == uid }
     }
 
     public func output(forUID uid: String?) -> AudioDevice? {
-        guard let uid else { return nil }
+        guard let uid, !uid.isEmpty else { return nil }
         return outputs.first { $0.uid == uid }
     }
 
