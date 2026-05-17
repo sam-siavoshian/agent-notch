@@ -756,13 +756,18 @@ private struct WeekStrip: View {
             )
         }
 
+        private static let letterFormatter: DateFormatter = {
+            let f = DateFormatter(); f.dateFormat = "EEEEE"; return f
+        }()
+        private static let dayFormatter: DateFormatter = {
+            let f = DateFormatter(); f.dateFormat = "d"; return f
+        }()
+
         private var letter: String {
-            let f = DateFormatter(); f.dateFormat = "EEEEE"
-            return f.string(from: date).uppercased()
+            Self.letterFormatter.string(from: date).uppercased()
         }
         private var day: String {
-            let f = DateFormatter(); f.dateFormat = "d"
-            return f.string(from: date)
+            Self.dayFormatter.string(from: date)
         }
     }
 }
