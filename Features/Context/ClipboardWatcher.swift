@@ -51,8 +51,7 @@ public final class ClipboardWatcher {
         selfPasteChangeCounts.insert(changeCount)
         // Garbage-collect old entries to avoid leak.
         if selfPasteChangeCounts.count > 64 {
-            let toRemove = selfPasteChangeCounts.sorted().prefix(selfPasteChangeCounts.count - 32)
-            for x in toRemove { selfPasteChangeCounts.remove(x) }
+            selfPasteChangeCounts = Set(selfPasteChangeCounts.sorted().suffix(32))
         }
     }
 
