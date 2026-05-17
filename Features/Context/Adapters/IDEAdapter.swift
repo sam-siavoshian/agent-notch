@@ -27,26 +27,14 @@ public final class IDEAdapter: AppContextAdapter {
         switch bundleID {
         case "com.apple.dt.Xcode":
             return await snapshotXcode()
-        case "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92":
+        case "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed":
+            // Zed has no scripting interface, so it falls through the same
+            // window-title parser. Zed titles are usually "<project> — <app>"
+            // (no filename), which `snapshotVSCodeLike` handles via parts[0].
             return snapshotVSCodeLike(bundleID: bundleID)
-        case "dev.zed.Zed":
-            return snapshotZed()
         default:
             throw AdapterError.unsupportedBundle(bundleID)
         }
-    }
-
-    public func recentResources(bundleID: String) async -> [CResourceRef] {
-        guard let snap = try? await snapshot(bundleID: bundleID) else { return [] }
-        var out: [CResourceRef] = []
-        let appLabel = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
-        if let openFile = snap["open_file"]?.value as? String, !openFile.isEmpty {
-            out.append(CResourceRef(kind: "file", uri: "file://\(openFile)", label: (openFile as NSString).lastPathComponent, app: appLabel, lastSeen: Date()))
-        }
-        if let root = snap["project_root"]?.value as? String, !root.isEmpty {
-            out.append(CResourceRef(kind: "cwd", uri: root, label: (root as NSString).lastPathComponent, app: appLabel, lastSeen: Date()))
-        }
-        return out
     }
 
     // MARK: - Xcode (AppleScript)
@@ -88,10 +76,9 @@ public final class IDEAdapter: AppContextAdapter {
         return dict
     }
 
-    // MARK: - VSCode / Cursor (window title + globalStorage)
+    // MARK: - VSCode / Cursor / Zed (window title via AX)
 
     private func snapshotVSCodeLike(bundleID: String) -> [String: AnyCodable] {
-        // Parse window title via AX (front window of frontmost app)
         guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }) else {
             return [:]
         }
@@ -106,8 +93,7 @@ public final class IDEAdapter: AppContextAdapter {
         AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleValue)
         let title = (titleValue as? String) ?? ""
 
-        // Title format (most VSCode/Cursor variants): "<filename> — <project> — <app>"
-        // Some installs use "•" or "–" or different em-dash variants.
+        // Title format: "<filename> — <project> — <app>" (separator varies: — – - •)
         var parts: [String] = []
         var current = ""
         for ch in title {
@@ -128,12 +114,8 @@ public final class IDEAdapter: AppContextAdapter {
         if parts.count >= 2, let project = parts.dropFirst().first {
             dict["project_label"] = AnyCodable(project)
         }
-        // VSCode/Cursor only put the bare filename in the title (not a path),
-        // so the .git walk almost never triggered. Two passes now:
-        //   1. If filename happens to be path-like, walk up from it.
-        //   2. Otherwise, look up `project_label` against conventional repo
-        //      roots (~/Desktop, ~/Documents, ~/Projects, ~/Code, ~/src, ~).
-        //      Cheap — a handful of stat calls.
+        // Resolve project_root: prefer path-like filename, fall back to looking
+        // up project_label under conventional repo roots.
         if let filename = parts.first, filename.contains("/") {
             let root = walkToGit(from: filename)
             if !root.isEmpty {
@@ -172,13 +154,6 @@ public final class IDEAdapter: AppContextAdapter {
             }
         }
         return nil
-    }
-
-    // MARK: - Zed (window title only)
-
-    private func snapshotZed() -> [String: AnyCodable] {
-        // Same window-title trick, but Zed shows "<project> — <app>" without a filename.
-        return snapshotVSCodeLike(bundleID: "dev.zed.Zed")
     }
 
     // MARK: - Helpers

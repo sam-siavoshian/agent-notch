@@ -32,8 +32,6 @@ public final class AdapterRegistry {
             var out: [AppContextAdapter] = []
             out.reserveCapacity(byBundleID.count)
             for adapter in byBundleID.values {
-                // ObjectIdentifier dedup only works for class types. AppContextAdapters
-                // are typically classes (AppleScript adapters need to hold state).
                 let id = ObjectIdentifier(adapter as AnyObject)
                 if seen.insert(id).inserted {
                     out.append(adapter)
@@ -57,8 +55,7 @@ public final class AdapterRegistry {
     }
 }
 
-/// Helper: race the async operation against a timeout. The first to complete wins.
-/// Adapted from the Swift Concurrency docs.
+/// Race the async operation against a timeout. The first to complete wins.
 private func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask {

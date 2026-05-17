@@ -1,31 +1,10 @@
-//
-//  BrowserAdapter.swift
-//  Agent in the Notch
-//
-//  AppContextAdapter for the four supported web browsers (Arc, Chrome,
-//  Safari, Brave). Uses AppleScript via NSAppleScript directly; the bundle
-//  IDs are also added to `AppleScriptBridge.allowedTargets` so the wider
-//  agent allowlist accepts these targets too.
-//
-//  Each browser exposes a slightly different scripting dictionary, so the
-//  adapter branches on bundle ID. Chromium-derived browsers (Chrome, Brave,
-//  Arc) share the same `active tab of window 1` shape; Safari uses
-//  `current tab of window 1`.
-//
-//  URL emission rules (enforced before any URL leaves this adapter):
-//    - Strip `user:pass@` userinfo
-//    - Strip query params matching
-//      (token|key|secret|password|auth|api_key|access_token|sig|signature)
-//
-
 import Foundation
-import AppKit
 
 /// AppContextAdapter for the four supported web browsers (Arc, Chrome, Safari, Brave).
 ///
-/// Uses AppleScript through `NSAppleScript`. `AppleScriptBridge.allowedTargets`
-/// has been extended in parallel so other code paths that gate on that
-/// allowlist will accept these browsers too.
+/// Uses AppleScript via `NSAppleScript`. Chromium-derived browsers (Chrome,
+/// Brave, Arc) share the same `active tab of window 1` shape; Safari uses
+/// `current tab of window 1`.
 ///
 /// **URL emission rules** (enforced before any URL leaves this adapter):
 ///   - Strip `user:pass@` userinfo
@@ -46,7 +25,6 @@ public final class BrowserAdapter: AppContextAdapter {
         let script: String
         switch bundleID {
         case "com.apple.Safari":
-            // Safari uses 'current tab of window 1' on its windows.
             script = """
             tell application "Safari"
                 try
@@ -63,7 +41,6 @@ public final class BrowserAdapter: AppContextAdapter {
             end tell
             """
         case "com.google.Chrome", "com.brave.Browser", "company.thebrowser.Browser":
-            // Chromium-derived browsers (incl. Arc, Brave) share the same dictionary.
             // App name in AppleScript: "Google Chrome" | "Brave Browser" | "Arc"
             let appName: String = {
                 switch bundleID {
@@ -94,13 +71,7 @@ public final class BrowserAdapter: AppContextAdapter {
 
         let result = try await runScript(script, bundleID: bundleID)
         let (activeURL, activeTitle, tabs) = parseBrowserResult(result)
-
         let cleanedActiveURL = Self.cleanURL(activeURL)
-        var dict: [String: AnyCodable] = [
-            "active_url": AnyCodable(cleanedActiveURL),
-            "active_title": AnyCodable(activeTitle)
-        ]
-        // tabs: array of {title, url, active}
         let cleanedTabs: [[String: Any]] = tabs.map { tab in
             let cleanedURL = Self.cleanURL(tab.url)
             return [
@@ -109,24 +80,11 @@ public final class BrowserAdapter: AppContextAdapter {
                 "active": cleanedURL == cleanedActiveURL
             ]
         }
-        dict["tabs"] = AnyCodable(cleanedTabs)
-        return dict
-    }
-
-    public func recentResources(bundleID: String) async -> [CResourceRef] {
-        guard let snap = try? await snapshot(bundleID: bundleID) else { return [] }
-        guard let tabsAny = snap["tabs"]?.value as? [[String: Any]] else { return [] }
-        let now = Date()
-        let appLabel = NSWorkspace.shared.runningApplications
-            .first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
-        var out: [CResourceRef] = []
-        for tab in tabsAny {
-            guard let title = tab["title"] as? String,
-                  let url = tab["url"] as? String,
-                  !url.isEmpty else { continue }
-            out.append(CResourceRef(kind: "url", uri: url, label: title, app: appLabel, lastSeen: now))
-        }
-        return out
+        return [
+            "active_url": AnyCodable(cleanedActiveURL),
+            "active_title": AnyCodable(activeTitle),
+            "tabs": AnyCodable(cleanedTabs)
+        ]
     }
 
     // MARK: - AppleScript invocation
@@ -177,7 +135,7 @@ public final class BrowserAdapter: AppContextAdapter {
 
     /// Strip user:pass@ userinfo and credential-bearing query params before any
     /// URL leaves the adapter.
-    public static func cleanURL(_ raw: String) -> String {
+    private static func cleanURL(_ raw: String) -> String {
         guard !raw.isEmpty, var comps = URLComponents(string: raw) else { return raw }
         comps.user = nil
         comps.password = nil
