@@ -118,11 +118,11 @@ public final class EvalRunner {
         for v in variants {
             let vrows = rows.filter { $0.variant == v.name }
             guard !vrows.isEmpty else { continue }
-            let meanSurface = mean(vrows.map { $0.surfaceMatch })
-            let meanRecall = mean(vrows.map { $0.controlRecall })
-            let meanPrecision = mean(vrows.map { $0.controlPrecision })
-            let meanLat = mean(vrows.map { $0.latencyS })
-            let p95Lat = percentile(vrows.map { $0.latencyS }, p: 0.95)
+            let meanSurface = mean(vrows.map(\.surfaceMatch))
+            let meanRecall = mean(vrows.map(\.controlRecall))
+            let meanPrecision = mean(vrows.map(\.controlPrecision))
+            let meanLat = mean(vrows.map(\.latencyS))
+            let p95Lat = percentile(vrows.map(\.latencyS), p: 0.95)
             let errs = vrows.filter { $0.error != nil }.count
             out += "| \(v.name) | \(fmt(meanSurface)) | \(fmt(meanRecall)) | \(fmt(meanPrecision)) | \(fmt(meanLat)) | \(fmt(p95Lat)) | \(errs) |\n"
         }
