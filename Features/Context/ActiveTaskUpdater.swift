@@ -79,7 +79,19 @@ public final class ActiveTaskUpdater {
         let events = EventLog.shared.tail(20)
         let resources = ResourceIndex.shared.recent(limit: 10)
 
-        let prompt = Self.buildPrompt(current: current, events: events, resources: resources)
+        // Pull the last few snapshots and reduce them to (app, surface, ocr_excerpt)
+        // entries — gives Mercury actual on-screen text to write a SPECIFIC
+        // active_task.title (e.g. "Drafting letter to Marcus") instead of
+        // app-and-surface-level generic titles.
+        let recentSnapshots = await ContextCoordinator.shared.recentSnapshots()
+        let recentScreenText = Self.buildRecentScreenText(from: recentSnapshots, limit: 5)
+
+        let prompt = Self.buildPrompt(
+            current: current,
+            events: events,
+            resources: resources,
+            recentScreenText: recentScreenText
+        )
         do {
             let raw = try await MercuryClient.shared.complete(
                 messages: [
@@ -145,6 +157,18 @@ public final class ActiveTaskUpdater {
       - CURRENT active_task: the current task object, or null if none exists
       - NEW events: a list of recent CEvent objects since the last update
       - RECENT resources: URIs the user has touched recently
+      - recent_screen_text: actual text from the last few app/surface captures (OCR excerpts)
+
+    You will receive `recent_screen_text` — actual text from the last few app/surface
+    captures. Use it to write a SPECIFIC label (e.g. "Drafting letter to Marcus about
+    Q3 timeline") rather than a generic one ("Writing in TextEdit"). When the screen
+    text contains a salutation, addressee, subject line, or document title, weave it
+    into the active_task.label and narrative. When it contains code, file paths, or
+    commit messages, do the same. Never invent — if the screen text is sparse, fall
+    back to the app-and-surface-level title. Additionally, populate active_task.resources
+    with one URI per distinct (app, surface) pair from recent_screen_text (e.g.
+    "textedit://letter-to-boss.rtf", "https://docs.google.com/...") so deictic
+    references like "the letter" can be resolved later.
 
     Return strictly one of these JSON shapes:
 
@@ -220,7 +244,66 @@ public final class ActiveTaskUpdater {
 
     // MARK: - Prompt builder
 
-    static func buildPrompt(current: CActiveTask?, events: [CEvent], resources: [CResourceRef]) -> String {
+    /// Compact (app, surface, ocr_excerpt) entry used to enrich the Mercury prompt.
+    struct RecentScreenTextEntry: Codable {
+        let app: String
+        let surface: String
+        let ocrExcerpt: String
+
+        enum CodingKeys: String, CodingKey {
+            case app
+            case surface
+            case ocrExcerpt = "ocr_excerpt"
+        }
+    }
+
+    /// Reduces a list of recent ContextSnapshots into ≤ `limit` entries of
+    /// (app, surface, ocr_excerpt). Dedups by (app, surface) keeping the
+    /// most-recent OCR. Strips whitespace-only lines and caps the excerpt at
+    /// 600 chars so the prompt doesn't bloat.
+    static func buildRecentScreenText(from snapshots: [ContextSnapshot], limit: Int) -> [RecentScreenTextEntry] {
+        // Walk newest-first so the first time we encounter an (app, surface)
+        // pair we get the freshest OCR. Then reverse back to chronological
+        // order before truncating.
+        var seen: Set<String> = []
+        var picked: [(snapshot: ContextSnapshot, key: String)] = []
+        for snap in snapshots.reversed() {
+            let app = snap.appName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let surface = snap.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = "\(app)\u{1F}\(surface)"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            picked.append((snap, key))
+        }
+        // Now newest-first; cap to `limit` then map.
+        return picked.prefix(max(0, limit)).map { entry in
+            let snap = entry.snapshot
+            let lines = snap.recognizedText
+                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let joined = lines.joined(separator: "\n")
+            let excerpt: String
+            if joined.count > 600 {
+                excerpt = String(joined.prefix(600))
+            } else {
+                excerpt = joined
+            }
+            let surface = snap.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedSurface = surface.isEmpty ? snap.appName : surface
+            return RecentScreenTextEntry(
+                app: snap.appName,
+                surface: resolvedSurface,
+                ocrExcerpt: excerpt
+            )
+        }
+    }
+
+    static func buildPrompt(
+        current: CActiveTask?,
+        events: [CEvent],
+        resources: [CResourceRef],
+        recentScreenText: [RecentScreenTextEntry] = []
+    ) -> String {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.sortedKeys]
@@ -246,6 +329,13 @@ public final class ActiveTaskUpdater {
             return "[]"
         }()
 
+        let recentScreenTextJSON: String = {
+            if let data = try? encoder.encode(recentScreenText) {
+                return String(data: data, encoding: .utf8) ?? "[]"
+            }
+            return "[]"
+        }()
+
         return """
         CURRENT active_task:
         \(currentJSON)
@@ -255,6 +345,9 @@ public final class ActiveTaskUpdater {
 
         RECENT resources index:
         \(resourcesJSON)
+
+        recent_screen_text:
+        \(recentScreenTextJSON)
 
         Return strictly one JSON object: {update: ...} OR {archive_and_start_new: {ended_task, new_task}}.
         """

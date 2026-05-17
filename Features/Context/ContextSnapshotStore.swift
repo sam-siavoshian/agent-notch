@@ -37,6 +37,21 @@ public actor ContextSnapshotStore {
         snapshots
     }
 
+    /// Returns the most recent N snapshots reduced to (app, surface, ocr lines)
+    /// tuples — the shape ActiveTaskUpdater needs to enrich the Mercury
+    /// active_task prompt. Caller does dedup/truncation; this helper just
+    /// strips the heavy fields (jpegData, geometry) so downstream code doesn't
+    /// touch internal snapshot structure.
+    public func recentForOCR(limit: Int) -> [(app: String, surface: String, ocr: [String])] {
+        let tail = snapshots.suffix(max(0, limit))
+        return tail.map { snap in
+            let lines = snap.recognizedText
+                .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            return (app: snap.appName, surface: snap.windowTitle, ocr: lines)
+        }
+    }
+
     public func lastSnapshot() -> ContextSnapshot? {
         snapshots.last
     }
