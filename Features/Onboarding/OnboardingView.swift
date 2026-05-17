@@ -155,7 +155,7 @@ struct OnboardingView: View {
 
     private var allGranted: Bool { checker.allGranted }
     private var grantedCount: Int {
-        checker.statuses.values.filter { $0 == .granted }.count
+        checker.statuses.values.count(where: { $0 == .granted })
     }
     private var needsRelaunch: Bool {
         // Screen Recording grants take effect only after a relaunch.
