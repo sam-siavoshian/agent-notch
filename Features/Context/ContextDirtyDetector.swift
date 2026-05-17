@@ -305,11 +305,14 @@ public enum ContextDirtyDetector {
         width: Int,
         height: Int
     ) {
-        for row in startRow..<min(size, startRow + height) {
-            let base = row * size
-            let xEnd = min(size, startX + width)
-            for column in startX..<xEnd {
-                bytes[base + column] = 0
+        let rowEnd = min(size, startRow + height)
+        let xEnd = min(size, startX + width)
+        guard xEnd > startX, rowEnd > startRow else { return }
+        let runLength = xEnd - startX
+        bytes.withUnsafeMutableBufferPointer { buffer in
+            guard let base = buffer.baseAddress else { return }
+            for row in startRow..<rowEnd {
+                (base + row * size + startX).update(repeating: 0, count: runLength)
             }
         }
     }
