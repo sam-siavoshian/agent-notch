@@ -460,6 +460,8 @@ private struct DraggableAgentIcon: View {
 /// Drawn fallback: black rounded square with a tiny notch silhouette in
 /// the top-center. Matches the product — looks like the menu-bar notch.
 private struct AgentNotchBadge: View {
+    private static let statusGreen = Color(red: 0.133, green: 0.773, blue: 0.369)
+
     var body: some View {
         GeometryReader { geo in
             let s = min(geo.size.width, geo.size.height)
@@ -496,10 +498,10 @@ private struct AgentNotchBadge: View {
                     )
                 // Tiny green status dot under the notch
                 Circle()
-                    .fill(Color(red: 0.133, green: 0.773, blue: 0.369))
+                    .fill(Self.statusGreen)
                     .frame(width: s * 0.13, height: s * 0.13)
                     .offset(y: s * 0.05)
-                    .shadow(color: Color(red: 0.133, green: 0.773, blue: 0.369).opacity(0.6),
+                    .shadow(color: Self.statusGreen.opacity(0.6),
                             radius: s * 0.10)
             }
         }
