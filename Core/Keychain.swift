@@ -40,15 +40,4 @@ public enum Keychain {
         guard status == errSecSuccess, let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
-
-    @discardableResult
-    public static func delete(_ account: String) -> Bool {
-        guard !account.isEmpty else { return false }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        return SecItemDelete(query as CFDictionary) == errSecSuccess
-    }
 }

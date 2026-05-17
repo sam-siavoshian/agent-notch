@@ -13,7 +13,7 @@ public enum Secrets {
         public static let anthropic = "ANTHROPIC_API_KEY"
         public static let openai = "OPENAI_API_KEY"
         public static let openRouter = "OPENROUTER_API_KEY"
-        public static let gemini = "GEMINI_API_KEY"   // restored for vision pre-processing
+        public static let gemini = "GEMINI_API_KEY"
     }
 
     public static var anthropicAPIKey: String? {
@@ -24,8 +24,6 @@ public enum Secrets {
         resolve(env: "OPENAI_API_KEY", account: Account.openai)
     }
 
-    /// Restored for vision pre-processing (single-call screenshot understanding
-    /// at long-press time). Not the old fan-out pipeline.
     public static var geminiAPIKey: String? {
         resolve(env: "GEMINI_API_KEY", account: Account.gemini)
     }
@@ -47,17 +45,8 @@ public enum Secrets {
         Keychain.set(key, account: Account.anthropic)
     }
 
-    // setOpenRouterAPIKey is below; Gemini observer is still active.
-
     public static func setOpenRouterAPIKey(_ key: String) {
         Keychain.set(key, account: Account.openRouter)
-    }
-
-    /// One-shot seed: stores a default OpenAI key only if Keychain has none.
-    /// Used during hackathon bring-up so a fresh machine works without manual setup.
-    public static func bootstrapOpenAIKey(_ key: String) {
-        guard Keychain.get(Account.openai) == nil else { return }
-        Keychain.set(key, account: Account.openai)
     }
 
     private static func resolve(env: String, account: String) -> String? {
