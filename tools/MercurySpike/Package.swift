@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "OpenRouterAPI"),
         .target(name: "EvalHarness", dependencies: ["OpenRouterAPI"]),
         .executableTarget(name: "MercurySpike", dependencies: ["OpenRouterAPI"]),
-        .executableTarget(name: "EvalRunner", dependencies: ["EvalHarness"]),
+        .executableTarget(name: "EvalRunner", dependencies: ["EvalHarness", "OpenRouterAPI"]),
         .testTarget(name: "OpenRouterAPITests", dependencies: ["OpenRouterAPI"]),
         .testTarget(name: "EvalHarnessTests", dependencies: ["EvalHarness"]),
     ]
