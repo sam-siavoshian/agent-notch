@@ -19,8 +19,8 @@ struct CursorCompanionView: View {
     @State private var idleOpacity: Double = 1.0
     @State private var haloPhase: CGFloat = 1.0
 
-    private let spriteSize: CGFloat = 17
-    private let symbol = "cursorarrow"
+    private static let spriteSize: CGFloat = 17
+    private static let symbol = "cursorarrow"
 
     private var isIdle: Bool { !viewModel.isListening && !viewModel.isThinking }
 
@@ -34,7 +34,7 @@ struct CursorCompanionView: View {
                 .opacity(isIdle ? idleOpacity : 1.0)
             thinkingOrbit
         }
-        .frame(width: spriteSize * 2.8, height: spriteSize * 2.8)
+        .frame(width: Self.spriteSize * 2.8, height: Self.spriteSize * 2.8)
         .onAppear { startIdleAnimations() }
         .onChange(of: viewModel.isListening) { _, listening in
             if listening {
@@ -77,9 +77,9 @@ struct CursorCompanionView: View {
     private var groundShadow: some View {
         Ellipse()
             .fill(Color.black.opacity(0.14))
-            .frame(width: spriteSize * 0.75, height: spriteSize * 0.30)
+            .frame(width: Self.spriteSize * 0.75, height: Self.spriteSize * 0.30)
             .blur(radius: 4)
-            .offset(y: spriteSize * 0.65)
+            .offset(y: Self.spriteSize * 0.65)
     }
 
     private var ambientHalo: some View {
@@ -92,10 +92,10 @@ struct CursorCompanionView: View {
                     ],
                     center: .center,
                     startRadius: 1,
-                    endRadius: spriteSize * 1.25
+                    endRadius: Self.spriteSize * 1.25
                 )
             )
-            .frame(width: spriteSize * 2.6, height: spriteSize * 2.6)
+            .frame(width: Self.spriteSize * 2.6, height: Self.spriteSize * 2.6)
             .scaleEffect(viewModel.isListening ? haloPhase : 1.0)
             .opacity(viewModel.isListening ? 1.0 : (isIdle ? 0.55 : 0.78))
     }
@@ -105,7 +105,7 @@ struct CursorCompanionView: View {
         if viewModel.isListening {
             Circle()
                 .stroke(Color.white.opacity(0.55), lineWidth: 1.4)
-                .frame(width: spriteSize * 1.55 * pulse, height: spriteSize * 1.55 * pulse)
+                .frame(width: Self.spriteSize * 1.55 * pulse, height: Self.spriteSize * 1.55 * pulse)
                 .blur(radius: 0.4)
                 .shadow(color: softPillColor.opacity(0.5), radius: 6)
         }
@@ -118,14 +118,14 @@ struct CursorCompanionView: View {
     /// Wrapped in 4-layer soft-pill shadow stack + warm tinted glow.
     private var cursorBody: some View {
         ZStack {
-            Image(systemName: symbol)
-                .font(.system(size: spriteSize, weight: .black))
+            Image(systemName: Self.symbol)
+                .font(.system(size: Self.spriteSize, weight: .black))
                 .foregroundStyle(Color.white.opacity(0.85))
                 .offset(x: 0.6, y: 0.9)
                 .blur(radius: 0.35)
 
-            Image(systemName: symbol)
-                .font(.system(size: spriteSize, weight: .black))
+            Image(systemName: Self.symbol)
+                .font(.system(size: Self.spriteSize, weight: .black))
                 .foregroundStyle(
                     LinearGradient(
                         colors: [softPillColorLight, softPillColor, softPillColorDeep],
@@ -134,15 +134,15 @@ struct CursorCompanionView: View {
                     )
                 )
 
-            Image(systemName: symbol)
-                .font(.system(size: spriteSize, weight: .black))
+            Image(systemName: Self.symbol)
+                .font(.system(size: Self.spriteSize, weight: .black))
                 .foregroundStyle(Color.white.opacity(0.45))
                 .offset(x: -0.45, y: -0.55)
                 .blur(radius: 0.25)
                 .blendMode(.plusLighter)
                 .mask(
-                    Image(systemName: symbol)
-                        .font(.system(size: spriteSize, weight: .black))
+                    Image(systemName: Self.symbol)
+                        .font(.system(size: Self.spriteSize, weight: .black))
                 )
         }
         // 4-layer soft-pill shadow recipe
@@ -162,7 +162,7 @@ struct CursorCompanionView: View {
                         .fill(Color.white)
                         .frame(width: 3.2 - CGFloat(i) * 0.7, height: 3.2 - CGFloat(i) * 0.7)
                         .opacity(1.0 - Double(i) * 0.32)
-                        .offset(y: -spriteSize * 0.95)
+                        .offset(y: -Self.spriteSize * 0.95)
                         .rotationEffect(.degrees(orbit - Double(i) * 30))
                         .shadow(color: softPillColor.opacity(0.75), radius: 2.5)
                 }
