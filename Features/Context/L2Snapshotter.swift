@@ -22,6 +22,13 @@ import ApplicationServices
 
 public enum L2Snapshotter {
 
+    private static let clickableRoles: Set<String> = [
+        "AXButton", "AXMenuItem", "AXMenuButton", "AXLink",
+        "AXRadioButton", "AXCheckBox", "AXTab", "AXTabGroup",
+        "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea",
+        "AXSearchField", "AXSlider", "AXStepper"
+    ]
+
     /// Build the L2 snapshot synchronously (from the caller's perspective). The
     /// `overallDeadline` parameter is informational — the actual ceiling comes
     /// from the per-component deadlines below.
@@ -201,15 +208,9 @@ public enum L2Snapshotter {
         walk(element: window, parentPath: "AXWindow", depth: 0, maxDepth: 3, focused: focused, collected: &collected)
 
         // Prioritize clickable elements; drop unlabeled passive ones; cap at 50.
-        let clickableRoles: Set<String> = [
-            "AXButton", "AXMenuItem", "AXMenuButton", "AXLink",
-            "AXRadioButton", "AXCheckBox", "AXTab", "AXTabGroup",
-            "AXPopUpButton", "AXComboBox", "AXTextField", "AXTextArea",
-            "AXSearchField", "AXSlider", "AXStepper"
-        ]
         let withLabel = collected.filter { ($0.label?.isEmpty == false) || $0.focused }
-        let clickable = withLabel.filter { clickableRoles.contains($0.role) }
-        let passive = withLabel.filter { !clickableRoles.contains($0.role) }
+        let clickable = withLabel.filter { Self.clickableRoles.contains($0.role) }
+        let passive = withLabel.filter { !Self.clickableRoles.contains($0.role) }
         // Take clickables first, fill the rest with passives.
         let combined = (clickable + passive).prefix(50)
         return Array(combined)
