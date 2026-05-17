@@ -12,12 +12,15 @@ public final class PrivacyGate {
     public static let shared = PrivacyGate()
 
     /// Frontmost-app bundle IDs whose events are dropped entirely.
-    /// Default list covers common password managers + Keychain. User edits via settings.
+    /// Default list covers common password managers + Keychain, plus our own
+    /// bundle ID so the user typing in the AgentNotch settings UI doesn't
+    /// pollute the event log. User edits via settings.
     public var neverLogApps: Set<String> = [
         "com.1password.1password7",
         "com.1password.1password8",
         "com.bitwarden.desktop",
-        "com.apple.keychainaccess"
+        "com.apple.keychainaccess",
+        "com.agentnotch.app"
     ]
 
     /// When true, suppress all events except occasional heartbeats.
@@ -33,6 +36,13 @@ public final class PrivacyGate {
 
     /// Process one event. Returns nil to drop, or a possibly-redacted CEvent.
     public func process(_ event: CEvent) -> CEvent? {
+        // Step 0: belt-and-suspenders — never log events from our own process,
+        // regardless of what the user added to neverLogApps. Catches the case
+        // where the build produces a different bundle ID than the default list.
+        if let selfBundle = Bundle.main.bundleIdentifier, event.bundleID == selfBundle {
+            return nil
+        }
+
         // Step 7: pause flag — only let heartbeat-shaped events through, throttled to 1/min.
         if collectionPaused {
             let allowed = (event.kind == .appSwitch) ||

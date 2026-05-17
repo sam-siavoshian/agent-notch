@@ -31,6 +31,7 @@ public struct AgentSettings: Equatable, Sendable {
         "com.1password.1password8",
         "com.bitwarden.desktop",
         "com.apple.keychainaccess",
+        "com.agentnotch.app",
     ]
 
     public static let `default` = AgentSettings(
