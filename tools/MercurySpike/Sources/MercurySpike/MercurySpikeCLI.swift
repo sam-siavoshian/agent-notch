@@ -17,6 +17,17 @@ struct MercurySpikeCLI {
             switch command {
             case "ping":
                 try await ProbeCommands.ping(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+            case "jsonMode":
+                try await ProbeCommands.jsonMode(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+            case "latency":
+                try await ProbeCommands.latency(client: client, model: args.dropFirst().first ?? "inception/mercury-coder")
+            case "all":
+                let model = args.dropFirst().first ?? "inception/mercury-coder"
+                try await ProbeCommands.ping(client: client, model: model)
+                print()
+                try await ProbeCommands.jsonMode(client: client, model: model)
+                print()
+                try await ProbeCommands.latency(client: client, model: model)
             case "help", "--help", "-h":
                 printUsage()
             default:
