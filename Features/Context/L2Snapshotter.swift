@@ -31,7 +31,11 @@ public enum L2Snapshotter {
     /// avoid bloating the Mercury 2 (text-only) selector prompt by hundreds
     /// of KB — callers that want the image (e.g. AgentSession passing the
     /// initiation screenshot through to Claude) read it from the tuple.
-    public static func snapshot(overallDeadline: TimeInterval = 0.4) async -> (l2: CL2Snapshot, screenshotJPEG: Data?) {
+    ///
+    /// Default deadline is 1.6s now because the optional Gemini vision call
+    /// has a 1.5s deadline. Vision can be disabled via `geminiVisionEnabled`;
+    /// when disabled the snapshot stays well under the legacy 0.4s ceiling.
+    public static func snapshot(overallDeadline: TimeInterval = 1.6) async -> (l2: CL2Snapshot, screenshotJPEG: Data?) {
         _ = overallDeadline // reserved for future use (e.g. Dev Tools timing assertions)
 
         // Frontmost app
@@ -42,7 +46,11 @@ public enum L2Snapshotter {
         let windowTitle = readWindowTitle(pid: pid)
         let (windowID, displayID, displayBounds) = readWindowAndDisplay(pid: pid)
 
+        // Read vision toggle once on the main actor.
+        let visionEnabled = await MainActor.run { AgentSettingsStore.shared.geminiVisionEnabled }
+
         // Parallel: screenshot+OCR, AX dump, app_specific adapter.
+        // Vision enrichment kicks off only after the capture lands (it needs the JPEG bytes).
         async let captureTask = captureScreenshotAndOCR(deadline: 0.25)
         async let axElementsTask = dumpAXElements(pid: pid, deadline: 0.15)
         async let appSpecificTask = AdapterRegistry.shared.snapshot(bundleID: bundleID, timeout: 0.2)
@@ -50,8 +58,18 @@ public enum L2Snapshotter {
         let capture = await captureTask
         let ocrLines = capture.ocrLines
         let screenshotJPEG = capture.jpegData
+
+        // Vision call: runs in parallel with the slower AX/adapter awaits below.
+        // 1.5s hard deadline inside VisionEnricher; returns nil on key missing,
+        // timeout, decoder error, or non-200 status.
+        async let visionTask: VisionEnricher.Result? = {
+            guard visionEnabled, let jpeg = screenshotJPEG else { return nil }
+            return await VisionEnricher.enrich(screenshotJPEG: jpeg, transcriptHint: nil)
+        }()
+
         let axElements = await axElementsTask
         let appSpecific = await appSpecificTask
+        let vision = await visionTask
 
         // Sync: selection + clipboard + cursor (cheap).
         let selection = AXObserverManager.shared.focusedElementDescriptor
@@ -72,7 +90,8 @@ public enum L2Snapshotter {
             cursor: cursor,
             selection: selection,
             clipboard: clipboard,
-            appSpecific: appSpecific
+            appSpecific: appSpecific,
+            vision: vision
         )
         return (l2: l2, screenshotJPEG: screenshotJPEG)
     }

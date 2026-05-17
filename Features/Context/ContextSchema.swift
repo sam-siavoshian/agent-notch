@@ -118,6 +118,11 @@ public struct CL2Snapshot: Codable {
     public let selection: String?
     public let clipboard: ClipboardSnapshot?
     public let appSpecific: [String: AnyCodable]?
+    /// Structured screen understanding from a vision model (Gemini Flash Lite).
+    /// Filled at long-press time by `VisionEnricher`; nil when disabled, no key,
+    /// or the call timed out. Mercury's selector prompt uses this to ground the
+    /// brief in what AX/OCR can't see (unlabeled icons, Electron UI, focal point).
+    public let vision: VisionEnricher.Result?
 
     public struct AXElement: Codable {
         public let role: String
