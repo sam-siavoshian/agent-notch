@@ -19,6 +19,8 @@ public final class IDEAdapter: AppContextAdapter {
         "dev.zed.Zed"
     ]
 
+    private static let titleSeparators: Set<Character> = ["—", "–", "-", "•"]
+
     public init() {}
 
     public func snapshot(bundleID: String) async throws -> [String: AnyCodable] {
@@ -106,11 +108,10 @@ public final class IDEAdapter: AppContextAdapter {
 
         // Title format (most VSCode/Cursor variants): "<filename> — <project> — <app>"
         // Some installs use "•" or "–" or different em-dash variants.
-        let separators: Set<Character> = ["—", "–", "-", "•"]
         var parts: [String] = []
         var current = ""
         for ch in title {
-            if separators.contains(ch) {
+            if Self.titleSeparators.contains(ch) {
                 parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
                 current = ""
             } else {
