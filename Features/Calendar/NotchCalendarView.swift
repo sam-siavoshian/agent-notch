@@ -282,13 +282,18 @@ private struct DateTile: View {
         }
     }
 
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM"; return f
+    }()
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "d"; return f
+    }()
+
     private var monthText: String {
-        let f = DateFormatter(); f.dateFormat = "MMM"
-        return f.string(from: date).uppercased()
+        Self.monthFormatter.string(from: date).uppercased()
     }
     private var dayText: String {
-        let f = DateFormatter(); f.dateFormat = "d"
-        return f.string(from: date)
+        Self.dayFormatter.string(from: date)
     }
 }
 
