@@ -29,6 +29,7 @@ public final class VoiceRecordingService {
 
     // swiftlint:disable:next force_unwrapping — hardcoded literal
     private static let whisperEndpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+    private static let whisperDecoder = JSONDecoder()
 
     private init() {}
 
@@ -212,7 +213,7 @@ public final class VoiceRecordingService {
         }
 
         struct WhisperResponse: Decodable { let text: String }
-        let decoded = try JSONDecoder().decode(WhisperResponse.self, from: data)
+        let decoded = try Self.whisperDecoder.decode(WhisperResponse.self, from: data)
         return decoded.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

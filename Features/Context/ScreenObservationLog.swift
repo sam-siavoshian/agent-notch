@@ -10,7 +10,11 @@ public final class ScreenObservationLog {
     private var buffer: [SurfaceObservation] = []
     private static let capacity = 100
     private let queue = DispatchQueue(label: "AgentNotch.ScreenObservationLog.queue")
-    private let encoder: JSONEncoder
+    private static let encoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        return e
+    }()
 
     private static let storageRoot: URL = {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -20,8 +24,6 @@ public final class ScreenObservationLog {
     private static let jsonlFile: URL = storageRoot.appendingPathComponent("screen_observations.jsonl")
 
     public init() {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
-        self.encoder = e
         try? FileManager.default.createDirectory(at: Self.storageRoot, withIntermediateDirectories: true)
     }
 
@@ -31,7 +33,7 @@ public final class ScreenObservationLog {
             if buffer.count > Self.capacity {
                 buffer.removeFirst(buffer.count - Self.capacity)
             }
-            if let data = try? encoder.encode(obs) {
+            if let data = try? Self.encoder.encode(obs) {
                 var line = data; line.append(0x0A)
                 if let h = try? FileHandle(forWritingTo: Self.jsonlFile) {
                     defer { try? h.close() }
