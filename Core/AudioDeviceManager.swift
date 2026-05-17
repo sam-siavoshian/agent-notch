@@ -146,13 +146,13 @@ public final class AudioDeviceManager: ObservableObject {
     }
 
     private static func deviceInfo(_ id: AudioDeviceID) -> AudioDevice? {
+        let hasInput  = channelCount(id, scope: kAudioObjectPropertyScopeInput)  > 0
+        let hasOutput = channelCount(id, scope: kAudioObjectPropertyScopeOutput) > 0
+        guard hasInput || hasOutput else { return nil }
         guard let uid = stringProperty(id, selector: kAudioDevicePropertyDeviceUID,
                                        scope: kAudioObjectPropertyScopeGlobal) else { return nil }
         let name = stringProperty(id, selector: kAudioObjectPropertyName,
                                   scope: kAudioObjectPropertyScopeGlobal) ?? uid
-        let hasInput  = channelCount(id, scope: kAudioObjectPropertyScopeInput)  > 0
-        let hasOutput = channelCount(id, scope: kAudioObjectPropertyScopeOutput) > 0
-        guard hasInput || hasOutput else { return nil }
         return AudioDevice(id: id, uid: uid, name: name, hasInput: hasInput, hasOutput: hasOutput)
     }
 
