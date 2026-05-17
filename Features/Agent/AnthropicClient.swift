@@ -7,9 +7,8 @@
 //
 
 import Foundation
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "anthropic")
+private let log = Log(category: "anthropic")
 
 public struct AnthropicClient: Sendable {
     public struct Error: Swift.Error, CustomStringConvertible {
@@ -58,29 +57,29 @@ public struct AnthropicClient: Sendable {
             throw Error(status: nil, body: nil, underlying: error)
         }
 
-        log.error("anthropic.request model=\(request.model, privacy: .public) messages=\(request.messages.count) max_tokens=\(request.maxTokens)")
+        log.info("anthropic.request model=\(request.model) messages=\(request.messages.count) max_tokens=\(request.maxTokens)")
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: req)
         } catch {
-            log.error("anthropic.network_error error=\(String(describing: error), privacy: .public)")
+            log.error("anthropic.network_error error=\(error)")
             throw Error(status: nil, body: nil, underlying: error)
         }
 
         let http = response as? HTTPURLResponse
         guard let http, (200..<300).contains(http.statusCode) else {
             let bodyString = String(data: data, encoding: .utf8)
-            log.error("anthropic.http_error status=\(http?.statusCode ?? -1) body=\(bodyString ?? "nil", privacy: .public)")
+            log.error("anthropic.http_error status=\(http?.statusCode ?? -1) body=\(bodyString ?? "nil")")
             throw Error(status: http?.statusCode, body: bodyString, underlying: nil)
         }
 
-        log.error("anthropic.response status=\(http.statusCode) body_bytes=\(data.count)")
+        log.info("anthropic.response status=\(http.statusCode) body_bytes=\(data.count)")
         let decoder = JSONDecoder()
         do {
             return try decoder.decode(AnthropicMessageResponse.self, from: data)
         } catch {
             let bodyString = String(data: data, encoding: .utf8)
-            log.error("anthropic.decode_error status=\(http.statusCode) body=\(bodyString ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public)")
+            log.error("anthropic.decode_error status=\(http.statusCode) body=\(bodyString ?? "nil") error=\(error)")
             throw Error(status: http.statusCode, body: bodyString, underlying: error)
         }
     }

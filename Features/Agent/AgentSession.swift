@@ -9,9 +9,8 @@
 //
 
 import Foundation
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "session")
+private let log = Log(category: "session")
 
 @MainActor
 public final class AgentSession {
@@ -46,10 +45,10 @@ public final class AgentSession {
             log.warning("session.fire skipped — empty transcript")
             return
         }
-        log.error("session.fire transcript=\(transcript, privacy: .public)")
+        log.info("session.fire transcript=\(transcript)")
 
         let context = await AgentInterfaces.context?.getRecentActivityContext() ?? ""
-        log.error("session.context context_len=\(context.count) has_context=\(AgentInterfaces.context != nil)")
+        log.info("session.context context_len=\(context.count) has_context=\(AgentInterfaces.context != nil)")
 
         let input = ComputerUseHarness.Input(transcript: transcript, contextSummary: context)
         await ComputerUseHarness.shared.run(input)

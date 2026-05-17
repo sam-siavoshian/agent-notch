@@ -6,6 +6,7 @@
 //  agent visible labels/entities without waiting on a network VLM call.
 //
 
+import Darwin
 import Foundation
 import ImageIO
 import Vision
@@ -29,7 +30,7 @@ public actor ContextOCRService {
         do {
             try handler.perform([request])
         } catch {
-            NSLog("[ContextOCRService] OCR failed: \(error)")
+            fputs("[ERROR] [context.ocr] OCR failed: \(error)\n", Darwin.stderr)
             return []
         }
 

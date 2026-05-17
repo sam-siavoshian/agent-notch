@@ -7,6 +7,7 @@
 //  same-surface click evidence.
 //
 
+import Darwin
 import Foundation
 
 public actor ContextMemoryStore {
@@ -498,7 +499,7 @@ public actor ContextMemoryStore {
             let markdown = ContextMemoryRenderer.markdown(for: memory)
             try markdown.write(to: markdownURL(for: appKey), atomically: true, encoding: .utf8)
         } catch {
-            NSLog("[ContextMemoryStore] Failed to persist memory for \(memory.appName): \(error)")
+            fputs("[ERROR] [context.memory] failed to persist memory for \(memory.appName): \(error)\n", Darwin.stderr)
         }
     }
 
@@ -528,7 +529,7 @@ public actor ContextMemoryStore {
                 try data.write(to: observationsURL, options: .atomic)
             }
         } catch {
-            NSLog("[ContextMemoryStore] Failed to append observation: \(error)")
+            fputs("[ERROR] [context.memory] failed to append observation: \(error)\n", Darwin.stderr)
         }
     }
 

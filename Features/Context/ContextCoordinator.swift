@@ -6,9 +6,12 @@
 //  exposes a compact text packet to AgentSession through AgentInterfaces.
 //
 
+import CryptoKit
 import Foundation
 import CoreGraphics
 import AppKit
+
+private let log = Log(category: "context")
 
 public final class ContextCoordinator: RecentActivityContext {
     public static let shared = ContextCoordinator()
@@ -19,7 +22,6 @@ public final class ContextCoordinator: RecentActivityContext {
     private let geminiObservationService: ContextGeminiObservationService
     private let aiObservationLog: ContextAIObservationLog
     private let geminiGate: ContextGeminiObservationGate
-    private let debugArtifactStore: ContextDebugArtifactStore
     private let capture: ScreenCapture
     private let clickMonitor: ContextClickMonitor
     private let appSwitchMonitor: ContextAppSwitchMonitor
@@ -33,8 +35,7 @@ public final class ContextCoordinator: RecentActivityContext {
         ocrService: ContextOCRService = .shared,
         geminiObservationService: ContextGeminiObservationService = .shared,
         aiObservationLog: ContextAIObservationLog = .shared,
-        geminiGate: ContextGeminiObservationGate = ContextGeminiObservationGate(),
-        debugArtifactStore: ContextDebugArtifactStore = .shared
+        geminiGate: ContextGeminiObservationGate = ContextGeminiObservationGate()
     ) {
         self.capture = capture
         self.memoryStore = memoryStore
@@ -42,7 +43,6 @@ public final class ContextCoordinator: RecentActivityContext {
         self.geminiObservationService = geminiObservationService
         self.aiObservationLog = aiObservationLog
         self.geminiGate = geminiGate
-        self.debugArtifactStore = debugArtifactStore
         self.clickMonitor = ContextClickMonitor { location in
             Task {
                 await ContextCoordinator.shared.capture(trigger: .click, cursorLocation: location)
@@ -102,7 +102,7 @@ public final class ContextCoordinator: RecentActivityContext {
             }
         }
 
-        NSLog("[ContextCoordinator] Context gathering \(paused ? "paused" : "resumed").")
+        log.info("context gathering \(paused ? "paused" : "resumed")")
         return isGatheringPaused
     }
 
@@ -125,201 +125,6 @@ public final class ContextCoordinator: RecentActivityContext {
         let appName = snapshots.last?.appName ?? ""
         let learnedMemory = await memoryStore.activationMemory(appName: appName)
         return await store.recentActivityContext(learnedUIMemory: learnedMemory)
-    }
-
-    public func debugSnapshots(limit: Int = 10) async -> [ContextDebugSnapshot] {
-        let snapshots = await store.recentSnapshots()
-        return snapshots
-            .suffix(max(0, limit))
-            .reversed()
-            .map { snapshot in
-                ContextDebugSnapshot(
-                    id: snapshot.id,
-                    capturedAt: snapshot.capturedAt,
-                    trigger: snapshot.trigger,
-                    appName: snapshot.appName,
-                    windowTitle: snapshot.windowTitle,
-                    jpegData: snapshot.jpegData,
-                    recognizedTextCount: snapshot.recognizedText.count,
-                    textPreview: Self.textPreview(from: snapshot)
-                )
-            }
-    }
-
-    public func aiObservationEvents(limit: Int = 20) async -> [ContextAIObservationEvent] {
-        await aiObservationLog.recentEvents(limit: limit)
-    }
-
-    public func aiObservationSummary() async -> ContextAIObservationSummary {
-        await aiObservationLog.summary()
-    }
-
-    public func captureCurrentScreenForDebug() async {
-        let cursorLocation = await MainActor.run {
-            NSEvent.mouseLocation
-        }
-        await capture(trigger: .manual, cursorLocation: cursorLocation, bypassPause: true)
-    }
-
-    public func compareLatestScreenshotForDebug() async {
-        guard ContextGeminiObservationService.isAPIKeyConfigured else {
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .skipped,
-                trigger: .manual,
-                appName: "Gemini comparison",
-                windowTitle: "",
-                reason: "GEMINI_API_KEY is not configured",
-                laneName: "compare"
-            ))
-            return
-        }
-
-        guard let snapshot = await store.recentSnapshots().last else {
-            await aiObservationLog.record(ContextAIObservationEvent(
-                status: .skipped,
-                trigger: .manual,
-                appName: "Gemini comparison",
-                windowTitle: "",
-                reason: "No recent screenshot available to compare",
-                laneName: "compare"
-            ))
-            return
-        }
-
-        let attemptID = UUID()
-        let variants = Self.comparisonVariants
-        let input = ContextGeminiObservationInput(
-            imageData: snapshot.jpegData,
-            mimeType: "image/jpeg",
-            appName: snapshot.appName,
-            windowTitle: snapshot.windowTitle,
-            width: snapshot.width,
-            height: snapshot.height,
-            recognizedText: snapshot.recognizedText,
-            metadata: [
-                "captureTrigger": "compare",
-                "comparisonLane": ContextGeminiObservationLane.uiMap.rawValue,
-                "comparisonPurpose": "same screenshot UI-map quality and latency comparison"
-            ]
-        )
-
-        await withTaskGroup(of: Void.self) { group in
-            for variant in variants {
-                group.addTask {
-                    let laneName = "compare-\(variant.id)"
-                    let debugPaths = ContextGeminiObservationService.debugPaths(
-                        for: snapshot.jpegData,
-                        mimeType: "image/jpeg",
-                        laneName: laneName
-                    )
-                    await self.aiObservationLog.record(ContextAIObservationEvent(
-                        status: .queued,
-                        model: variant.model,
-                        trigger: .manual,
-                        appName: snapshot.appName,
-                        windowTitle: snapshot.windowTitle,
-                        reason: "queued same-screenshot UI Map comparison for \(variant.label)",
-                        attemptID: attemptID,
-                        laneName: laneName,
-                        imageBytes: snapshot.jpegData.count,
-                        requestMimeType: "image/jpeg",
-                        requestMediaResolution: variant.mediaResolution,
-                        requestThinkingLevel: variant.thinkingLevel,
-                        ocrCount: snapshot.recognizedText.count,
-                        imageHash: debugPaths.imageHash,
-                        requestImagePath: debugPaths.requestImagePath,
-                        requestMetadataPath: debugPaths.requestMetadataPath,
-                        promptPath: debugPaths.promptPath,
-                        rawResponsePath: debugPaths.rawResponsePath,
-                        errorPath: debugPaths.errorPath
-                    ))
-
-                    let service = ContextGeminiObservationService(
-                        model: variant.model,
-                        mediaResolutionOverride: variant.mediaResolution,
-                        thinkingLevelOverride: variant.thinkingLevel
-                    )
-                    let startedAt = Date()
-                    let observation = await service.observeLane(
-                        .uiMap,
-                        input: input,
-                        previousSnapshot: nil,
-                        debugLaneName: laneName
-                    )
-                    let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
-
-                    guard let observation else {
-                        await self.aiObservationLog.record(ContextAIObservationEvent(
-                            status: .failed,
-                            model: variant.model,
-                            trigger: .manual,
-                            appName: snapshot.appName,
-                            windowTitle: snapshot.windowTitle,
-                            reason: "\(variant.label) returned no valid UI Map comparison output",
-                            attemptID: attemptID,
-                            laneName: laneName,
-                            latencyMilliseconds: elapsedMilliseconds,
-                            imageBytes: snapshot.jpegData.count,
-                            requestMimeType: "image/jpeg",
-                            requestMediaResolution: variant.mediaResolution,
-                            requestThinkingLevel: variant.thinkingLevel,
-                            ocrCount: snapshot.recognizedText.count,
-                            imageHash: debugPaths.imageHash,
-                            requestImagePath: debugPaths.requestImagePath,
-                            requestMetadataPath: debugPaths.requestMetadataPath,
-                            promptPath: debugPaths.promptPath,
-                            rawResponsePath: debugPaths.rawResponsePath,
-                            errorPath: debugPaths.errorPath
-                        ))
-                        return
-                    }
-
-                    await self.aiObservationLog.record(ContextAIObservationEvent(
-                        status: .completed,
-                        model: variant.model,
-                        trigger: .manual,
-                        appName: snapshot.appName,
-                        windowTitle: snapshot.windowTitle,
-                        reason: "\(variant.label) comparison produced \(observation.controls.count) controls, \(observation.workflows.count) workflows, \(observation.memoryCards.count) memory cards",
-                        attemptID: attemptID,
-                        laneName: laneName,
-                        source: observation.source.rawValue,
-                        latencyMilliseconds: elapsedMilliseconds,
-                        confidence: observation.confidence,
-                        surfaceLabel: observation.surfaceLabel,
-                        summary: observation.summary,
-                        screenType: observation.screenType,
-                        primaryTask: observation.primaryTask,
-                        contentSummary: observation.contentSummary,
-                        controls: Self.controlDescriptions(observation.controls),
-                        landmarks: observation.layoutRegions,
-                        entities: observation.entities,
-                        affordances: Self.controlDescriptions(observation.controls),
-                        stateIndicators: observation.stateIndicators,
-                        navigationPaths: observation.navigation,
-                        dataRegions: observation.layoutRegions,
-                        workflowHints: observation.workflows,
-                        negativeCues: observation.negativeCues,
-                        memoryCandidates: observation.memoryCards,
-                        uncertainty: observation.uncertainty,
-                        imageBytes: snapshot.jpegData.count,
-                        requestMimeType: "image/jpeg",
-                        requestMediaResolution: variant.mediaResolution,
-                        requestThinkingLevel: variant.thinkingLevel,
-                        ocrCount: snapshot.recognizedText.count,
-                        imageHash: debugPaths.imageHash,
-                        requestImagePath: debugPaths.requestImagePath,
-                        requestMetadataPath: debugPaths.requestMetadataPath,
-                        promptPath: debugPaths.promptPath,
-                        rawResponsePath: debugPaths.rawResponsePath,
-                        errorPath: debugPaths.errorPath,
-                        controlsCount: observation.controls.count,
-                        affordancesCount: observation.workflows.count,
-                        entitiesCount: observation.entities.count
-                    ))
-                }
-            }
-        }
     }
 
     public func diagnostics() async -> ContextDiagnostics {
@@ -350,7 +155,7 @@ public final class ContextCoordinator: RecentActivityContext {
 
     public func capture(trigger: ContextCaptureTrigger, cursorLocation: CGPoint?, bypassPause: Bool = false) async {
         if !bypassPause, await MainActor.run(body: { isGatheringPaused }) {
-            NSLog("[ContextCoordinator] Skipped \(trigger.rawValue) capture because context gathering is paused.")
+            log.debug("skipped \(trigger.rawValue) capture — gathering paused")
             return
         }
 
@@ -358,7 +163,7 @@ public final class ContextCoordinator: RecentActivityContext {
             ContextWindowMetadataReader.current()
         }
         guard !Self.shouldIgnoreCapture(metadata) else {
-            NSLog("[ContextCoordinator] Ignored \(trigger.rawValue) capture for AgentNotch UI.")
+            log.debug("ignored \(trigger.rawValue) capture for AgentNotch UI")
             return
         }
 
@@ -379,17 +184,15 @@ public final class ContextCoordinator: RecentActivityContext {
             )
             await store.record(contextSnapshot)
             await memoryStore.record(contextSnapshot)
-            let captureArtifact = await debugArtifactStore.recordCapture(contextSnapshot)
             scheduleGeminiObservation(
                 for: contextSnapshot,
                 imageData: snapshot.pngData,
                 mimeType: "image/png",
-                captureArtifact: captureArtifact,
                 previousSnapshot: previousSnapshot
             )
-            NSLog("[ContextCoordinator] Captured \(trigger.rawValue) context for \(metadata.appName) with \(recognizedText.count) OCR text items")
+            log.info("captured \(trigger.rawValue) for \(metadata.appName) with \(recognizedText.count) OCR items")
         } catch {
-            NSLog("[ContextCoordinator] Capture failed: \(error)")
+            log.error("capture failed: \(error)")
         }
     }
 
@@ -397,14 +200,12 @@ public final class ContextCoordinator: RecentActivityContext {
         for snapshot: ContextSnapshot,
         imageData: Data,
         mimeType: String,
-        captureArtifact: ContextCaptureDebugArtifact?,
         previousSnapshot: ContextSnapshot?
     ) {
         let geminiObservationService = geminiObservationService
         let memoryStore = memoryStore
         let aiObservationLog = aiObservationLog
         let geminiGate = geminiGate
-        let aggregateDebugPaths = ContextGeminiObservationService.debugPaths(for: imageData, mimeType: mimeType)
         let mediaResolution = ContextGeminiObservationService.configuredMediaResolution
         let thinkingLevel = ContextGeminiObservationService.configuredThinkingLevel
         let attemptID = UUID()
@@ -440,17 +241,8 @@ public final class ContextCoordinator: RecentActivityContext {
                     requestMimeType: mimeType,
                     requestMediaResolution: mediaResolution,
                     requestThinkingLevel: thinkingLevel,
-                    ocrCount: snapshot.recognizedText.count,
-                    imageHash: aggregateDebugPaths.imageHash,
-                    requestImagePath: aggregateDebugPaths.requestImagePath,
-                    requestMetadataPath: aggregateDebugPaths.requestMetadataPath,
-                    captureImagePath: captureArtifact?.jpegPath,
-                    captureJSONPath: captureArtifact?.jsonPath,
-                    promptPath: aggregateDebugPaths.promptPath,
-                    rawResponsePath: aggregateDebugPaths.rawResponsePath,
-                    errorPath: aggregateDebugPaths.errorPath
+                    ocrCount: snapshot.recognizedText.count
                 ))
-                NSLog("[ContextCoordinator] Gemini skipped for \(snapshot.appName) / \(snapshot.windowTitle): \(reason)")
                 return
             case .run:
                 break
@@ -469,26 +261,12 @@ public final class ContextCoordinator: RecentActivityContext {
                 requestMimeType: mimeType,
                 requestMediaResolution: mediaResolution,
                 requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count,
-                imageHash: aggregateDebugPaths.imageHash,
-                requestImagePath: aggregateDebugPaths.requestImagePath,
-                requestMetadataPath: aggregateDebugPaths.requestMetadataPath,
-                captureImagePath: captureArtifact?.jpegPath,
-                captureJSONPath: captureArtifact?.jsonPath,
-                promptPath: aggregateDebugPaths.promptPath,
-                rawResponsePath: aggregateDebugPaths.rawResponsePath,
-                errorPath: aggregateDebugPaths.errorPath
+                ocrCount: snapshot.recognizedText.count
             ))
-            NSLog("[ContextCoordinator] Gemini modular observation queued for \(snapshot.appName) / \(snapshot.windowTitle)")
 
             let laneResults = await withTaskGroup(of: ContextGeminiLaneObservation?.self) { group in
                 for lane in lanes {
                     group.addTask {
-                        let laneDebugPaths = ContextGeminiObservationService.debugPaths(
-                            for: imageData,
-                            mimeType: mimeType,
-                            laneName: lane.rawValue
-                        )
                         await aiObservationLog.record(ContextAIObservationEvent(
                             status: .queued,
                             trigger: snapshot.trigger,
@@ -501,15 +279,7 @@ public final class ContextCoordinator: RecentActivityContext {
                             requestMimeType: mimeType,
                             requestMediaResolution: mediaResolution,
                             requestThinkingLevel: thinkingLevel,
-                            ocrCount: snapshot.recognizedText.count,
-                            imageHash: laneDebugPaths.imageHash,
-                            requestImagePath: laneDebugPaths.requestImagePath,
-                            requestMetadataPath: laneDebugPaths.requestMetadataPath,
-                            captureImagePath: captureArtifact?.jpegPath,
-                            captureJSONPath: captureArtifact?.jsonPath,
-                            promptPath: laneDebugPaths.promptPath,
-                            rawResponsePath: laneDebugPaths.rawResponsePath,
-                            errorPath: laneDebugPaths.errorPath
+                            ocrCount: snapshot.recognizedText.count
                         ))
 
                         let laneStartedAt = Date()
@@ -534,15 +304,7 @@ public final class ContextCoordinator: RecentActivityContext {
                                 requestMimeType: mimeType,
                                 requestMediaResolution: mediaResolution,
                                 requestThinkingLevel: thinkingLevel,
-                                ocrCount: snapshot.recognizedText.count,
-                                imageHash: laneDebugPaths.imageHash,
-                                requestImagePath: laneDebugPaths.requestImagePath,
-                                requestMetadataPath: laneDebugPaths.requestMetadataPath,
-                                captureImagePath: captureArtifact?.jpegPath,
-                                captureJSONPath: captureArtifact?.jsonPath,
-                                promptPath: laneDebugPaths.promptPath,
-                                rawResponsePath: laneDebugPaths.rawResponsePath,
-                                errorPath: laneDebugPaths.errorPath
+                                ocrCount: snapshot.recognizedText.count
                             ))
                             return nil
                         }
@@ -580,14 +342,6 @@ public final class ContextCoordinator: RecentActivityContext {
                             requestMediaResolution: mediaResolution,
                             requestThinkingLevel: thinkingLevel,
                             ocrCount: snapshot.recognizedText.count,
-                            imageHash: laneDebugPaths.imageHash,
-                            requestImagePath: laneDebugPaths.requestImagePath,
-                            requestMetadataPath: laneDebugPaths.requestMetadataPath,
-                            captureImagePath: captureArtifact?.jpegPath,
-                            captureJSONPath: captureArtifact?.jsonPath,
-                            promptPath: laneDebugPaths.promptPath,
-                            rawResponsePath: laneDebugPaths.rawResponsePath,
-                            errorPath: laneDebugPaths.errorPath,
                             controlsCount: laneObservation.controls.count,
                             affordancesCount: laneObservation.workflows.count,
                             entitiesCount: laneObservation.entities.count
@@ -611,7 +365,7 @@ public final class ContextCoordinator: RecentActivityContext {
             guard let observation = ContextGeminiObservationService.reduceLaneObservations(
                 laneResults,
                 input: input,
-                imageHash: aggregateDebugPaths.imageHash
+                imageHash: Self.sha256Hex(imageData)
             ) else {
                 await aiObservationLog.record(ContextAIObservationEvent(
                     status: .failed,
@@ -626,15 +380,7 @@ public final class ContextCoordinator: RecentActivityContext {
                     requestMimeType: mimeType,
                     requestMediaResolution: mediaResolution,
                     requestThinkingLevel: thinkingLevel,
-                    ocrCount: snapshot.recognizedText.count,
-                    imageHash: aggregateDebugPaths.imageHash,
-                    requestImagePath: aggregateDebugPaths.requestImagePath,
-                    requestMetadataPath: aggregateDebugPaths.requestMetadataPath,
-                    captureImagePath: captureArtifact?.jpegPath,
-                    captureJSONPath: captureArtifact?.jsonPath,
-                    promptPath: aggregateDebugPaths.promptPath,
-                    rawResponsePath: aggregateDebugPaths.rawResponsePath,
-                    errorPath: aggregateDebugPaths.errorPath
+                    ocrCount: snapshot.recognizedText.count
                 ))
                 return
             }
@@ -679,19 +425,11 @@ public final class ContextCoordinator: RecentActivityContext {
                 requestMediaResolution: mediaResolution,
                 requestThinkingLevel: thinkingLevel,
                 ocrCount: snapshot.recognizedText.count,
-                imageHash: aggregateDebugPaths.imageHash,
-                requestImagePath: aggregateDebugPaths.requestImagePath,
-                requestMetadataPath: aggregateDebugPaths.requestMetadataPath,
-                captureImagePath: captureArtifact?.jpegPath,
-                captureJSONPath: captureArtifact?.jsonPath,
-                promptPath: aggregateDebugPaths.promptPath,
-                rawResponsePath: aggregateDebugPaths.rawResponsePath,
-                errorPath: aggregateDebugPaths.errorPath,
                 controlsCount: observation.visibleControls.count,
                 affordancesCount: observation.affordances.count,
                 entitiesCount: observation.entities.count
             ))
-            NSLog("[ContextCoordinator] Gemini modular lanes learned \(observation.appLabel) / \(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
+            log.info("Gemini learned \(observation.appLabel)/\(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
         }
     }
 
@@ -733,59 +471,6 @@ public final class ContextCoordinator: RecentActivityContext {
         }
     }
 
-    private struct GeminiComparisonVariant: Sendable {
-        let id: String
-        let label: String
-        let model: String
-        let mediaResolution: String
-        let thinkingLevel: String
-    }
-
-    private static let comparisonVariants: [GeminiComparisonVariant] = [
-        GeminiComparisonVariant(
-            id: "31-lite-med-min",
-            label: "Gemini 3.1 Flash-Lite minimal, medium image",
-            model: "gemini-3.1-flash-lite",
-            mediaResolution: "MEDIA_RESOLUTION_MEDIUM",
-            thinkingLevel: "minimal"
-        ),
-        GeminiComparisonVariant(
-            id: "31-lite-min",
-            label: "Gemini 3.1 Flash-Lite minimal, high image",
-            model: "gemini-3.1-flash-lite",
-            mediaResolution: "MEDIA_RESOLUTION_HIGH",
-            thinkingLevel: "minimal"
-        ),
-        GeminiComparisonVariant(
-            id: "31-lite-low",
-            label: "Gemini 3.1 Flash-Lite low, high image",
-            model: "gemini-3.1-flash-lite",
-            mediaResolution: "MEDIA_RESOLUTION_HIGH",
-            thinkingLevel: "low"
-        ),
-        GeminiComparisonVariant(
-            id: "3-flash-med-min",
-            label: "Gemini 3 Flash minimal, medium image",
-            model: "gemini-3-flash",
-            mediaResolution: "MEDIA_RESOLUTION_MEDIUM",
-            thinkingLevel: "minimal"
-        ),
-        GeminiComparisonVariant(
-            id: "3-flash-min",
-            label: "Gemini 3 Flash minimal, high image",
-            model: "gemini-3-flash",
-            mediaResolution: "MEDIA_RESOLUTION_HIGH",
-            thinkingLevel: "minimal"
-        ),
-        GeminiComparisonVariant(
-            id: "3-flash-low",
-            label: "Gemini 3 Flash low, high image",
-            model: "gemini-3-flash",
-            mediaResolution: "MEDIA_RESOLUTION_HIGH",
-            thinkingLevel: "low"
-        )
-    ]
-
     private static func textPreview(from snapshot: ContextSnapshot) -> String {
         ContextTextSignalFilter.usefulText(from: snapshot.recognizedText, maxCount: 8)
             .joined(separator: " | ")
@@ -797,5 +482,10 @@ public final class ContextCoordinator: RecentActivityContext {
         return appName == "agentnotch"
             || appName == "agent in the notch"
             || windowTitle.contains("agentnotch dev tools")
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        return digest.compactMap { String(format: "%02x", $0) }.joined()
     }
 }

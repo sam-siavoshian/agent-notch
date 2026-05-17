@@ -17,9 +17,8 @@ import ApplicationServices
 import Foundation
 import CoreGraphics
 import os.lock
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "longpress")
+private let log = Log(category: "longpress")
 
 final class LongPressDetector {
     private enum State {
@@ -40,9 +39,9 @@ final class LongPressDetector {
         guard eventTap == nil else { return }
 
         let trusted = AXIsProcessTrusted()
-        NSLog("[LongPressDetector] AXIsProcessTrusted=\(trusted)")
+        log.info("longpress.ax_trusted=\(trusted)")
         if !trusted {
-            NSLog("[LongPressDetector] WARNING: Accessibility not granted. Open System Settings > Privacy & Security > Accessibility and enable AgentNotch, then relaunch.")
+            log.warning("Accessibility not granted — long-press disabled until granted in System Settings > Privacy > Accessibility")
             Task { @MainActor in
                 AgentState.shared.set(.error(message: "Accessibility permission missing — long-press disabled"))
             }
@@ -67,8 +66,7 @@ final class LongPressDetector {
             },
             userInfo: opaqueSelf
         ) else {
-            NSLog("[LongPressDetector] Failed to create event tap. Accessibility permission probably not granted.")
-            log.error("longpress.ready ax_trusted=\(trusted, privacy: .public) tap_installed=false reason=tap_create_failed")
+            log.error("longpress.ready ax_trusted=\(trusted) tap_installed=false reason=tap_create_failed")
             return
         }
 
@@ -78,8 +76,7 @@ final class LongPressDetector {
 
         self.eventTap = tap
         self.runLoopSource = source
-        NSLog("[LongPressDetector] event tap installed (threshold=\(threshold)s)")
-        log.info("longpress.ready ax_trusted=\(trusted, privacy: .public) tap_installed=true threshold_s=\(self.threshold, privacy: .public)")
+        log.info("longpress.ready ax_trusted=\(trusted) tap_installed=true threshold_s=\(self.threshold)")
     }
 
     func stop() {
@@ -120,7 +117,7 @@ final class LongPressDetector {
     }
 
     private func handleMouseDown() {
-        NSLog("[LongPressDetector] mouseDown")
+        log.debug("mouseDown")
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
 
@@ -167,7 +164,7 @@ final class LongPressDetector {
         state = .listening
         os_unfair_lock_unlock(&lock)
 
-        NSLog("[LongPressDetector] threshold crossed → posting longPressBegan")
+        log.info("threshold crossed → posting longPressBegan")
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .longPressBegan, object: nil)
         }

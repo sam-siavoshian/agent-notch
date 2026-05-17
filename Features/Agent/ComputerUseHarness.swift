@@ -9,9 +9,8 @@
 
 import Foundation
 import AppKit
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "harness")
+private let log = Log(category: "harness")
 
 @MainActor
 public final class ComputerUseHarness {
@@ -44,7 +43,7 @@ public final class ComputerUseHarness {
         let startedAt = Date()
         let transcriptLength = input.transcript.count
         let contextLength = input.contextSummary.count
-        log.error("harness.start run_id=\(runID.uuidString, privacy: .public) model=\(self.modelID, privacy: .public) transcript_len=\(transcriptLength) context_len=\(contextLength)")
+        log.info("harness.start run_id=\(runID.uuidString) model=\(self.modelID) transcript_len=\(transcriptLength) context_len=\(contextLength)")
         var toolCallCount = 0
         var screenshotToolCallCount = 0
         var actionCounts: [String: Int] = [:]
@@ -79,9 +78,9 @@ public final class ComputerUseHarness {
         var triedFallback = false
         var turn = 0
 
-        func recordMetrics(status: String, errorMessage: String? = nil) async {
+        func recordMetrics(status: String, errorMessage: String? = nil) {
             let endedAt = Date()
-            await AgentMetricsStore.shared.record(AgentRunMetricsRecord(
+            printRunMetrics(AgentRunMetricsRecord(
                 id: runID,
                 startedAt: startedAt,
                 endedAt: endedAt,
@@ -105,7 +104,7 @@ public final class ComputerUseHarness {
 
         while turn < maxTurns {
             turn += 1
-            log.error("harness.turn run_id=\(runID.uuidString, privacy: .public) turn=\(turn) model=\(currentModel, privacy: .public)")
+            log.info("harness.turn run_id=\(runID.uuidString) turn=\(turn) model=\(currentModel)")
             let request = AnthropicMessageRequest(
                 model: currentModel,
                 maxTokens: maxOutputTokens,
@@ -120,21 +119,21 @@ public final class ComputerUseHarness {
                 response = try await client.send(request)
             } catch let err as AnthropicClient.Error {
                 if !triedFallback, shouldFallback(err) {
-                    log.warning("harness.fallback run_id=\(runID.uuidString, privacy: .public) from=\(currentModel, privacy: .public) to=\(self.fallbackModelID, privacy: .public) status=\(err.status ?? -1)")
+                    log.warning("harness.fallback run_id=\(runID.uuidString) from=\(currentModel) to=\(self.fallbackModelID) status=\(err.status ?? -1)")
                     triedFallback = true
                     usedFallback = true
                     currentModel = fallbackModelID
                     continue
                 }
                 let status = err.status.map(String.init) ?? "nil"
-                log.error("harness.api_error run_id=\(runID.uuidString, privacy: .public) turn=\(turn) status=\(status, privacy: .public) body=\(err.body ?? "nil", privacy: .public)")
+                log.error("harness.api_error run_id=\(runID.uuidString) turn=\(turn) status=\(status) body=\(err.body ?? "nil")")
                 AgentState.shared.set(.error(message: "Anthropic error: \(status)"))
-                await recordMetrics(status: "anthropic_error", errorMessage: "\(err)")
+                recordMetrics(status: "anthropic_error", errorMessage: "\(err)")
                 return
             } catch {
-                log.error("harness.network_error run_id=\(runID.uuidString, privacy: .public) turn=\(turn) error=\(String(describing: error), privacy: .public)")
+                log.error("harness.network_error run_id=\(runID.uuidString) turn=\(turn) error=\(error)")
                 AgentState.shared.set(.error(message: "Network error"))
-                await recordMetrics(status: "network_error", errorMessage: "\(error)")
+                recordMetrics(status: "network_error", errorMessage: "\(error)")
                 return
             }
 
@@ -146,15 +145,15 @@ public final class ComputerUseHarness {
                 return nil
             }
 
-            log.error("harness.response run_id=\(runID.uuidString, privacy: .public) turn=\(turn) stop_reason=\(response.stopReason ?? "nil", privacy: .public) tool_uses=\(toolUses.count)")
+            log.info("harness.response run_id=\(runID.uuidString) turn=\(turn) stop_reason=\(response.stopReason ?? "nil") tool_uses=\(toolUses.count)")
 
             if toolUses.isEmpty {
                 let text = response.content.compactMap { block -> String? in
                     if case .text(let t) = block { return t } else { return nil }
                 }.joined(separator: " ")
-                log.error("harness.done run_id=\(runID.uuidString, privacy: .public) status=completed_without_tool turns=\(turn)")
+                log.info("harness.done run_id=\(runID.uuidString) status=completed_without_tool turns=\(turn)")
                 AgentState.shared.set(.idle, detail: text)
-                await recordMetrics(status: "completed_without_tool")
+                recordMetrics(status: "completed_without_tool")
                 return
             }
 
@@ -183,25 +182,25 @@ public final class ComputerUseHarness {
                     screenshotToolCallCount += 1
                 }
 
-                log.error("harness.tool run_id=\(runID.uuidString, privacy: .public) turn=\(turn) action=\(action, privacy: .public) tool_id=\(use.id, privacy: .public)")
+                log.info("harness.tool run_id=\(runID.uuidString) turn=\(turn) action=\(action) tool_id=\(use.id)")
                 AgentState.shared.set(.toolCall(name: use.name), detail: action)
                 let result = await dispatcher.dispatch(toolUseId: use.id, name: use.name, input: use.input)
-                log.error("harness.tool_result run_id=\(runID.uuidString, privacy: .public) action=\(action, privacy: .public) is_error=\(result.isError)")
+                log.info("harness.tool_result run_id=\(runID.uuidString) action=\(action) is_error=\(result.isError)")
                 resultBlocks.append(.toolResult(toolUseId: result.toolUseId, content: result.content, isError: result.isError))
             }
             messages.append(Message(role: "user", content: resultBlocks))
 
             if response.stopReason != "tool_use" {
-                log.error("harness.done run_id=\(runID.uuidString, privacy: .public) status=completed_after_tools turns=\(turn)")
+                log.info("harness.done run_id=\(runID.uuidString) status=completed_after_tools turns=\(turn)")
                 AgentState.shared.set(.idle)
-                await recordMetrics(status: "completed_after_tools")
+                recordMetrics(status: "completed_after_tools")
                 return
             }
         }
 
-        log.error("harness.max_turns run_id=\(runID.uuidString, privacy: .public) max=\(self.maxTurns)")
+        log.error("harness.max_turns run_id=\(runID.uuidString) max=\(self.maxTurns)")
         AgentState.shared.set(.error(message: "Hit max turns (\(maxTurns))"))
-        await recordMetrics(status: "max_turns", errorMessage: "Hit max turns (\(maxTurns))")
+        recordMetrics(status: "max_turns", errorMessage: "Hit max turns (\(maxTurns))")
     }
 
     // MARK: - Helpers

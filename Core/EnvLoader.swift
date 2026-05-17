@@ -13,6 +13,7 @@
 //  Surrounding quotes on the value stripped. No interpolation, no multiline.
 //
 
+import Darwin
 import Foundation
 
 public enum Env {
@@ -24,12 +25,12 @@ public enum Env {
         guard overrides.isEmpty else { return }
 
         guard let url = locateEnvFile() else {
-            NSLog("[Env] No agentnotch.env found. Falling back to process environment only.")
+            print("[INFO]  [env] no agentnotch.env found — using process environment only")
             return
         }
 
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
-            NSLog("[Env] Failed to read \(url.path)")
+            fputs("[ERROR] [env] failed to read \(url.path)\n", Darwin.stderr)
             return
         }
 
@@ -40,7 +41,7 @@ public enum Env {
             setenv(key, value, 1)
         }
 
-        NSLog("[Env] Loaded \(parsed.count) keys from \(url.lastPathComponent)")
+        print("[INFO]  [env] loaded \(parsed.count) keys from \(url.lastPathComponent)")
     }
 
     /// Returns the value for `key`. Checks process environment first (so Xcode

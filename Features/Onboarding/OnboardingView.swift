@@ -12,6 +12,7 @@
 //  The app icon is still a real Finder-style drag source.
 //
 
+import Darwin
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
@@ -396,7 +397,7 @@ struct OnboardingView: View {
         do {
             try task.run()
         } catch {
-            NSLog("[Onboarding] relaunch helper spawn failed: \(error)")
+            fputs("[ERROR] [onboarding] relaunch helper spawn failed: \(error)\n", Darwin.stderr)
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {

@@ -2,9 +2,6 @@
 //  AgentRunMetrics.swift
 //  Agent in the Notch
 //
-//  Lightweight per-run metrics for testing whether local context and UI memory
-//  reduce computer-use exploration.
-//
 
 import Foundation
 
@@ -29,46 +26,11 @@ public struct AgentRunMetricsRecord: Codable, Sendable {
     public let errorMessage: String?
 }
 
-public actor AgentMetricsStore {
-    public static let shared = AgentMetricsStore()
-    public static var defaultDirectoryURL: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("AgentNotch", isDirectory: true)
-            .appendingPathComponent("AgentMetrics", isDirectory: true)
-    }
-
-    private let metricsURL: URL
-
-    public init(rootURL: URL? = nil) {
-        let directory = rootURL ?? Self.defaultDirectoryURL
-        self.metricsURL = directory.appendingPathComponent("runs.jsonl")
-
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    }
-
-    public func record(_ metrics: AgentRunMetricsRecord) {
-        do {
-            var data = try Self.encoder.encode(metrics)
-            data.append(0x0A)
-
-            if FileManager.default.fileExists(atPath: metricsURL.path) {
-                let handle = try FileHandle(forWritingTo: metricsURL)
-                try handle.seekToEnd()
-                try handle.write(contentsOf: data)
-                try handle.close()
-            } else {
-                try data.write(to: metricsURL, options: .atomic)
-            }
-        } catch {
-            NSLog("[AgentMetricsStore] Failed to record run metrics: \(error)")
-        }
-    }
-
-    private static var encoder: JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return encoder
+public func printRunMetrics(_ r: AgentRunMetricsRecord) {
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    encoder.outputFormatting = [.sortedKeys]
+    if let data = try? encoder.encode(r), let json = String(data: data, encoding: .utf8) {
+        print("[INFO]  [metrics] run \(json)")
     }
 }

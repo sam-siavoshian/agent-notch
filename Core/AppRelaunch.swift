@@ -13,6 +13,7 @@
 //
 
 import AppKit
+import Darwin
 
 @MainActor
 enum AppRelaunch {
@@ -33,7 +34,7 @@ enum AppRelaunch {
         do {
             try task.run()
         } catch {
-            NSLog("[AppRelaunch] helper spawn failed: \(error)")
+            fputs("[ERROR] [relaunch] helper spawn failed: \(error)\n", Darwin.stderr)
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {

@@ -16,9 +16,8 @@ import Foundation
 import CoreGraphics
 import AppKit
 import Carbon.HIToolbox
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "dispatcher")
+private let log = Log(category: "dispatcher")
 
 public struct DispatchedToolResult: Sendable {
     public let toolUseId: String
@@ -37,15 +36,15 @@ public actor ToolDispatcher {
 
     public func dispatch(toolUseId: String, name: String, input: JSON) async -> DispatchedToolResult {
         guard name == "computer" else {
-            log.error("dispatcher.unsupported_tool tool=\(name, privacy: .public)")
+            log.error("dispatcher.unsupported_tool tool=\(name)")
             return errorResult(toolUseId, "Unsupported tool: \(name)")
         }
         guard let action = input.objectValue?["action"]?.stringValue else {
-            log.error("dispatcher.missing_action input=\(String(describing: input), privacy: .public)")
+            log.error("dispatcher.missing_action input=\(input)")
             return errorResult(toolUseId, "Missing 'action' in tool input")
         }
 
-        log.error("dispatcher.action action=\(action, privacy: .public)")
+        log.info("dispatcher.action action=\(action)")
         do {
             switch action {
             case "screenshot":
@@ -128,14 +127,14 @@ public actor ToolDispatcher {
                 return ok(toolUseId, "held \(combo) for \(dur)ms")
 
             default:
-                log.error("dispatcher.unsupported_action action=\(action, privacy: .public)")
+                log.error("dispatcher.unsupported_action action=\(action)")
                 return errorResult(toolUseId, "Unsupported action: \(action)")
             }
         } catch let e as DispatchError {
-            log.error("dispatcher.dispatch_error action=\(action, privacy: .public) message=\(e.message, privacy: .public)")
+            log.error("dispatcher.dispatch_error action=\(action) message=\(e.message)")
             return errorResult(toolUseId, e.message)
         } catch {
-            log.error("dispatcher.unexpected_error action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            log.error("dispatcher.unexpected_error action=\(action) error=\(error)")
             return errorResult(toolUseId, "Dispatch failed: \(error)")
         }
     }
@@ -185,13 +184,13 @@ public actor ToolDispatcher {
 
     private func postDrag(from: CGPoint, to: CGPoint) {
         let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
-        if down == nil { NSLog("[ToolDispatcher] CGEvent alloc failed for leftMouseDown") }
+        if down == nil { log.error("CGEvent alloc failed for leftMouseDown") }
         down?.post(tap: .cghidEventTap)
         let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: to, mouseButton: .left)
-        if drag == nil { NSLog("[ToolDispatcher] CGEvent alloc failed for leftMouseDragged") }
+        if drag == nil { log.error("CGEvent alloc failed for leftMouseDragged") }
         drag?.post(tap: .cghidEventTap)
         let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
-        if up == nil { NSLog("[ToolDispatcher] CGEvent alloc failed for leftMouseUp") }
+        if up == nil { log.error("CGEvent alloc failed for leftMouseUp") }
         up?.post(tap: .cghidEventTap)
     }
 

@@ -16,9 +16,8 @@
 
 import AVFoundation
 import WhisperKit
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "voice")
+private let log = Log(category: "voice")
 
 @MainActor
 public final class VoiceRecordingService {
@@ -61,7 +60,7 @@ public final class VoiceRecordingService {
         }
 
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-        log.info("voice.ready mic_authorized=\(micStatus == .authorized, privacy: .public) whisper_loading=true")
+        log.info("voice.ready mic_authorized=\(micStatus == .authorized) whisper_loading=true")
     }
 
     public func stop() {
@@ -83,11 +82,9 @@ public final class VoiceRecordingService {
         let modelName = "openai_whisper-tiny"
         do {
             whisper = try await WhisperKit(model: modelName)
-            NSLog("[VoiceRecordingService] WhisperKit ready (\(modelName))")
-            log.info("voice.whisper_ready model=\(modelName, privacy: .public)")
+            log.info("voice.whisper_ready model=\(modelName)")
         } catch {
-            NSLog("[VoiceRecordingService] WhisperKit init failed: \(error)")
-            log.error("voice.whisper_failed model=\(modelName, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            log.error("voice.whisper_failed model=\(modelName) error=\(error)")
         }
     }
 
@@ -109,7 +106,7 @@ public final class VoiceRecordingService {
             file = try AVAudioFile(forWriting: url, settings: format.settings)
             audioFile = file
         } catch {
-            NSLog("[VoiceRecordingService] Failed to create audio file: \(error)")
+            log.error("failed to create audio file: \(error)")
             AgentState.shared.set(.idle)
             return
         }
@@ -123,7 +120,7 @@ public final class VoiceRecordingService {
         do {
             try audioEngine.start()
         } catch {
-            NSLog("[VoiceRecordingService] AVAudioEngine start failed: \(error)")
+            log.error("AVAudioEngine start failed: \(error)")
             inputNode.removeTap(onBus: 0)
             audioFile = nil
             recordingURL = nil
@@ -162,7 +159,7 @@ public final class VoiceRecordingService {
                 transcript = results.map(\.text).joined(separator: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             } catch {
-                NSLog("[VoiceRecordingService] Transcription failed: \(error)")
+                log.error("transcription failed: \(error)")
                 transcriptError = error
             }
         }
@@ -173,7 +170,7 @@ public final class VoiceRecordingService {
         if transcript.isEmpty { transcript = demoPrompt }
 
         guard !transcript.isEmpty else {
-            NSLog("[VoiceRecordingService] No transcript — agent not fired.")
+            log.warning("no transcript — agent not fired")
             let msg = transcriptError != nil ? "Transcription error — try again" : "Nothing captured — try speaking again"
             AgentState.shared.set(.error(message: msg))
             Task { @MainActor in

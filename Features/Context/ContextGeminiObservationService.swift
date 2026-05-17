@@ -9,6 +9,8 @@
 import CryptoKit
 import Foundation
 
+private let log = Log(category: "gemini")
+
 public actor ContextGeminiObservationService {
     public static let shared = ContextGeminiObservationService()
 
@@ -53,28 +55,8 @@ public actor ContextGeminiObservationService {
         )
     }
 
-    public static func debugPaths(
-        for imageData: Data,
-        mimeType: String = "image/png",
-        laneName: String? = nil
-    ) -> ContextGeminiDebugPaths {
-        let imageHash = sha256Hex(imageData)
-        let prefix = debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
-        let debugDirectoryURL = defaultCacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
-        let imageExtension = mimeType == "image/png" ? "png" : "jpg"
-        return ContextGeminiDebugPaths(
-            imageHash: imageHash,
-            requestImagePath: debugDirectoryURL.appendingPathComponent("\(prefix)-request-image.\(imageExtension)").path,
-            requestMetadataPath: debugDirectoryURL.appendingPathComponent("\(prefix)-request.txt").path,
-            promptPath: debugDirectoryURL.appendingPathComponent("\(prefix)-prompt.txt").path,
-            rawResponsePath: debugDirectoryURL.appendingPathComponent("\(prefix)-raw-response.json").path,
-            errorPath: debugDirectoryURL.appendingPathComponent("\(prefix)-error.txt").path
-        )
-    }
-
     private let apiKeyProvider: @Sendable () -> String?
     private let cacheDirectoryURL: URL
-    private let debugDirectoryURL: URL
     private let endpointBaseURL: URL
     private let model: String
     private let mediaResolutionOverride: String?
@@ -99,12 +81,10 @@ public actor ContextGeminiObservationService {
         self.mediaResolutionOverride = mediaResolutionOverride
         self.thinkingLevelOverride = thinkingLevelOverride
         self.cacheDirectoryURL = cacheDirectoryURL
-        self.debugDirectoryURL = cacheDirectoryURL.appendingPathComponent("Debug", isDirectory: true)
         self.endpointBaseURL = endpointBaseURL
         self.session = session
         self.apiKeyProvider = apiKeyProvider
         try? FileManager.default.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
-        try? FileManager.default.createDirectory(at: debugDirectoryURL, withIntermediateDirectories: true)
     }
 
     public func observe(_ input: ContextGeminiObservationInput) async -> ContextGeminiObservation? {
@@ -119,15 +99,12 @@ public actor ContextGeminiObservationService {
         }
 
         guard let apiKey = apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
-            NSLog("[ContextGeminiObservationService] GEMINI_API_KEY is not set; skipping Gemini observation.")
+            log.warning("GEMINI_API_KEY is not set; skipping Gemini observation.")
             return nil
         }
 
         do {
             let prompt = Self.prompt(for: input)
-            writeDebugData(input.imageData, imageHash: imageHash, mimeType: input.mimeType)
-            writeDebugText(requestMetadata(for: input, config: config), imageHash: imageHash, suffix: "request.txt")
-            writeDebugText(prompt, imageHash: imageHash, suffix: "prompt.txt")
             let request = GeminiGenerateContentRequest(
                 contents: [
                     .init(parts: [
@@ -144,12 +121,10 @@ public actor ContextGeminiObservationService {
             )
 
             let result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
-            writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json")
             guard let text = result.response.firstText else {
-                NSLog("[ContextGeminiObservationService] Gemini response had no text candidate.")
+                log.warning("Gemini response had no text candidate.")
                 return nil
             }
-            writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json")
 
             let observation = try Self.parseObservation(
                 text,
@@ -161,8 +136,7 @@ public actor ContextGeminiObservationService {
             writeCachedObservation(observation, to: cacheURL)
             return observation
         } catch {
-            writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt")
-            NSLog("[ContextGeminiObservationService] Gemini observation failed: \(error)")
+            log.error("Gemini observation failed: \(error)")
             return nil
         }
     }
@@ -212,13 +186,11 @@ public actor ContextGeminiObservationService {
     public func observeLane(
         _ lane: ContextGeminiObservationLane,
         input: ContextGeminiObservationInput,
-        previousSnapshot: ContextSnapshot? = nil,
-        debugLaneName: String? = nil
+        previousSnapshot: ContextSnapshot? = nil
     ) async -> ContextGeminiLaneObservation? {
         let config = requestConfig(for: lane)
         let imageHash = Self.sha256Hex(input.imageData)
         let cacheURL = laneCacheURL(imageHash: imageHash, lane: lane, input: input, config: config)
-        let debugName = debugLaneName ?? lane.rawValue
 
         if let cached = readCachedLaneObservation(at: cacheURL) {
             var observation = cached
@@ -227,16 +199,12 @@ public actor ContextGeminiObservationService {
         }
 
         guard let apiKey = apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty else {
-            NSLog("[ContextGeminiObservationService] GEMINI_API_KEY is not set; skipping \(lane.rawValue) lane.")
+            log.warning("GEMINI_API_KEY is not set; skipping \(lane.rawValue) lane.")
             return nil
         }
 
         do {
             let prompt = Self.lanePrompt(for: lane, input: input, previousSnapshot: previousSnapshot)
-            writeDebugData(input.imageData, imageHash: imageHash, mimeType: input.mimeType, laneName: debugName)
-            writeDebugText(requestMetadata(for: input, config: config, lane: lane), imageHash: imageHash, suffix: "request.txt", laneName: debugName)
-            writeDebugText(prompt, imageHash: imageHash, suffix: "prompt.txt", laneName: debugName)
-
             let request = GeminiGenerateContentRequest(
                 contents: [
                     .init(parts: [
@@ -253,12 +221,10 @@ public actor ContextGeminiObservationService {
             )
 
             let result = try await send(request, apiKey: apiKey, timeoutSeconds: config.timeoutSeconds)
-            writeDebugText(result.rawBody, imageHash: imageHash, suffix: "raw-response.json", laneName: debugName)
             guard let text = result.response.firstText else {
-                NSLog("[ContextGeminiObservationService] \(lane.rawValue) lane response had no text candidate.")
+                log.warning("\(lane.rawValue) lane response had no text candidate.")
                 return nil
             }
-            writeDebugText(text, imageHash: imageHash, suffix: "raw-text.json", laneName: debugName)
 
             let observation = try Self.parseLaneObservation(
                 text,
@@ -271,8 +237,7 @@ public actor ContextGeminiObservationService {
             writeCachedLaneObservation(observation, to: cacheURL)
             return observation
         } catch {
-            writeDebugText("\(error)", imageHash: imageHash, suffix: "error.txt", laneName: debugName)
-            NSLog("[ContextGeminiObservationService] \(lane.rawValue) lane failed: \(error)")
+            log.error("\(lane.rawValue) lane failed: \(error)")
             return nil
         }
     }
@@ -341,7 +306,7 @@ public actor ContextGeminiObservationService {
         do {
             return try await sendOnce(request, apiKey: apiKey, timeoutSeconds: timeoutSeconds)
         } catch let error as Error where error.isRetryable {
-            NSLog("[ContextGeminiObservationService] Transient error, retrying in 1s: \(error)")
+            log.warning("Transient error, retrying in 1s: \(error)")
             try await Task.sleep(for: .seconds(1))
             return try await sendOnce(request, apiKey: apiKey, timeoutSeconds: timeoutSeconds)
         }
@@ -434,7 +399,7 @@ public actor ContextGeminiObservationService {
             let data = try Self.encoder.encode(observation)
             try data.write(to: url, options: .atomic)
         } catch {
-            NSLog("[ContextGeminiObservationService] Failed to write Gemini cache: \(error)")
+            log.error("Failed to write Gemini cache: \(error)")
         }
     }
 
@@ -443,29 +408,7 @@ public actor ContextGeminiObservationService {
             let data = try Self.encoder.encode(observation)
             try data.write(to: url, options: .atomic)
         } catch {
-            NSLog("[ContextGeminiObservationService] Failed to write Gemini lane cache: \(error)")
-        }
-    }
-
-    private func writeDebugData(_ data: Data, imageHash: String, mimeType: String, laneName: String? = nil) {
-        let prefix = Self.debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
-        let fileExtension = mimeType == "image/png" ? "png" : "jpg"
-        do {
-            try data.write(to: debugDirectoryURL.appendingPathComponent("\(prefix)-request-image.\(fileExtension)"), options: .atomic)
-            try data.write(to: debugDirectoryURL.appendingPathComponent("latest-request-image.\(fileExtension)"), options: .atomic)
-        } catch {
-            NSLog("[ContextGeminiObservationService] Failed to write Gemini debug image: \(error)")
-        }
-    }
-
-    private func writeDebugText(_ text: String, imageHash: String, suffix: String, laneName: String? = nil) {
-        let prefix = Self.debugArtifactPrefix(imageHash: imageHash, laneName: laneName)
-        let url = debugDirectoryURL.appendingPathComponent("\(prefix)-\(suffix)")
-        do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            try text.write(to: debugDirectoryURL.appendingPathComponent("latest-\(suffix)"), atomically: true, encoding: .utf8)
-        } catch {
-            NSLog("[ContextGeminiObservationService] Failed to write Gemini debug text: \(error)")
+            log.error("Failed to write Gemini lane cache: \(error)")
         }
     }
 
@@ -509,38 +452,6 @@ public actor ContextGeminiObservationService {
             timeoutSeconds: 20
         )
     }
-
-    private func requestMetadata(
-        for input: ContextGeminiObservationInput,
-        config: GeminiObservationRequestConfig,
-        lane: ContextGeminiObservationLane? = nil
-    ) -> String {
-        let imageKB = input.imageData.count / 1024
-        return """
-        Gemini observation request
-        model: \(model)
-        promptVersion: \(Self.promptVersion)
-        lane: \(lane?.rawValue ?? "monolith")
-        mimeType: \(input.mimeType)
-        imageBytes: \(input.imageData.count) (\(imageKB)KB)
-        mediaResolution: \(config.mediaResolution)
-        thinkingLevel: \(config.thinkingLevel)
-        maxOutputTokens: \(config.maxOutputTokens)
-        timeoutSeconds: \(Int(config.timeoutSeconds))
-        estimatedCost: \(Self.estimatedCostDescription(model: model, config: config))
-        temperature: default
-        partOrder: image, prompt
-
-        Image processing pipeline:
-        - Capture: ScreenCaptureKit full-display CGImage with cursor included.
-        - Local OCR: Apple Vision runs on the lossless PNG bytes from the capture.
-        - Local preview artifact: JPEG encoded separately at capture quality for lightweight Dev Tools thumbnails.
-        - Gemini request image: PNG bytes from the same capture, no crop, no downscale, no JPEG compression.
-        - Gemini request format: inline_data image first, text prompt second.
-        - Gemini latency knobs: global mediaResolution=\(config.mediaResolution), thinkingLevel=\(config.thinkingLevel), maxOutputTokens=\(config.maxOutputTokens).
-        """
-    }
-
 
     // Reused across all encode/decode calls — JSONEncoder/Decoder are not Sendable but all
     // accesses happen through actor-serialized methods or static funcs called from them.

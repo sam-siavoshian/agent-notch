@@ -7,17 +7,14 @@
 
 import AppKit
 import SwiftUI
-import os.log
 
-private let log = Logger(subsystem: "com.agentnotch.app", category: "boot")
+private let log = Log(category: "boot")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         Env.load()
         NotchWindowController.shared.install()
-        ContextDevToolsWindowController.shared.install()
-        ContextDevToolsWindowController.shared.present()
 
         OnboardingWindowController.shared.presentIfNeeded { [weak self] in
             self?.bootAgent()
@@ -41,6 +38,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // tapped Connect (state persists in UserDefaults).
         SpotifyController.shared.startIfPreviouslyConnected()
         let p = PermissionChecker.shared
-        log.info("boot.complete ax=\(p.statuses[.accessibility]?.rawValue ?? "?", privacy: .public) screen=\(p.statuses[.screenRecording]?.rawValue ?? "?", privacy: .public) mic=\(p.statuses[.microphone]?.rawValue ?? "?", privacy: .public)")
+        log.info("boot.complete ax=\(p.statuses[.accessibility]?.rawValue ?? "?") screen=\(p.statuses[.screenRecording]?.rawValue ?? "?") mic=\(p.statuses[.microphone]?.rawValue ?? "?")")
     }
 }

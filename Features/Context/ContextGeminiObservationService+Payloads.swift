@@ -204,17 +204,6 @@ struct LaneObservationPayload: Decodable {
     }
 }
 
-// MARK: - Debug Paths
-
-public struct ContextGeminiDebugPaths: Sendable {
-    public let imageHash: String
-    public let requestImagePath: String
-    public let requestMetadataPath: String
-    public let promptPath: String
-    public let rawResponsePath: String
-    public let errorPath: String
-}
-
 // MARK: - Request Configuration
 
 struct GeminiObservationRequestConfig: Sendable {

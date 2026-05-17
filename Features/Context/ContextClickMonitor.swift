@@ -46,7 +46,7 @@ final class ContextClickMonitor {
             },
             userInfo: opaqueSelf
         ) else {
-            NSLog("[ContextClickMonitor] Failed to create event tap. Accessibility permission probably not granted.")
+            print("[WARN]  [context.click] failed to create event tap — Accessibility permission probably not granted")
             return
         }
 
