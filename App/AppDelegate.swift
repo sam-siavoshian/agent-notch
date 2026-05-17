@@ -33,6 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ContextDevToolsWindowController.shared.present()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
+        // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
+        AdapterRegistry.shared.register(BrowserAdapter())
+        AdapterRegistry.shared.register(TerminalAdapter())
+        AdapterRegistry.shared.register(IDEAdapter())
+        log.info("Registered \(AdapterRegistry.shared.allRegistered().count) app-specific adapter instance(s)")
         // Phase 1 monitors — passively collect events into EventLog via
         // EventIngester. Start order matters: KeystrokeMonitor wants
         // AXObserverManager's focused-element provider, so AXObserverManager
