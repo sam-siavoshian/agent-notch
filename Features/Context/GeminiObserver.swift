@@ -77,9 +77,9 @@ public final class GeminiObserver {
             allVisibleApps: parsed.allVisibleApps ?? [],
             screenLayout: parsed.screenLayout,
             currentSurface: parsed.currentSurface,
-            observableControls: (parsed.observableControls ?? []).map {
+            observableControls: parsed.observableControls?.map {
                 SurfaceObservation.Control(label: $0.label, purpose: $0.purpose, location: $0.location, iconHint: $0.iconHint)
-            },
+            } ?? [],
             crossAppCorrelations: parsed.crossAppCorrelations ?? [],
             userVisibleState: parsed.userVisibleState,
             modelLatencyS: latency,
