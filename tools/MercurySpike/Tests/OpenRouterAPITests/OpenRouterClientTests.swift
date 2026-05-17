@@ -24,7 +24,7 @@ final class OpenRouterClientTests: XCTestCase {
         }
         let client = OpenRouterClient(apiKey: "sk-test", session: Self.mockSession())
         _ = try await client.chatCompletion(request: ChatCompletionRequest(
-            model: "inception/mercury-coder",
+            model: "inception/mercury-2",
             messages: [.init(role: "user", content: "hi")]
         ))
         let req = try XCTUnwrap(captured.value)
