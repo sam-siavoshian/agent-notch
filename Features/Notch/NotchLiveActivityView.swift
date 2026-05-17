@@ -15,7 +15,6 @@ import SwiftUI
 struct NotchLiveActivityView: View {
     @ObservedObject private var state = AgentState.shared
     @ObservedObject private var store = AgentSettingsStore.shared
-    @StateObject private var frontmost = FrontmostAppObserver()
 
     var body: some View {
         HStack(spacing: 6) {
@@ -26,21 +25,12 @@ struct NotchLiveActivityView: View {
                 .frame(width: 16, height: 16)
                 .shadow(color: store.cursorColor.swatch.opacity(0.55), radius: 3)
 
-            if let icon = frontmost.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 16, height: 16)
-                    .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
-            }
-
             Text(statusText)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.92))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .id(statusText) // re-trigger transitions on text change
+                .id(statusText)
 
             Spacer(minLength: 0)
         }
@@ -50,26 +40,28 @@ struct NotchLiveActivityView: View {
         .allowsHitTesting(false)
     }
 
+    /// Generic activity status — never the tool name. The chip strip below
+    /// owns the per-tool readout so the top row stays a clean "still working"
+    /// signal.
     private var statusText: String {
-        let detail = state.detail.trimmingCharacters(in: .whitespacesAndNewlines)
         switch state.activity {
-        case .thinking:
+        case .thinking, .toolCall:
             return "thinking…"
-        case .toolCall(let name):
-            if !detail.isEmpty { return detail }
-            return name
         case .listening:
             return "listening…"
         case .error(let msg):
             return msg
         case .idle:
+            let detail = state.detail.trimmingCharacters(in: .whitespacesAndNewlines)
             return detail.isEmpty ? "done" : detail
         }
     }
 }
 
+/// Tracks the frontmost (non-self) app icon. Shared across notch surfaces
+/// that want to badge the user's actual target app.
 @MainActor
-private final class FrontmostAppObserver: ObservableObject {
+final class FrontmostAppObserver: ObservableObject {
     @Published var icon: NSImage?
     private var observer: NSObjectProtocol?
 
