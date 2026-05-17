@@ -20,11 +20,7 @@ final class CalendarService: ObservableObject {
     }
 
     func requestAccess() async {
-        do {
-            try await store.requestFullAccessToEvents()
-        } catch {
-            // Permission denied or error — status update below covers the UI.
-        }
+        try? await store.requestFullAccessToEvents()
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
         if authorizationStatus == .fullAccess {
             refresh()
