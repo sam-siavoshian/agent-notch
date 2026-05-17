@@ -9,9 +9,7 @@
 //
 
 import AppKit
-import ApplicationServices
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct NotchHomeView: View {
     @ObservedObject private var state = AgentState.shared
@@ -226,16 +224,6 @@ struct NotchHomeView: View {
             case .microphone:      return URL(string: base + "Microphone")!
             }
         }
-
-        /// Live trust check. Only `.accessibility` has a synchronous,
-        /// no-prompt API; for the others we assume granted once the user
-        /// returns from Settings.
-        var isNowGranted: Bool {
-            switch self {
-            case .accessibility: return AXIsProcessTrusted()
-            case .screenRecording, .microphone: return true
-            }
-        }
     }
 }
 
@@ -416,22 +404,17 @@ private struct DraggableAgentIcon: View {
     var size: CGFloat = 26
     @State private var hover = false
 
-    /// True when the bundle has a real app icon. The default Xcode template
-    /// icon is a blank/placeholder rendering — fall back to a custom badge
-    /// so the drag target reads as "this app" instead of "blank square".
+    /// True when the bundle has a real app icon. Default Xcode template
+    /// icons render as a blank square, so we fall back to a custom badge.
     /// Bundle info dict never changes at runtime, so cache once.
     private static let hasRealIcon: Bool =
         Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") != nil
             || Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") != nil
-    private var hasRealIcon: Bool { Self.hasRealIcon }
-
-    private var iconImage: NSImage? {
-        NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName)
-    }
 
     @ViewBuilder
     private var icon: some View {
-        if hasRealIcon, let img = iconImage {
+        if Self.hasRealIcon,
+           let img = NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName) {
             Image(nsImage: img)
                 .resizable()
                 .interpolation(.high)

@@ -59,8 +59,8 @@ enum SoftPill {
 
 struct PillBackground: View {
     var fill: AnyShapeStyle = AnyShapeStyle(SoftPill.Surface.raised)
-    var isHovered: Bool = false
-    var isPressed: Bool = false
+    /// Hover glow tint. Currently unused (callers never activate hover) but
+    /// kept as a parameter so external call sites remain source-compatible.
     var glow: Color? = nil
     var cornerRadius: CGFloat? = nil
 
@@ -73,7 +73,7 @@ struct PillBackground: View {
             shape.fill(fill)
 
             shape
-                .stroke(Color.white.opacity(isPressed ? 0.04 : 0.16), lineWidth: 1)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
                 .blur(radius: 0.5)
                 .mask(
                     shape.fill(LinearGradient(
@@ -82,39 +82,13 @@ struct PillBackground: View {
                         endPoint: .center
                     ))
                 )
-
-            if isPressed {
-                shape
-                    .stroke(Color.black.opacity(0.5), lineWidth: 1.2)
-                    .blur(radius: 0.8)
-                    .mask(
-                        shape.fill(LinearGradient(
-                            colors: [.white, .clear],
-                            startPoint: .top,
-                            endPoint: .center
-                        ))
-                    )
-            }
         }
-        .overlay(
-            shape.stroke(SoftPill.Border.subtle, lineWidth: 0.5)
-        )
-        .shadow(
-            color: Color.black.opacity(isPressed ? 0.0 : (isHovered ? 0.5 : 0.35)),
-            radius: isPressed ? 0 : (isHovered ? 14 : 9),
-            x: 0,
-            y: isPressed ? 0 : (isHovered ? 8 : 4)
-        )
-        .shadow(
-            color: (glow ?? .clear).opacity(isHovered ? 0.4 : 0.0),
-            radius: isHovered ? 14 : 0,
-            x: 0,
-            y: 0
-        )
+        .overlay(shape.stroke(SoftPill.Border.subtle, lineWidth: 0.5))
+        .shadow(color: Color.black.opacity(0.35), radius: 9, x: 0, y: 4)
     }
 }
 
-// MARK: – Status badge + chip
+// MARK: – Status badge
 
 struct StatusBadge: View {
     let color: Color
@@ -132,36 +106,6 @@ struct StatusBadge: View {
                 .foregroundStyle(.white)
         }
         .frame(width: size, height: size)
-    }
-}
-
-struct StatusChip: View {
-    let color: Color
-    let symbol: String
-    let label: String
-    var detail: String? = nil
-
-    var body: some View {
-        HStack(spacing: 8) {
-            StatusBadge(color: color, symbol: symbol, size: 18)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-                if let detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 10))
-                        .foregroundStyle(SoftPill.Text.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, 8)
-        .padding(.trailing, 12)
-        .padding(.vertical, 6)
-        .background(PillBackground(fill: AnyShapeStyle(SoftPill.Surface.base)))
     }
 }
 

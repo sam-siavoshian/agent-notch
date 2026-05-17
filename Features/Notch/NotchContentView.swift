@@ -39,10 +39,12 @@ enum NotchTab: String, CaseIterable, Identifiable {
         }
     }
 
+    /// SF Symbol shown in the tab toolbar. `.spotify` is rendered with the
+    /// branded `SpotifyTabButton`, so its glyph here is a fallback only.
     var icon: String {
         switch self {
         case .home: return "house.fill"
-        case .spotify: return "music.note"   // unused for spotify — rendered as brand mark
+        case .spotify: return "music.note"
         case .calendar: return "calendar"
         case .settings: return "gearshape.fill"
         }

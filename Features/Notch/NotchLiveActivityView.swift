@@ -9,7 +9,6 @@
 //
 
 import AppKit
-import Foundation
 import SwiftUI
 
 struct NotchLiveActivityView: View {
