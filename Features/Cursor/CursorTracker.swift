@@ -23,8 +23,11 @@ private let _CGSCursorIsVisibleFn: (@convention(c) (Int32) -> Bool)? = {
     return unsafeBitCast(sym, to: (@convention(c) (Int32) -> Bool).self)
 }()
 
+// Connection is stable per-process — resolve once instead of 120Hz.
+private let _cgsConnection: Int32? = _CGSDefaultConnectionFn?()
+
 private func systemCursorVisible() -> Bool {
-    guard let conn = _CGSDefaultConnectionFn?(),
+    guard let conn = _cgsConnection,
           let isVisible = _CGSCursorIsVisibleFn else { return true }
     return isVisible(conn)
 }
