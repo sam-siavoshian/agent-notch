@@ -33,6 +33,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ContextDevToolsWindowController.shared.present()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
+        // Phase 1 monitors — passively collect events into EventLog via
+        // EventIngester. Start order matters: KeystrokeMonitor wants
+        // AXObserverManager's focused-element provider, so AXObserverManager
+        // comes first.
+        AXObserverManager.shared.start()
+        let keystrokeOK = KeystrokeMonitor.shared.start()
+        if !keystrokeOK {
+            log.warning("keystroke.start denied — Input Monitoring TCC not granted; running degraded")
+        }
+        ClipboardWatcher.shared.start()
+        DwellTimer.shared.start()
         // Keep polling TCC state after onboarding so the Notch UI can show a
         // banner the moment a permission is revoked / not yet granted.
         PermissionChecker.shared.startPolling()
