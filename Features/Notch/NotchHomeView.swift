@@ -117,7 +117,7 @@ struct NotchHomeView: View {
             Spacer(minLength: 0)
             // Skip the inline Grant when the amber banner above already
             // owns the permission fix flow — avoids two competing CTAs.
-            if let fix = missingPermission, permissions.missing.isEmpty {
+            if permissions.missing.isEmpty, let fix = missingPermission {
                 DraggableAgentIcon(size: 26)
                     .help("Drag onto the privacy list in System Settings to add AgentNotch")
                 GrantPermissionButton(target: fix)
