@@ -257,6 +257,23 @@ public final class ContextCoordinator: RecentActivityContext {
                 windowTitle: contextSnapshot.windowTitle,
                 jpegData: snapshot.jpegData
             ))
+
+            // Phase 6+: continuous vision-based UI/UX learning.
+            // Only fires when the screen has genuinely changed (DirtyDetector
+            // said major), and is throttled internally to >=8s between calls.
+            // Detached so we never block the capture path.
+            if classification.classification == .majorChange {
+                let jpeg = snapshot.jpegData
+                Task.detached(priority: .utility) {
+                    let hint = await MainActor.run {
+                        NSWorkspace.shared.frontmostApplication?.localizedName
+                    }
+                    await GeminiObserver.shared.observe(
+                        screenshotJPEG: jpeg,
+                        frontmostHint: hint
+                    )
+                }
+            }
         } catch {
             log.error("capture failed: \(error)")
         }
