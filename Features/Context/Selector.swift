@@ -304,9 +304,9 @@ public final class ContextSelector {
         let storyWindowSeconds: TimeInterval = 300
         let now = Date()
         let recentStory: [StoryEntry] = CaptureStoryLog.shared.tail(20)
-            .filter { now.timeIntervalSince($0.t) <= storyWindowSeconds }
-            .map { obs in
-                StoryEntry(
+            .compactMap { obs in
+                guard now.timeIntervalSince(obs.t) <= storyWindowSeconds else { return nil }
+                return StoryEntry(
                     t: obs.t,
                     app: obs.frontmostApp,
                     surface: obs.currentSurface,
