@@ -8,7 +8,7 @@ public final class ScreenObservationLog {
     public static let shared = ScreenObservationLog()
 
     private var buffer: [SurfaceObservation] = []
-    private let capacity = 100
+    private static let capacity = 100
     private let queue = DispatchQueue(label: "AgentNotch.ScreenObservationLog.queue")
     private let encoder: JSONEncoder
 
@@ -28,8 +28,8 @@ public final class ScreenObservationLog {
     public func record(_ obs: SurfaceObservation) {
         queue.sync {
             buffer.append(obs)
-            if buffer.count > capacity {
-                buffer.removeFirst(buffer.count - capacity)
+            if buffer.count > Self.capacity {
+                buffer.removeFirst(buffer.count - Self.capacity)
             }
             if let data = try? encoder.encode(obs) {
                 var line = data; line.append(0x0A)
