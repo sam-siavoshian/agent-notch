@@ -179,6 +179,9 @@ private struct ContextAIEventRow: View {
 
                 statusPill
                 lanePill
+                if event.source == "ocr-delta" {
+                    ocrDeltaPill
+                }
 
                 Text(appLabel)
                     .lineLimit(1)
@@ -239,6 +242,18 @@ private struct ContextAIEventRow: View {
             .background(Color.gray.opacity(0.16))
             .clipShape(Capsule())
             .frame(width: 120, alignment: .leading)
+    }
+
+    /// Yellow pill that flags a Tier 0 OCR-delta fast path event so it
+    /// stands out from regular Gemini-backed update-lane events.
+    private var ocrDeltaPill: some View {
+        Text("⚡ OCR-delta (no LLM)")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.orange.opacity(0.22))
+            .foregroundStyle(Color.orange)
+            .clipShape(Capsule())
     }
 
     private static func statusStyle(_ status: ContextAIObservationEvent.Status) -> (Color, String) {

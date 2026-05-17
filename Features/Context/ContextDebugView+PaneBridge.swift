@@ -14,4 +14,5 @@ extension ContextDebugView {
     var dirtyPane: some View { ContextDebugDirtyPane() }
     var cachePane: some View { ContextDebugCachePane() }
     var reportPane: some View { ContextDebugReportPane() }
+    var harnessPane: some View { ContextDebugHarnessPane() }
 }

@@ -59,6 +59,10 @@ public struct ContextAIObservationEvent: Sendable {
     public let controlsCount: Int
     public let affordancesCount: Int
     public let entitiesCount: Int
+    /// Prefix into ContextGeminiCache/Debug/ for `*-prompt.txt` and
+    /// `*-raw-response.json`. Used by the Dev Tools AI pane to lazily load
+    /// the prompt + raw response for reducer events. Format: `<shortHash>-<slug>`.
+    public let debugArtifactPrefix: String?
 
     public init(
         id: UUID = UUID(),
@@ -100,7 +104,8 @@ public struct ContextAIObservationEvent: Sendable {
         ocrCount: Int? = nil,
         controlsCount: Int = 0,
         affordancesCount: Int = 0,
-        entitiesCount: Int = 0
+        entitiesCount: Int = 0,
+        debugArtifactPrefix: String? = nil
     ) {
         self.id = id
         self.attemptID = attemptID
@@ -142,6 +147,7 @@ public struct ContextAIObservationEvent: Sendable {
         self.controlsCount = controlsCount
         self.affordancesCount = affordancesCount
         self.entitiesCount = entitiesCount
+        self.debugArtifactPrefix = debugArtifactPrefix
     }
 }
 

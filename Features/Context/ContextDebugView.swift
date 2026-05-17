@@ -9,7 +9,7 @@
 import SwiftUI
 
 public enum ContextDebugMode: String, CaseIterable, Identifiable {
-    case overview, packet, captures, memory, ai, intent, dirty, cache, report
+    case overview, packet, captures, memory, ai, intent, dirty, cache, report, harness
 
     public var id: String { rawValue }
 
@@ -24,6 +24,7 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
         case .dirty:    return "Dirty Detector"
         case .cache:    return "Gemini Cache"
         case .report:   return "Run Metrics"
+        case .harness:  return "Harness Detail"
         }
     }
 
@@ -38,6 +39,7 @@ public enum ContextDebugMode: String, CaseIterable, Identifiable {
         case .dirty:    return "viewfinder.circle"
         case .cache:    return "externaldrive.badge.checkmark"
         case .report:   return "chart.bar.doc.horizontal"
+        case .harness:  return "bubble.left.and.bubble.right"
         }
     }
 }
@@ -154,6 +156,7 @@ public struct ContextDebugView: View {
         case .dirty:    dirtyPane
         case .cache:    cachePane
         case .report:   reportPane
+        case .harness:  harnessPane
         }
     }
 

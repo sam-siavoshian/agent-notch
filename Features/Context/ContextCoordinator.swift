@@ -637,6 +637,12 @@ public final class ContextCoordinator: RecentActivityContext {
         let elapsedMilliseconds = Int(Date().timeIntervalSince(startedAt) * 1000)
         await finishGateAndDrainNext()
 
+        let reducerDebugPrefix = ContextGeminiObservationService.debugPaths(
+            for: imageData,
+            mimeType: mimeType,
+            laneName: ContextGeminiObservationLane.reducer.rawValue
+        ).artifactPrefix
+
         guard let observation = ContextGeminiObservationService.reduceLaneObservations(
             laneResults,
             input: input,
@@ -655,7 +661,8 @@ public final class ContextCoordinator: RecentActivityContext {
                 requestMimeType: mimeType,
                 requestMediaResolution: mediaResolution,
                 requestThinkingLevel: thinkingLevel,
-                ocrCount: snapshot.recognizedText.count
+                ocrCount: snapshot.recognizedText.count,
+                debugArtifactPrefix: reducerDebugPrefix
             ))
             return
         }
@@ -669,6 +676,7 @@ public final class ContextCoordinator: RecentActivityContext {
         let controls = Self.controlDescriptions(observation.visibleControls)
         await aiObservationLog.record(ContextAIObservationEvent(
             status: .completed,
+            model: observation.model,
             trigger: snapshot.trigger,
             appName: snapshot.appName,
             windowTitle: snapshot.windowTitle,
@@ -702,7 +710,8 @@ public final class ContextCoordinator: RecentActivityContext {
             ocrCount: snapshot.recognizedText.count,
             controlsCount: observation.visibleControls.count,
             affordancesCount: observation.affordances.count,
-            entitiesCount: observation.entities.count
+            entitiesCount: observation.entities.count,
+            debugArtifactPrefix: reducerDebugPrefix
         ))
         log.info("Gemini learned \(observation.appLabel)/\(observation.surfaceLabel) in \(elapsedMilliseconds)ms, confidence \(observation.confidence)")
     }

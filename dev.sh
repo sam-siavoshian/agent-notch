@@ -9,13 +9,15 @@
 #   ./dev.sh --show-onboarding                 # force-show the permissions onboarding window on launch
 #   ./dev.sh --rotate-key sk-ant-...           # update keychain entry, then build + run
 #   ./dev.sh --rotate-gemini-key AIza...       # update optional Gemini key, then build + run
+#   ./dev.sh --rotate-openai-key sk-...        # update optional OpenAI (Whisper) key, then build + run
 #   ./dev.sh --install                         # build, copy to /Applications, launch from there
 #                                              # (stable path → TCC grants survive close+reopen
 #                                              #  as long as you don't rebuild)
 #
 # Secrets: reads ANTHROPIC_API_KEY from macOS keychain (service: AgentNotch,
-# account: anthropic). Reads optional GEMINI_API_KEY from the same service
-# (account: gemini). Never store keys in this file or in git.
+# account: anthropic). Reads optional GEMINI_API_KEY and OPENAI_API_KEY from
+# the same service (accounts: gemini, openai). Never store keys in this file
+# or in git.
 
 set -euo pipefail
 
@@ -23,6 +25,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEYCHAIN_SERVICE="AgentNotch"
 KEYCHAIN_ACCOUNT="anthropic"
 GEMINI_KEYCHAIN_ACCOUNT="gemini"
+OPENAI_KEYCHAIN_ACCOUNT="openai"
 SCHEME="AgentNotch"
 PROJECT="${REPO_ROOT}/AgentNotch.xcodeproj"
 DERIVED="${REPO_ROOT}/.build/DerivedData"
@@ -65,6 +68,17 @@ while [[ $# -gt 0 ]]; do
         -U >/dev/null
       shift
       ;;
+    --rotate-openai-key)
+      shift
+      if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-openai-key needs the key as next arg"; exit 1; fi
+      echo "→ Updating keychain entry for ${KEYCHAIN_SERVICE}/${OPENAI_KEYCHAIN_ACCOUNT}"
+      security add-generic-password \
+        -s "$KEYCHAIN_SERVICE" \
+        -a "$OPENAI_KEYCHAIN_ACCOUNT" \
+        -w "$1" \
+        -U >/dev/null
+      shift
+      ;;
     -h|--help)
       sed -n '2,13p' "$0"; exit 0 ;;
     *)
@@ -90,6 +104,14 @@ if GEMINI_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$
   echo "→ Gemini context observation enabled"
 else
   echo "→ Gemini key not configured; context observation will run OCR-only"
+fi
+
+echo "→ Fetching optional OPENAI_API_KEY from keychain"
+if OPENAI_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$OPENAI_KEYCHAIN_ACCOUNT" -w 2>/dev/null)"; then
+  export OPENAI_API_KEY
+  echo "→ Whisper transcription enabled"
+else
+  echo "→ OpenAI key not configured; voice transcription will fail"
 fi
 
 # Recommended native screenshot-analysis baseline. The AGENTNOTCH_* names take

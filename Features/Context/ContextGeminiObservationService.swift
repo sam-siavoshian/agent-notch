@@ -1969,6 +1969,18 @@ public struct ContextGeminiDebugPaths: Sendable {
     public let promptPath: String
     public let rawResponsePath: String
     public let errorPath: String
+
+    /// `<shortHash>-<slug>` — the filename prefix used inside Debug/. Suitable
+    /// for embedding in events so a UI consumer can re-derive paths on demand
+    /// without holding the full file paths in memory.
+    public var artifactPrefix: String {
+        // promptPath = <dir>/<prefix>-prompt.txt — strip both ends to recover it.
+        let leaf = (promptPath as NSString).lastPathComponent
+        if leaf.hasSuffix("-prompt.txt") {
+            return String(leaf.dropLast("-prompt.txt".count))
+        }
+        return leaf
+    }
 }
 
 private struct GeminiObservationRequestConfig: Sendable {

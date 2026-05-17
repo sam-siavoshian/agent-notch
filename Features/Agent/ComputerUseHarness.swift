@@ -136,6 +136,21 @@ public final class ComputerUseHarness {
             resolvedIntent: input.resolvedIntent
         )
 
+        let systemSummaries = system.map { block in
+            HarnessRunDetail.SystemBlockSummary(
+                cached: block.cacheControl != nil,
+                charCount: block.text.count,
+                preview: String(block.text.prefix(240))
+            )
+        }
+        await HarnessRunDetailStore.shared.startRun(HarnessRunDetail(
+            id: runID,
+            startedAt: startedAt,
+            transcript: input.transcript,
+            systemBlocks: systemSummaries,
+            resolvedIntentVerb: input.resolvedIntent?.verb
+        ))
+
         var messages: [Message] = [
             Message(role: "user", content: [.text(input.transcript)])
         ]
@@ -146,6 +161,11 @@ public final class ComputerUseHarness {
 
         func recordMetrics(status: String, errorMessage: String? = nil) async {
             let endedAt = Date()
+            await HarnessRunDetailStore.shared.finalizeRun(
+                runID: runID,
+                endedAt: endedAt,
+                finalStatus: status
+            )
             printRunMetrics(AgentRunMetricsRecord(
                 id: runID,
                 startedAt: startedAt,
@@ -217,6 +237,7 @@ public final class ComputerUseHarness {
                 toolChoice: nil
             )
 
+            let requestedAt = Date()
             let response: AnthropicMessageResponse
             do {
                 response = try await client.send(request)
@@ -239,6 +260,7 @@ public final class ComputerUseHarness {
                 await recordMetrics(status: "network_error", errorMessage: "\(error)")
                 return
             }
+            let respondedAt = Date()
 
             if let usage = response.usage {
                 NSLog("[Harness] usage turn=\(turn) in=\(usage.inputTokens ?? -1) out=\(usage.outputTokens ?? -1) cache_create=\(usage.cacheCreationInputTokens ?? -1) cache_read=\(usage.cacheReadInputTokens ?? -1)")
@@ -259,6 +281,21 @@ public final class ComputerUseHarness {
                     if case .text(let t) = block { return t } else { return nil }
                 }.joined(separator: " ")
                 log.info("harness.done run_id=\(runID.uuidString) status=completed_without_tool turns=\(turn)")
+                await HarnessRunDetailStore.shared.appendTurn(
+                    runID: runID,
+                    turn: HarnessTurnRecord(
+                        turnIndex: turn,
+                        model: response.model,
+                        requestedAt: requestedAt,
+                        respondedAt: respondedAt,
+                        stopReason: response.stopReason,
+                        inputTokens: response.usage?.inputTokens,
+                        outputTokens: response.usage?.outputTokens,
+                        cacheReadInputTokens: response.usage?.cacheReadInputTokens,
+                        cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
+                        toolCalls: []
+                    )
+                )
                 AgentState.shared.set(.idle, detail: text)
                 await recordMetrics(status: "completed_without_tool")
                 return
@@ -274,8 +311,24 @@ public final class ComputerUseHarness {
             }
 
             var resultBlocks: [ContentBlock] = []
+            var toolRecords: [HarnessTurnRecord.ToolCallRecord] = []
             for use in toolUses {
                 if stopRequested {
+                    await HarnessRunDetailStore.shared.appendTurn(
+                        runID: runID,
+                        turn: HarnessTurnRecord(
+                            turnIndex: turn,
+                            model: response.model,
+                            requestedAt: requestedAt,
+                            respondedAt: respondedAt,
+                            stopReason: response.stopReason,
+                            inputTokens: response.usage?.inputTokens,
+                            outputTokens: response.usage?.outputTokens,
+                            cacheReadInputTokens: response.usage?.cacheReadInputTokens,
+                            cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
+                            toolCalls: toolRecords
+                        )
+                    )
                     AgentState.shared.set(.idle, detail: "Stopped")
                     await recordMetrics(status: "stopped_by_user")
                     return
@@ -299,8 +352,33 @@ public final class ComputerUseHarness {
                 let result = await dispatcher.dispatch(toolUseId: use.id, name: use.name, input: use.input)
                 log.info("harness.tool_result run_id=\(runID.uuidString) action=\(action) is_error=\(result.isError)")
                 resultBlocks.append(.toolResult(toolUseId: result.toolUseId, content: result.content, isError: result.isError, cache: false))
+
+                toolRecords.append(HarnessTurnRecord.ToolCallRecord(
+                    id: use.id,
+                    name: use.name,
+                    inputSummary: Self.compactJSON(use.input),
+                    action: use.name == "computer" ? action : nil,
+                    resultIsError: result.isError,
+                    resultTextPreview: Self.previewText(of: result.content, limit: 200)
+                ))
             }
             messages.append(Message(role: "user", content: resultBlocks))
+
+            await HarnessRunDetailStore.shared.appendTurn(
+                runID: runID,
+                turn: HarnessTurnRecord(
+                    turnIndex: turn,
+                    model: response.model,
+                    requestedAt: requestedAt,
+                    respondedAt: respondedAt,
+                    stopReason: response.stopReason,
+                    inputTokens: response.usage?.inputTokens,
+                    outputTokens: response.usage?.outputTokens,
+                    cacheReadInputTokens: response.usage?.cacheReadInputTokens,
+                    cacheCreationInputTokens: response.usage?.cacheCreationInputTokens,
+                    toolCalls: toolRecords
+                )
+            )
 
             if response.stopReason != "tool_use" {
                 log.info("harness.done run_id=\(runID.uuidString) status=completed_after_tools turns=\(turn)")
@@ -537,5 +615,37 @@ public final class ComputerUseHarness {
         let scale = screen.backingScaleFactor
         let size = screen.frame.size
         return CGSize(width: size.width * scale, height: size.height * scale)
+    }
+
+    /// Compact JSON representation of a tool input. Used for the Dev Tools
+    /// per-turn drill-in — small enough to render inline, big enough to debug.
+    fileprivate static func compactJSON(_ value: JSON, limit: Int = 240) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        if let data = try? encoder.encode(value), let text = String(data: data, encoding: .utf8) {
+            if text.count <= limit { return text }
+            let prefix = text.prefix(limit)
+            return "\(prefix)…"
+        }
+        return "<unencodable>"
+    }
+
+    /// Pulls the first text block out of a tool result's content array and
+    /// truncates it. Image results render as `<image>`.
+    fileprivate static func previewText(of content: [ContentBlock], limit: Int) -> String {
+        for block in content {
+            switch block {
+            case .text(let t):
+                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                if trimmed.count <= limit { return trimmed }
+                return "\(trimmed.prefix(limit))…"
+            case .image:
+                return "<image>"
+            default:
+                continue
+            }
+        }
+        return ""
     }
 }
