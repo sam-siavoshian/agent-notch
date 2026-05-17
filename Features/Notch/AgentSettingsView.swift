@@ -198,9 +198,6 @@ struct AgentSettingsView: View {
     private var diagnosticsRow: some View {
         SettingRow(title: "Context") {
             PillToolbar {
-                ToolbarIconButton(systemImage: "wrench.and.screwdriver") {
-                    openDevTools()
-                }
                 ToolbarIconButton(systemImage: "doc.on.doc") {
                     copyActivationContext()
                 }
@@ -208,13 +205,6 @@ struct AgentSettingsView: View {
                     Task { await refreshContextHealth() }
                 }
             }
-        }
-    }
-
-    private func openDevTools() {
-        Task { @MainActor in
-            ContextDevToolsWindowController.shared.present()
-            diagnosticsStatus = "Opened Dev Tools."
         }
     }
 
