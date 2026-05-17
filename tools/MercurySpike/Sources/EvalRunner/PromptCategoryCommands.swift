@@ -277,7 +277,7 @@ enum PromptCategoryCommands {
             }
             let elapsed = Date().timeIntervalSince(start)
             let checks = scorer(raw, fixture.expectedAny)
-            let allPassed = !checks.isEmpty && checks.allSatisfy { $0.passed }
+            let allPassed = !checks.isEmpty && checks.allSatisfy(\.passed)
             print("[\(allPassed ? "PASS" : "FAIL")] \(fixture.name)  (\(String(format: "%.2f", elapsed))s)")
             for c in checks {
                 let mark = c.passed ? "  ✓" : "  ✗"
@@ -334,7 +334,7 @@ enum PromptCategoryCommands {
             }
             let elapsed = Date().timeIntervalSince(start)
             let checks = scoreActiveTask(raw: raw, expected: fixture.expectedAny)
-            let allPassed = !checks.isEmpty && checks.allSatisfy { $0.passed }
+            let allPassed = !checks.isEmpty && checks.allSatisfy(\.passed)
             print("[\(allPassed ? "PASS" : "FAIL")] \(fixture.name)  (\(String(format: "%.2f", elapsed))s)")
             for c in checks {
                 let mark = c.passed ? "  ✓" : "  ✗"
@@ -389,7 +389,7 @@ enum PromptCategoryCommands {
             }
             let elapsed = Date().timeIntervalSince(start)
             let checks = scoreRecipeNaming(raw: raw, expected: fixture.expectedAny)
-            let allPassed = !checks.isEmpty && checks.allSatisfy { $0.passed }
+            let allPassed = !checks.isEmpty && checks.allSatisfy(\.passed)
             print("[\(allPassed ? "PASS" : "FAIL")] \(fixture.name)  (\(String(format: "%.2f", elapsed))s)")
             for c in checks {
                 let mark = c.passed ? "  ✓" : "  ✗"
