@@ -1,0 +1,10 @@
+{
+  "intent": {
+    "verb": "run",
+    "target": "the tests",
+    "resolved_target_contains": "tritonhacks2026"
+  },
+  "brief_must_contain": ["swift test", "tritonhacks2026"],
+  "brief_must_not_contain": ["\\b\\d{3}\\s*,\\s*\\d{3}\\b"],
+  "brief_token_budget": 600
+}

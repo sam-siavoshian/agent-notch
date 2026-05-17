@@ -1,0 +1,65 @@
+{
+  "transcript": "run the tests",
+  "current_screen": {
+    "app": "iTerm2",
+    "bundle_id": "com.googlecode.iterm2",
+    "pid": 5510,
+    "window_title": "tritonhacks2026 — zsh — 120×40",
+    "window_id": 88,
+    "display_id": 1,
+    "display_bounds": [0, 0, 1728, 1117],
+    "captured_at": "2026-05-16T21:02:00Z",
+    "ocr_lines": ["arshan@MBP tritonhacks2026 % git status", "On branch main", "nothing to commit, working tree clean", "arshan@MBP tritonhacks2026 %"],
+    "ax_elements": [
+      {"role": "AXTextArea", "label": "Terminal", "ax_path": "AXWindow/AXScrollArea/AXTextArea", "focused": true}
+    ],
+    "cursor": [120, 600],
+    "selection": null,
+    "clipboard": null,
+    "app_specific": {
+      "cwd": "/Users/arshan/Desktop/tritonhacks2026",
+      "git_branch": "main",
+      "git_dirty": false,
+      "shell": "zsh",
+      "recent_commands": ["git status", "ls", "git log --oneline -5"],
+      "ssh_host": null
+    }
+  },
+  "user_prefs": "",
+  "active_task": {
+    "id": "t_2026-05-16_21",
+    "started_at": "2026-05-16T20:55:00Z",
+    "label": "Work on context system redesign",
+    "kind": "coding",
+    "narrative": "User is working in the tritonhacks2026 repo on the AgentNotch context redesign. Recent activity in iTerm: git status checks.",
+    "actions_taken": [
+      {"t": "2026-05-16T21:00:00Z", "what": "ran git status in tritonhacks2026"}
+    ],
+    "resources": [
+      "/Users/arshan/Desktop/tritonhacks2026"
+    ],
+    "entities": [
+      {"label": "tritonhacks2026", "kind": "cwd", "uri": "/Users/arshan/Desktop/tritonhacks2026"}
+    ],
+    "blocked_on": null,
+    "likely_next_steps": ["edit context files", "run tests"]
+  },
+  "recent_events": [
+    {"t": "2026-05-16T21:00:00Z", "kind": "input", "app": "iTerm2", "text": "git status", "context": "shell command"},
+    {"t": "2026-05-16T21:01:30Z", "kind": "screen", "app": "iTerm2", "surface": "git status output"}
+  ],
+  "recent_resources": [
+    {"kind": "cwd", "uri": "/Users/arshan/Desktop/tritonhacks2026", "label": "tritonhacks2026", "app": "iTerm2", "last_seen": "2026-05-16T21:01:30Z"}
+  ],
+  "recipes_for_active_app": [
+    {
+      "name": "run swift package tests",
+      "trigger_pattern": "run tests | swift test | run unit tests",
+      "steps": [
+        {"kind": "shell_cmd", "value": "swift test", "needs_cwd": "<cwd>"}
+      ],
+      "seen_count": 4,
+      "confidence": 0.80
+    }
+  ]
+}
