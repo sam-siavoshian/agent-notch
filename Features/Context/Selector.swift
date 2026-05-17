@@ -27,7 +27,22 @@ public final class ContextSelector {
     /// Snapshot of the last selector run — surfaced in Dev Tools.
     public private(set) var lastRun: Result?
 
+    /// In-memory ring of the most recent selector runs (oldest → newest).
+    /// Bounded to `maxRecentRuns`. Powers the Dev Tools Intent history view.
+    /// Note: `recentRuns.last == lastRun` by construction — that duplication
+    /// is intentional for caller ergonomics.
+    public private(set) var recentRuns: [Result] = []
+    private let maxRecentRuns = 20
+
     private init() {}
+
+    private func recordRun(_ result: Result) {
+        lastRun = result
+        recentRuns.append(result)
+        if recentRuns.count > maxRecentRuns {
+            recentRuns.removeFirst(recentRuns.count - maxRecentRuns)
+        }
+    }
 
     /// Run the selector for a long-press transcript. Total budget ~3.5s worst case.
     public func select(transcript: String) async -> Result {
@@ -78,7 +93,7 @@ public final class ContextSelector {
                         latencyS: Date().timeIntervalSince(started),
                         modelUsed: MercuryClient.defaultModel
                     )
-                    lastRun = result
+                    recordRun(result)
                     return result
                 }
                 // Parse failed — fall through to local renderer.
@@ -104,7 +119,7 @@ public final class ContextSelector {
             latencyS: Date().timeIntervalSince(started),
             modelUsed: nil
         )
-        lastRun = result
+        recordRun(result)
         return result
     }
 
