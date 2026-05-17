@@ -78,7 +78,7 @@ final class LongPressDetector {
             options: .defaultTap,
             eventsOfInterest: CGEventMask(mask),
             callback: { _, type, event, refcon in
-                guard let refcon = refcon else {
+                guard let refcon else {
                     return Unmanaged.passUnretained(event)
                 }
                 let detector = Unmanaged<LongPressDetector>.fromOpaque(refcon).takeUnretainedValue()
