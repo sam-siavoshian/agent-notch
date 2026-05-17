@@ -96,7 +96,7 @@ public final class ComputerUseHarness {
         if case .handled(let summary, let affirmation) = routed {
             TextToSpeechService.shared.speak(affirmation)
             AgentState.shared.set(.idle, detail: summary)
-            await AgentMetricsStore.shared.record(AgentRunMetricsRecord(
+            printRunMetrics(AgentRunMetricsRecord(
                 id: runID,
                 startedAt: startedAt,
                 endedAt: Date(),
