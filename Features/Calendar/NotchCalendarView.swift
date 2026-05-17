@@ -87,10 +87,6 @@ struct NotchCalendarView: View {
                     .foregroundStyle(SoftPill.Text.muted)
                 Spacer()
             }
-            Text("Enjoy the quiet.")
-                .font(.system(size: 18, design: .serif).italic())
-                .foregroundStyle(SoftPill.Text.primary)
-                .padding(.top, 2)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
