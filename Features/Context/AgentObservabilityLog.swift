@@ -31,7 +31,7 @@ public final class AgentObservabilityLog {
                  .l2Snapshot(let id, _, _, _, _, _, _),
                  .selectorRun(let id, _, _, _, _, _, _, _),
                  .mercuryCall(let id, _, _, _, _, _, _, _, _),
-                 .harnessTurn(let id, _, _, _, _, _, _, _, _, _),
+                 .harnessTurn(let id, _, _, _, _, _, _, _, _, _, _),
                  .memoryMutation(let id, _, _, _):
                 return id
             }
@@ -43,7 +43,7 @@ public final class AgentObservabilityLog {
                  .l2Snapshot(_, let t, _, _, _, _, _),
                  .selectorRun(_, let t, _, _, _, _, _, _),
                  .mercuryCall(_, let t, _, _, _, _, _, _, _),
-                 .harnessTurn(_, let t, _, _, _, _, _, _, _, _),
+                 .harnessTurn(_, let t, _, _, _, _, _, _, _, _, _),
                  .memoryMutation(_, let t, _, _):
                 return t
             }
