@@ -104,11 +104,11 @@ public final class AnchorRecorder {
         case let .click(elementLabel, axRole, _):
             // Click on a labeled control with a meaningful role.
             guard let label = elementLabel, !label.isEmpty else { return false }
-            if let role = axRole, ["AXButton", "AXMenuItem", "AXMenuButton", "AXLink", "AXRadioButton", "AXCheckBox", "AXTab", "AXTabGroup"].contains(role) {
+            if let role = axRole, Self.clickableTriggerRoles.contains(role) {
                 return true
             }
             // Fallback: any click with a label is at least a hint.
-            return label.count > 0
+            return !label.isEmpty
         default:
             return false
         }
@@ -258,6 +258,11 @@ public final class AnchorRecorder {
             return true
         }
     }
+
+    private static let clickableTriggerRoles: Set<String> = [
+        "AXButton", "AXMenuItem", "AXMenuButton", "AXLink",
+        "AXRadioButton", "AXCheckBox", "AXTab", "AXTabGroup"
+    ]
 
     private static let terminalBundleIDs: Set<String> = [
         "com.apple.Terminal",
