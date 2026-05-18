@@ -80,8 +80,7 @@ public final class SurfaceMemoryStore {
             memory.observationCount += 1
 
             for control in obs.observableControls {
-                let needle = control.label.lowercased()
-                if let idx = memory.controls.firstIndex(where: { $0.label.lowercased() == needle }) {
+                if let idx = memory.controls.firstIndex(where: { $0.label.lowercased() == control.label.lowercased() }) {
                     memory.controls[idx].seenCount += 1
                     memory.controls[idx].lastSeen = obs.t
                     if memory.controls[idx].purpose == nil, control.purpose != nil {
@@ -135,8 +134,47 @@ public final class SurfaceMemoryStore {
     public func allBundleIDs() -> [String] {
         queue.sync {
             (try? FileManager.default.contentsOfDirectory(at: Self.storageRoot, includingPropertiesForKeys: nil))?
-                .map(\.lastPathComponent) ?? []
+                .map { $0.lastPathComponent } ?? []
         }
+    }
+
+    /// Find surfaces from ANY bundle whose surface name, app name, or control
+    /// labels match any of the given lowercased tokens. This is the
+    /// cross-app deictic resolver: when the user says "DM phone1k" while
+    /// browsing in Brave, the bundle-scoped `memories(forBundle:)` returns
+    /// only Brave surfaces, but the phone1k Discord surface lives under a
+    /// different bundle. Without this method that surface stays invisible
+    /// to Mercury and the agent falls back to a generic Messages/Mail path.
+    ///
+    /// Scoring: surface-name hit = 5, app-name hit = 2, control-label hit = 1.
+    /// Higher-score surfaces sort first; ties broken by `observationCount`.
+    /// Skips tokens shorter than 3 chars to avoid junk matches on "is"/"to".
+    public func searchAcrossApps(matchingTokens tokens: [String], limit: Int = 4) -> [SurfaceMemory] {
+        let normalized = Set(tokens.map { $0.lowercased() }.filter { $0.count >= 3 })
+        guard !normalized.isEmpty else { return [] }
+        var scored: [(score: Int, mem: SurfaceMemory)] = []
+        for bid in allBundleIDs() {
+            for mem in memories(forBundle: bid) {
+                var score = 0
+                let surfaceLower = mem.surface.lowercased()
+                let appLower = mem.app.lowercased()
+                for tok in normalized {
+                    if surfaceLower.contains(tok) { score += 5 }
+                    if appLower.contains(tok) { score += 2 }
+                    for ctrl in mem.controls where ctrl.label.lowercased().contains(tok) {
+                        score += 1
+                    }
+                }
+                if score > 0 { scored.append((score, mem)) }
+            }
+        }
+        return scored
+            .sorted { (lhs, rhs) in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                return lhs.mem.observationCount > rhs.mem.observationCount
+            }
+            .prefix(limit)
+            .map { $0.mem }
     }
 
     /// Remove memories older than `policy.maxAgeDays` (with fewer than
@@ -210,17 +248,11 @@ public final class SurfaceMemoryStore {
         return try? JSONDecoder.iso8601.decode(SurfaceMemory.self, from: data)
     }
 
-    private static let memoryEncoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return e
-    }()
-
     private func saveMemory(_ memory: SurfaceMemory) throws {
         let url = pathFor(bundleID: memory.bundleID, surface: memory.surface)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try Self.memoryEncoder.encode(memory)
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(memory)
         try data.write(to: url, options: [.atomic])
     }
 
@@ -239,9 +271,9 @@ public final class SurfaceMemoryStore {
 }
 
 private extension JSONDecoder {
-    static let iso8601: JSONDecoder = {
+    static var iso8601: JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
-    }()
+    }
 }

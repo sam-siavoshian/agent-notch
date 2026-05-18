@@ -25,6 +25,28 @@ public final class ScreenObservationLog {
 
     public init() {
         try? FileManager.default.createDirectory(at: Self.storageRoot, withIntermediateDirectories: true)
+        self.buffer = Self.loadTailFromDisk(maxCount: Self.capacity)
+    }
+
+    /// Re-hydrate the ring from the on-disk JSONL so the Dev Tools "Screen Obs"
+    /// pane shows continuity across restarts instead of resetting every launch.
+    /// Parse failures are skipped silently — a partially malformed file should
+    /// not block startup.
+    private static func loadTailFromDisk(maxCount: Int) -> [SurfaceObservation] {
+        guard let data = try? Data(contentsOf: Self.jsonlFile),
+              let raw = String(data: data, encoding: .utf8) else { return [] }
+        let lines = raw.split(separator: "\n", omittingEmptySubsequences: true)
+        let tail = lines.suffix(maxCount)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var out: [SurfaceObservation] = []
+        out.reserveCapacity(tail.count)
+        for line in tail {
+            guard let lineData = line.data(using: .utf8),
+                  let obs = try? decoder.decode(SurfaceObservation.self, from: lineData) else { continue }
+            out.append(obs)
+        }
+        return out
     }
 
     public func record(_ obs: SurfaceObservation) {

@@ -46,16 +46,12 @@ public struct ContextDebugScreenObsView: View {
         }
     }
 
-    private static let timeFormatter: DateFormatter = {
+    private var timeString: String {
+        guard lastRefreshed > .distantPast else { return "—" }
         let formatter = DateFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .medium
-        return formatter
-    }()
-
-    private var timeString: String {
-        guard lastRefreshed > .distantPast else { return "—" }
-        return Self.timeFormatter.string(from: lastRefreshed)
+        return formatter.string(from: lastRefreshed)
     }
 
     private func row(_ obs: SurfaceObservation) -> some View {
@@ -198,27 +194,19 @@ public struct ContextDebugScreenObsView: View {
         }
     }
 
-    private static let obsEncoder: JSONEncoder = {
+    private func prettyJSON(_ obs: SurfaceObservation) -> String {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }()
-
-    private static let artifactEncoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }()
-
-    private func prettyJSON(_ obs: SurfaceObservation) -> String {
-        guard let data = try? Self.obsEncoder.encode(obs),
+        guard let data = try? encoder.encode(obs),
               let s = String(data: data, encoding: .utf8) else { return "<encode failed>" }
         return s
     }
 
     private func prettyJSONArtifact(_ artifact: [String: AnyCodable]) -> String {
-        guard let data = try? Self.artifactEncoder.encode(artifact),
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(artifact),
               let s = String(data: data, encoding: .utf8) else { return "<encode failed>" }
         return s
     }

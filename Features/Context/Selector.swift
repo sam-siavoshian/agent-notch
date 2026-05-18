@@ -86,6 +86,13 @@ public final class ContextSelector {
         let mercuryEnabled = await MainActor.run { AgentSettingsStore.shared.mercuryEnabled }
         let userPrefs = await MainActor.run { AgentSettingsStore.shared.preferences }
 
+        // Deterministic cross-app routing hint, computed BEFORE Mercury. If
+        // the transcript names an entity that resolves to a different app
+        // (e.g. "phone1k" → Discord while user is in Brave), this hint will
+        // be prepended to the brief regardless of what Mercury writes. Belt-
+        // and-suspenders against Mercury misrouting.
+        let routingHint = Self.routingHint(transcript: transcript, currentApp: l2.app)
+
         // Try Mercury first (when enabled + key available)
         if mercuryEnabled {
             do {
@@ -111,9 +118,11 @@ public final class ContextSelector {
                     if hadMatchingLearned && parsed.brief.navigationAnchors.isEmpty {
                         NSLog("[Selector] WARN: Mercury returned empty navigation_anchors despite matching learned surface for \(l2.bundleID) / \(l2.windowTitle ?? "?")")
                     }
+                    let renderedBrief = Self.renderMarkdown(parsed.brief, routingHint: routingHint)
+                    Self.persistBriefOutput(transcript: transcript, mercuryRaw: raw, renderedBrief: renderedBrief, routingHint: routingHint, degraded: false)
                     let result = Result(
                         intent: parsed.intent,
-                        brief: Self.renderMarkdown(parsed.brief),
+                        brief: renderedBrief,
                         structuredBrief: parsed.brief,
                         l2: l2,
                         initiationScreenshot: initiationScreenshot,
@@ -130,17 +139,24 @@ public final class ContextSelector {
             }
         }
 
-        // Local fallback
-        let (intent, brief) = LocalBriefRenderer.render(
+        // Local fallback — same routing hint applies, prepended to the local brief.
+        let (intent, localBrief) = LocalBriefRenderer.render(
             transcript: transcript,
             l2: l2,
             activeTask: activeTask,
             recipesForActiveApp: recipes,
             recentResources: resources
         )
+        let briefWithHint: String
+        if let routingHint, !routingHint.isEmpty {
+            briefWithHint = routingHint + "\n\n" + localBrief
+        } else {
+            briefWithHint = localBrief
+        }
+        Self.persistBriefOutput(transcript: transcript, mercuryRaw: nil, renderedBrief: briefWithHint, routingHint: routingHint, degraded: true)
         let result = Result(
             intent: intent,
-            brief: brief,
+            brief: briefWithHint,
             structuredBrief: nil,
             l2: l2,
             initiationScreenshot: initiationScreenshot,
@@ -210,6 +226,14 @@ public final class ContextSelector {
       current surface, you MUST cite at least its top-3 controls by
       `seen_count` in `navigation_anchors`, even if you think the agent
       could find them on its own.
+      ALSO: when the transcript names a person, file, channel, or other
+      entity (e.g. "phone1k", "the merge"), search ALL `learned_surfaces`
+      AND `recent_resources` for that name — not just the current surface.
+      If a surface/resource matches the named entity, set `steps[0]` to the
+      app of THAT surface (e.g. Discord), EVEN IF a generic alternative like
+      Messages or Mail would also work. The user's actual usage trumps the
+      agent's AppleScript allowlist. Put the match in `resolved_references`
+      with `evidence` citing the matching surface name + seen_count.
     - `recent_story`: chronological story of recent activity with per-entry
       `narrative`, `current_goal_guess`, `content_type`, `artifact`. Use it
       to resolve deictic references ("the letter", "her", "that PR") against
@@ -280,7 +304,9 @@ public final class ContextSelector {
         events: [CEvent],
         userPrefs: String
     ) throws -> String {
-        let encoder = Self.promptEncoder
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
 
         /// Compact per-entry projection of `SurfaceObservation` for the
         /// Mercury payload. We drop fields Mercury doesn't need (controls,
@@ -322,18 +348,18 @@ public final class ContextSelector {
             let recent_story: [StoryEntry]
         }
 
-        // Rank surfaces with the CURRENT one first, then the rest by frequency.
-        // Ranking by raw observationCount alone meant a long-press in a niche
-        // surface (e.g. one specific Slack channel) could exclude that surface
-        // from the top-6 entirely, since busier channels dominate the count.
-        // Now any surface whose label shares a meaningful token with the live
-        // window title floats to the top, regardless of count.
-        //
-        // Within each surface, controls whose labels appear in the transcript
-        // are boosted ahead of high-frequency-but-irrelevant ones (e.g. asking
-        // "send" pulls the Send button forward over Channels/Settings).
-        let allMemories = SurfaceMemoryStore.shared.memories(forBundle: l2.bundleID)
+        // Tokenize the transcript ONCE up front. Used by every cross-cutting
+        // ranking step below (surfaces, controls, resources, story). Drops
+        // stopwords + tokens shorter than 3 chars to avoid junk hits on "to"
+        // or "is".
         let lowerTranscript = transcript.lowercased()
+        let tTokens = Self.transcriptTokens(transcript)
+
+        // STAGE 1 — current-app surfaces. The window-title-matching ones float
+        // up so a long-press in a niche surface (e.g. one specific Slack
+        // channel) still surfaces even when busier channels dominate the
+        // observationCount.
+        let allMemories = SurfaceMemoryStore.shared.memories(forBundle: l2.bundleID)
         var matchesCurrent: [SurfaceMemoryStore.SurfaceMemory] = []
         var others: [SurfaceMemoryStore.SurfaceMemory] = []
         for mem in allMemories {
@@ -343,37 +369,80 @@ public final class ContextSelector {
                 others.append(mem)
             }
         }
-        let learned: [SurfaceMemoryStore.SurfaceMemory] = (
-            matchesCurrent.sorted { $0.observationCount > $1.observationCount } +
-            others.sorted { $0.observationCount > $1.observationCount }
-        ).prefix(6).map { mem -> SurfaceMemoryStore.SurfaceMemory in
-            var trimmed = mem
-            trimmed.controls = Array(mem.controls.sorted { lhs, rhs in
-                let lInTranscript = lowerTranscript.contains(lhs.label.lowercased())
-                let rInTranscript = lowerTranscript.contains(rhs.label.lowercased())
-                if lInTranscript != rInTranscript { return lInTranscript }
-                return lhs.seenCount > rhs.seenCount
-            }.prefix(12))
-            return trimmed
+        let currentRanked = matchesCurrent.sorted { $0.observationCount > $1.observationCount }
+                          + others.sorted { $0.observationCount > $1.observationCount }
+
+        // STAGE 2 — cross-app surfaces. Critical for cross-app intents like
+        // "DM phone1k" issued while Brave is frontmost. Without this, the
+        // bundle-scoped lookup above returns only Brave surfaces and Mercury
+        // never sees that phone1k has 9 observations on Discord. The fallback
+        // path is then a generic AppleScript Messages call.
+        let crossAppMatches = SurfaceMemoryStore.shared.searchAcrossApps(
+            matchingTokens: tTokens,
+            limit: 4
+        )
+
+        // Merge with dedup. Cross-app matches go FIRST — they're explicitly
+        // transcript-relevant, which is a stronger signal than current-surface
+        // proximity. Dedup by (bundleID, surface) so a cross-app match doesn't
+        // get re-included via the current-app path.
+        var seen: Set<String> = []
+        let learned: [SurfaceMemoryStore.SurfaceMemory] = (crossAppMatches + currentRanked)
+            .filter { mem in
+                let key = "\(mem.bundleID)\u{1F}\(mem.surface)"
+                return seen.insert(key).inserted
+            }
+            .prefix(8)
+            .map { mem -> SurfaceMemoryStore.SurfaceMemory in
+                var trimmed = mem
+                trimmed.controls = Array(mem.controls.sorted { lhs, rhs in
+                    let lInTranscript = lowerTranscript.contains(lhs.label.lowercased())
+                    let rInTranscript = lowerTranscript.contains(rhs.label.lowercased())
+                    if lInTranscript != rInTranscript { return lInTranscript }
+                    return lhs.seenCount > rhs.seenCount
+                }.prefix(12))
+                return trimmed
+            }
+
+        // Resources: existing order is lastSeen desc. Also boost any whose
+        // label or URI contains a transcript token, so "the lethal company
+        // repo" lifts the matching GitHub URL ahead of stale tabs.
+        let rankedResources: [CResourceRef] = resources.sorted { lhs, rhs in
+            let lScore = Self.resourceTokenScore(lhs, tokens: tTokens)
+            let rScore = Self.resourceTokenScore(rhs, tokens: tTokens)
+            if lScore != rScore { return lScore > rScore }
+            return lhs.lastSeen > rhs.lastSeen
         }
 
-        // Pull the last 20 story entries, then keep only those within the last
-        // 5 minutes. If fewer fit the window, that's fine — emit what's there.
+        // Story: keep the rolling 5-minute "what's happening now" window, AND
+        // bring in older entries whose narrative/goal/surface contains a
+        // transcript token. Without the second arm, an entity reference older
+        // than 5 minutes drops out entirely — e.g. "finish my message to
+        // phone1k" 20 minutes after the draft was last visible.
         let storyWindowSeconds: TimeInterval = 300
         let now = Date()
-        let recentStory: [StoryEntry] = CaptureStoryLog.shared.tail(20)
-            .compactMap { obs in
-                guard now.timeIntervalSince(obs.t) <= storyWindowSeconds else { return nil }
-                return StoryEntry(
-                    t: obs.t,
-                    app: obs.frontmostApp,
-                    surface: obs.currentSurface,
-                    narrative: obs.narrative,
-                    current_goal_guess: obs.currentGoalGuess,
-                    content_type: obs.contentType,
-                    artifacts: obs.artifacts
-                )
-            }
+        let allStory: [SurfaceObservation] = CaptureStoryLog.shared.tail(40)
+        let storyFiltered: [SurfaceObservation] = allStory.filter { obs in
+            if now.timeIntervalSince(obs.t) <= storyWindowSeconds { return true }
+            guard !tTokens.isEmpty else { return false }
+            let narrative: String = obs.narrative ?? ""
+            let goal: String = obs.currentGoalGuess ?? ""
+            let surface: String = obs.currentSurface ?? ""
+            let hay: String = (narrative + " " + goal + " " + surface).lowercased()
+            return tTokens.contains(where: { hay.contains($0) })
+        }
+        let storyTrimmed: [SurfaceObservation] = Array(storyFiltered.suffix(20))
+        let recentStory: [StoryEntry] = storyTrimmed.map { obs in
+            StoryEntry(
+                t: obs.t,
+                app: obs.frontmostApp,
+                surface: obs.currentSurface,
+                narrative: obs.narrative,
+                current_goal_guess: obs.currentGoalGuess,
+                content_type: obs.contentType,
+                artifacts: obs.artifacts
+            )
+        }
 
         let payload = Payload(
             transcript: transcript,
@@ -381,47 +450,35 @@ public final class ContextSelector {
             user_prefs: userPrefs,
             active_task: activeTask,
             recent_events: events,
-            recent_resources: Array(resources.prefix(20)),
+            recent_resources: Array(rankedResources.prefix(20)),
             recipes_for_active_app: Array(recipes.sorted { $0.seenCount > $1.seenCount }.prefix(8)),
             learned_surfaces: learned,
             recent_story: recentStory
         )
         let data = try encoder.encode(payload)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        Self.persistPayload(transcript: transcript, payloadJSON: json)
+        return json
     }
 
     // MARK: - Response parser
 
-    // Hoisted JSON coders — upstream's optimization, kept here so both the
-    // typed brief decode and the prompt encode pay zero allocation cost
-    // per call. `briefDecoder` handles `StructuredBrief`; `intentDecoder`
-    // handles the inner `CIntent` payload.
-    private static let intentDecoder = JSONDecoder()
-    private static let briefDecoder = JSONDecoder()
-
-    private static let promptEncoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = [.sortedKeys]
-        return e
-    }()
-
-    /// Decode Mercury's `{intent, brief}` envelope where `brief` is a typed
-    /// `StructuredBrief` object (no longer a free-form markdown string).
-    /// Robust: when `intent` is malformed but `brief` is valid we still
-    /// return — the brief is the load-bearing artifact for the harness.
+    /// Decode Mercury's `{intent, brief}` envelope where `brief` is now a typed
+    /// `StructuredBrief` object (no longer a free-form markdown string). Robust:
+    /// when `intent` is malformed but `brief` is valid we still return — the
+    /// brief is the load-bearing artifact for the harness.
     static func parseResponse(_ raw: String) -> (intent: CIntent, brief: StructuredBrief)? {
         guard let data = raw.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let briefAny = obj["brief"],
               let briefData = try? JSONSerialization.data(withJSONObject: briefAny),
-              let brief = try? Self.briefDecoder.decode(StructuredBrief.self, from: briefData)
+              let brief = try? JSONDecoder().decode(StructuredBrief.self, from: briefData)
         else { return nil }
 
         var intent: CIntent
         if let intentAny = obj["intent"],
            let intentData = try? JSONSerialization.data(withJSONObject: intentAny),
-           let parsed = try? Self.intentDecoder.decode(CIntent.self, from: intentData) {
+           let parsed = try? JSONDecoder().decode(CIntent.self, from: intentData) {
             intent = parsed
         } else {
             intent = CIntent(verb: "do", target: nil, resolvedTarget: nil, entities: [], confidence: 0.2)
@@ -447,6 +504,170 @@ public final class ContextSelector {
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { $0.count >= 3 }
         )
+    }
+
+    /// Common English words and voice-command verbs that carry no entity
+    /// signal. Filtered out of transcript tokens so "let phone 1k know" ranks
+    /// surfaces by "phone" and the "1k"/"phone1k" component, not by garbage
+    /// matches on "let" or "know".
+    private static let transcriptStopwords: Set<String> = [
+        "the", "and", "for", "you", "your", "yours", "let", "tell", "him", "her",
+        "they", "them", "this", "that", "those", "these", "with", "from", "into",
+        "have", "has", "had", "need", "needs", "wants", "want", "wanted", "know",
+        "knows", "knew", "make", "send", "say", "ask", "show", "open", "find",
+        "got", "put", "what", "when", "where", "why", "how", "who", "now",
+        "then", "are", "was", "were", "will", "would", "should", "could", "can",
+        "him", "his", "hers", "she", "ours", "their", "but", "and"
+    ]
+
+    /// Tokenize a transcript for cross-cutting ranking. Drops stopwords and
+    /// tokens < 3 chars. Returns a deduplicated list (order does not matter
+    /// for the matching loops downstream).
+    static func transcriptTokens(_ transcript: String) -> [String] {
+        Array(
+            Set(
+                transcript.lowercased()
+                    .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                    .filter { $0.count >= 3 && !transcriptStopwords.contains($0) }
+            )
+        )
+    }
+
+    /// Count of transcript tokens appearing in a resource's label or URI.
+    /// Used to re-rank `recent_resources` so transcript-relevant URIs ("the
+    /// lethal company repo") sort ahead of stale-but-recent ones.
+    static func resourceTokenScore(_ r: CResourceRef, tokens: [String]) -> Int {
+        guard !tokens.isEmpty else { return 0 }
+        let labelPart: String = r.label ?? ""
+        let hay: String = (labelPart + " " + r.uri).lowercased()
+        return tokens.reduce(0) { $0 + (hay.contains($1) ? 1 : 0) }
+    }
+
+    /// Deterministic cross-app routing hint, prepended to the brief BEFORE
+    /// Mercury's structured output. This is the belt-and-suspenders fix for
+    /// the "Mercury sees Discord phone1k but Claude still opens Messages"
+    /// failure mode. The hint is computed from `SurfaceMemoryStore` directly,
+    /// independent of Mercury, so the routing decision is guaranteed to reach
+    /// Claude even if Mercury misbehaves or omits the relevant `steps[0]`.
+    ///
+    /// Fires only when:
+    ///   1. The transcript has tokens that match surfaces in some other app
+    ///   2. There is a clear app winner (more evidence than the runner-up)
+    ///   3. The winning app is NOT the current frontmost (otherwise no
+    ///      cross-app routing is needed — the agent can act in place)
+    static func routingHint(transcript: String, currentApp: String?) -> String? {
+        let tokens = transcriptTokens(transcript)
+        guard !tokens.isEmpty else { return nil }
+        let matches = SurfaceMemoryStore.shared.searchAcrossApps(matchingTokens: tokens, limit: 6)
+        guard !matches.isEmpty else { return nil }
+
+        // Aggregate by app name (NOT bundleID — same app accessed via web +
+        // native should count together).
+        var byApp: [String: (total: Int, surfaces: [String])] = [:]
+        for m in matches {
+            var entry = byApp[m.app] ?? (0, [])
+            entry.total += m.observationCount
+            entry.surfaces.append(m.surface)
+            byApp[m.app] = entry
+        }
+        let ranked = byApp.map { (app: $0.key, total: $0.value.total, surfaces: $0.value.surfaces) }
+            .sorted { $0.total > $1.total }
+        guard let top = ranked.first else { return nil }
+
+        // Skip when the matched app is already frontmost — no cross-app
+        // routing needed there; the agent should ax_press inside the surface.
+        if let currentApp, top.app.caseInsensitiveCompare(currentApp) == .orderedSame {
+            return nil
+        }
+
+        // Only emit when the winner has substantially more evidence than the
+        // runner-up. Without this guard, a single transcript token matching
+        // two unrelated apps would emit a misleading hint.
+        let runnerUp = ranked.dropFirst().first?.total ?? 0
+        guard top.total > runnerUp else { return nil }
+
+        let surfaceExamples = top.surfaces.prefix(3).joined(separator: ", ")
+        let transcriptShort = String(transcript.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+
+        return """
+        ## ROUTING — open \(top.app) first
+        The voice transcript ("\(transcriptShort)") names an entity that resolves to **\(top.app)** based on \(top.total) prior observations across \(top.surfaces.count) learned surfaces: \(surfaceExamples). Use `open_app` with name "\(top.app)" as your FIRST tool. Do NOT default to Messages or Mail just because the verb sounds messaging-like — the user does not contact this person there.
+        """
+    }
+
+    // MARK: - Payload persistence
+
+    /// Append-only JSONL log of every Mercury payload, written to
+    /// ~/Library/Application Support/AgentNotch/ContextMemory/mercury-payloads.jsonl.
+    /// One line per long-press. Makes the question "did Mercury actually see
+    /// X?" falsifiable — without this we can only see Mercury's RESPONSE in
+    /// Dev Tools, not the input that produced it, so prompt-rule regressions
+    /// are silent. Best-effort: disk write failure does not block the run.
+    private static let payloadsFile: URL = {
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AgentNotch", isDirectory: true)
+            .appendingPathComponent("ContextMemory", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("mercury-payloads.jsonl")
+    }()
+
+    private static let payloadsQueue = DispatchQueue(label: "AgentNotch.Selector.payloadsQueue", qos: .utility)
+
+    private static func persistPayload(transcript: String, payloadJSON: String) {
+        payloadsQueue.async {
+            let envelope: [String: Any] = [
+                "kind": "input",
+                "t": ISO8601DateFormatter().string(from: Date()),
+                "transcript": transcript,
+                "payload": (try? JSONSerialization.jsonObject(with: Data(payloadJSON.utf8))) ?? payloadJSON
+            ]
+            appendEnvelope(envelope)
+        }
+    }
+
+    /// Append a second JSONL line for the same long-press carrying Mercury's
+    /// raw response, the markdown brief that Claude actually saw, the
+    /// routing hint that was injected (or nil), and whether we degraded to
+    /// the LocalBriefRenderer. Together with the matching `input` line this
+    /// gives a complete forensic record per long-press.
+    private static func persistBriefOutput(transcript: String, mercuryRaw: String?, renderedBrief: String, routingHint: String?, degraded: Bool) {
+        payloadsQueue.async {
+            var envelope: [String: Any] = [
+                "kind": "output",
+                "t": ISO8601DateFormatter().string(from: Date()),
+                "transcript": transcript,
+                "degraded": degraded,
+                "rendered_brief": renderedBrief
+            ]
+            if let mercuryRaw {
+                // Embed the parsed JSON if possible so jq/grep can drill in.
+                if let parsed = try? JSONSerialization.jsonObject(with: Data(mercuryRaw.utf8)) {
+                    envelope["mercury_raw"] = parsed
+                } else {
+                    envelope["mercury_raw"] = mercuryRaw
+                }
+            }
+            if let routingHint {
+                envelope["routing_hint"] = routingHint
+            }
+            appendEnvelope(envelope)
+        }
+    }
+
+    /// MUST be called from `payloadsQueue`. Best-effort append; failure is
+    /// logged via NSLog so the long-press doesn't block on disk.
+    private static func appendEnvelope(_ envelope: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: envelope) else { return }
+        var line = data
+        line.append(0x0A) // \n
+        if let h = try? FileHandle(forWritingTo: payloadsFile) {
+            defer { try? h.close() }
+            _ = try? h.seekToEnd()
+            try? h.write(contentsOf: line)
+        } else {
+            try? line.write(to: payloadsFile, options: [.atomic])
+        }
     }
 
     /// True when the on-disk active_task mentions the live app/bundleID
@@ -482,8 +703,17 @@ public final class ContextSelector {
     /// driven entirely by what Mercury filled in — Swift never paraphrases,
     /// reorders, or invents. Sections with empty arrays / nil fields are
     /// omitted so the rendered prose stays tight.
-    static func renderMarkdown(_ b: StructuredBrief) -> String {
+    ///
+    /// `routingHint` is prepended verbatim BEFORE Mercury's output. It is
+    /// computed deterministically from `SurfaceMemoryStore`, so even if
+    /// Mercury writes a wrong-app brief the routing decision still reaches
+    /// Claude.
+    static func renderMarkdown(_ b: StructuredBrief, routingHint: String? = nil) -> String {
         var lines: [String] = []
+        if let routingHint, !routingHint.isEmpty {
+            lines.append(routingHint)
+            lines.append("")
+        }
         lines.append("## What the user wants")
         lines.append(b.goal)
         lines.append("")

@@ -23,7 +23,6 @@ public final class GeminiObserver {
     private var lastObservedAt: Date = .distantPast
     private static let minIntervalBetweenObservations: TimeInterval = 8.0   // >= 8s between calls
     private let queue = DispatchQueue(label: "AgentNotch.GeminiObserver.queue")
-    private static let observationDecoder = JSONDecoder()
 
     public init() {}
 
@@ -66,7 +65,7 @@ public final class GeminiObserver {
         }
 
         guard let data = raw.data(using: .utf8),
-              let parsed = try? Self.observationDecoder.decode(ObservationDTO.self, from: data) else {
+              let parsed = try? JSONDecoder().decode(ObservationDTO.self, from: data) else {
             // Successful HTTP but observation didn't parse — log it so we can debug.
             AgentObservabilityLog.shared.record(.memoryMutation(
                 id: UUID(), t: now, kind: .resourceRecorded,
@@ -84,9 +83,9 @@ public final class GeminiObserver {
             allVisibleApps: parsed.allVisibleApps ?? [],
             screenLayout: parsed.screenLayout,
             currentSurface: parsed.currentSurface,
-            observableControls: parsed.observableControls?.map {
+            observableControls: (parsed.observableControls ?? []).map {
                 SurfaceObservation.Control(label: $0.label, purpose: $0.purpose, location: $0.location, iconHint: $0.iconHint)
-            } ?? [],
+            },
             crossAppCorrelations: parsed.crossAppCorrelations ?? [],
             userVisibleState: parsed.userVisibleState,
             modelLatencyS: latency,

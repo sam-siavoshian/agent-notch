@@ -35,6 +35,30 @@ public final class CaptureStoryLog {
         e.dateEncodingStrategy = .iso8601
         self.encoder = e
         ensureDirectoryExists()
+        self.buffer = Self.loadTodaysTail(maxCount: inMemoryCapacity)
+    }
+
+    /// Re-hydrate today's story so the Selector's `recent_story` survives a
+    /// mid-day restart and Mercury briefs keep narrative continuity. Yesterday's
+    /// story is intentionally NOT loaded — "recent" means today, and stale
+    /// continuity would mislead the brief.
+    private static func loadTodaysTail(maxCount: Int) -> [SurfaceObservation] {
+        let day = dayFormatter.string(from: Date())
+        let url = storageRoot.appendingPathComponent("story-\(day).jsonl")
+        guard let data = try? Data(contentsOf: url),
+              let raw = String(data: data, encoding: .utf8) else { return [] }
+        let lines = raw.split(separator: "\n", omittingEmptySubsequences: true)
+        let tail = lines.suffix(maxCount)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var out: [SurfaceObservation] = []
+        out.reserveCapacity(tail.count)
+        for line in tail {
+            guard let lineData = line.data(using: .utf8),
+                  let obs = try? decoder.decode(SurfaceObservation.self, from: lineData) else { continue }
+            out.append(obs)
+        }
+        return out
     }
 
     // MARK: - Public API

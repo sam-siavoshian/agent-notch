@@ -27,9 +27,6 @@ public final class GeminiVisionClient {
         self.session = session
     }
 
-    private static let bodyEncoder = JSONEncoder()
-    private static let envelopeDecoder = JSONDecoder()
-
     public enum ClientError: Error, CustomStringConvertible {
         case missingAPIKey
         case timeout
@@ -162,7 +159,7 @@ public final class GeminiVisionClient {
                 thinkingConfig: ThinkingConfig(thinkingBudget: 0)
             )
         )
-        req.httpBody = try Self.bodyEncoder.encode(body)
+        req.httpBody = try JSONEncoder().encode(body)
 
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
@@ -183,7 +180,7 @@ public final class GeminiVisionClient {
                         }
                     }
                 }
-                let env = try Self.envelopeDecoder.decode(Envelope.self, from: data)
+                let env = try JSONDecoder().decode(Envelope.self, from: data)
                 return env.candidates.first?.content.parts.first?.text ?? ""
             }
             group.addTask {

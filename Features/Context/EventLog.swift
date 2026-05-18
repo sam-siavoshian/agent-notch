@@ -25,6 +25,33 @@ public final class EventLog {
         e.dateEncodingStrategy = .iso8601
         self.encoder = e
         self.ensureDirectoryExists()
+        // Re-hydrate today's events so the Dev Tools timeline survives restart
+        // and the new session's seq numbers don't collide with the on-disk
+        // history in today's file. We intentionally only load today — events
+        // from prior days have already been rolled into surfaces / anchors /
+        // active_task and aren't "recent" enough to feed back to Mercury.
+        let hydrated = Self.loadTodaysTail(maxCount: inMemoryCapacity)
+        self.buffer = hydrated
+        self.seqCounter = hydrated.map(\.seq).max() ?? 0
+    }
+
+    private static func loadTodaysTail(maxCount: Int) -> [CEvent] {
+        let day = dayFormatter.string(from: Date())
+        let url = storageRoot.appendingPathComponent("events-\(day).jsonl")
+        guard let data = try? Data(contentsOf: url),
+              let raw = String(data: data, encoding: .utf8) else { return [] }
+        let lines = raw.split(separator: "\n", omittingEmptySubsequences: true)
+        let tail = lines.suffix(maxCount)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var out: [CEvent] = []
+        out.reserveCapacity(tail.count)
+        for line in tail {
+            guard let lineData = line.data(using: .utf8),
+                  let ev = try? decoder.decode(CEvent.self, from: lineData) else { continue }
+            out.append(ev)
+        }
+        return out
     }
 
     // MARK: Public API

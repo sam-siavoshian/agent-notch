@@ -169,7 +169,7 @@ public final class ContextCoordinator: RecentActivityContext {
             } else {
                 recognizedText = await ocrService.recognizeText(in: snapshot.jpegData)
             }
-            let previousSnapshot = await store.lastSnapshot()
+            let previousSnapshot = await store.recentSnapshots().last
             let previousSignature = await store.lastSignature()
             let contextSnapshot = ContextSnapshot(
                 capturedAt: snapshot.capturedAt,
@@ -195,6 +195,17 @@ public final class ContextCoordinator: RecentActivityContext {
                     lastSeen: contextSnapshot.capturedAt
                 )
                 ResourceIndex.shared.record(resource)
+            }
+
+            // Pipe adapter-extracted resources (browser URLs, IDE open file +
+            // project root, terminal cwd) into ResourceIndex too. Without this
+            // the Selector's `recent_resources` only ever sees the generic
+            // window stub above — so deictic references like "the lethal
+            // company repo" can't resolve to a real github.com URL even when
+            // the user just looked at it. Bounded by adapter timeout.
+            let adapterRefs = await AdapterRegistry.shared.recentResources(bundleID: bundleID, timeout: 0.3)
+            if !adapterRefs.isEmpty {
+                ResourceIndex.shared.record(adapterRefs)
             }
 
             let signature = ContextDirtyDetector.signature(
@@ -347,12 +358,11 @@ public final class ContextCoordinator: RecentActivityContext {
         }
     }
 
-    private static let ignoredAppNames: Set<String> = ["agentnotch", "agent in the notch"]
-
     private static func shouldIgnoreCapture(_ metadata: ContextWindowMetadata) -> Bool {
         let appName = metadata.appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if ignoredAppNames.contains(appName) { return true }
         let windowTitle = metadata.windowTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return windowTitle.contains("agentnotch dev tools")
+        return appName == "agentnotch"
+            || appName == "agent in the notch"
+            || windowTitle.contains("agentnotch dev tools")
     }
 }

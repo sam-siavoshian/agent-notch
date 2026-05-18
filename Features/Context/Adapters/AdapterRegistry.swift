@@ -55,6 +55,22 @@ public final class AdapterRegistry {
             return nil
         }
     }
+
+    /// Run `recentResources` on the adapter for `bundleID` with a hard timeout.
+    /// Returns [] on absent adapter, timeout, or error. Called from
+    /// `ContextCoordinator.capture(...)` per snapshot so the ResourceIndex
+    /// stays warm with real browser URLs / IDE files / terminal cwds — the
+    /// Selector's `recent_resources` is empty without this.
+    public func recentResources(bundleID: String, timeout: TimeInterval = 0.3) async -> [CResourceRef] {
+        guard let adapter = adapter(for: bundleID) else { return [] }
+        do {
+            return try await withTimeout(seconds: timeout) {
+                await adapter.recentResources(bundleID: bundleID)
+            }
+        } catch {
+            return []
+        }
+    }
 }
 
 /// Helper: race the async operation against a timeout. The first to complete wins.

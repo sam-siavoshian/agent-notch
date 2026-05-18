@@ -19,8 +19,6 @@ public final class IDEAdapter: AppContextAdapter {
         "dev.zed.Zed"
     ]
 
-    private static let titleSeparators: Set<Character> = ["—", "–", "-", "•"]
-
     public init() {}
 
     public func snapshot(bundleID: String) async throws -> [String: AnyCodable] {
@@ -39,7 +37,7 @@ public final class IDEAdapter: AppContextAdapter {
     public func recentResources(bundleID: String) async -> [CResourceRef] {
         guard let snap = try? await snapshot(bundleID: bundleID) else { return [] }
         var out: [CResourceRef] = []
-        let appLabel = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })?.localizedName ?? bundleID
+        let appLabel = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == bundleID }?.localizedName ?? bundleID
         if let openFile = snap["open_file"]?.value as? String, !openFile.isEmpty {
             out.append(CResourceRef(kind: "file", uri: "file://\(openFile)", label: (openFile as NSString).lastPathComponent, app: appLabel, lastSeen: Date()))
         }
@@ -108,10 +106,11 @@ public final class IDEAdapter: AppContextAdapter {
 
         // Title format (most VSCode/Cursor variants): "<filename> — <project> — <app>"
         // Some installs use "•" or "–" or different em-dash variants.
+        let separators: [Character] = ["—", "–", "-", "•"]
         var parts: [String] = []
         var current = ""
         for ch in title {
-            if Self.titleSeparators.contains(ch) {
+            if separators.contains(ch) {
                 parts.append(current.trimmingCharacters(in: .whitespacesAndNewlines))
                 current = ""
             } else {
@@ -185,10 +184,9 @@ public final class IDEAdapter: AppContextAdapter {
 
     private func walkToGit(from path: String) -> String {
         guard !path.isEmpty else { return "" }
-        let fm = FileManager.default
         var dir = URL(fileURLWithPath: path).deletingLastPathComponent()
         for _ in 0..<12 {
-            if fm.fileExists(atPath: dir.appendingPathComponent(".git").path) {
+            if FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path) {
                 return dir.path
             }
             let parent = dir.deletingLastPathComponent()

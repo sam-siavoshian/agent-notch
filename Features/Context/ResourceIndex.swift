@@ -14,8 +14,20 @@ public final class ResourceIndex {
     private var byURI: [String: CResourceRef] = [:]
     private let queue = DispatchQueue(label: "AgentNotch.ResourceIndex.queue")
 
+    /// Coalesces many rapid `record()` calls into one disk write. Worst case
+    /// the latest state lands on disk `persistDebounce` after the last call.
+    private var pendingPersist: DispatchWorkItem?
+    private let persistQueue = DispatchQueue(label: "AgentNotch.ResourceIndex.persist", qos: .utility)
+    private static let persistDebounce: TimeInterval = 1.0
+
     public init(capacity: Int = 100) {
         self.capacity = capacity
+        // Hydrate from L5Store so the index survives restart. Without this,
+        // every launch starts empty and the Selector loses its ability to
+        // resolve "the X" against URLs/files the user already touched.
+        for ref in L5Store.shared.loadResourcesIndex() {
+            byURI[ref.uri] = ref
+        }
     }
 
     /// Add or refresh a single resource. Updates lastSeen if URI is already present.
@@ -36,6 +48,7 @@ public final class ResourceIndex {
                 isNewURI = true
                 evictIfNeeded()
             }
+            schedulePersistLocked()
         }
         if isNewURI {
             AgentObservabilityLog.shared.record(.memoryMutation(
@@ -70,5 +83,19 @@ public final class ResourceIndex {
         // LRU by lastSeen
         let toRemove = byURI.values.sorted { $0.lastSeen < $1.lastSeen }.prefix(byURI.count - capacity)
         for r in toRemove { byURI.removeValue(forKey: r.uri) }
+    }
+
+    /// MUST be called from `queue`. Schedules a debounced save so a burst of
+    /// records (e.g. a browser snapshot returning 12 tabs) coalesces into one
+    /// disk write. Saves snapshot the index off-queue to avoid blocking
+    /// readers while encoding.
+    private func schedulePersistLocked() {
+        pendingPersist?.cancel()
+        let snapshot = Array(byURI.values)
+        let item = DispatchWorkItem {
+            try? L5Store.shared.saveResourcesIndex(snapshot)
+        }
+        pendingPersist = item
+        persistQueue.asyncAfter(deadline: .now() + Self.persistDebounce, execute: item)
     }
 }
