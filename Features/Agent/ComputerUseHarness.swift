@@ -569,7 +569,7 @@ public final class ComputerUseHarness {
         )
         let applescript: Tool = .custom(
             name: "applescript",
-            description: "Run an AppleScript via NSAppleScript. ALLOWLISTED target apps only: Safari, Firefox, Terminal, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. Use for one-shot intents like 'tell application \"Spotify\" to play track \"...\"' or 'tell application \"Notes\" to make new note...'. Far faster than clicking the UI.",
+            description: "Run an AppleScript via NSAppleScript. ALLOWLISTED target apps only: Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. Use for one-shot intents like 'tell application \"Spotify\" to play track \"...\"' or 'tell application \"Notes\" to make new note...'. Far faster than clicking the UI.",
             inputSchema: .object([
                 "type": .string("object"),
                 "properties": .object([
@@ -671,17 +671,11 @@ public final class ComputerUseHarness {
         ALWAYS prefer tools in this order, falling back only when the prior tool cannot do the task:
           1. open_app — for any plain "open <DesktopApp>" goal (Discord, Slack, Notion, Spotify, etc.). Path-resolved so it ALWAYS opens the canonical /Applications/<Name>.app, never a Canary/Beta/Dev variant. Use this BEFORE open_url for desktop apps.
           2. open_url — for web URLs (https, mailto, sms) and true deep links (spotify:track:..., things:///add?title=..., shortcuts://, raycast://). Do NOT use `open_url <app>://` to launch a bare app — that goes through Launch Services' default-handler and may resolve to a beta variant; use open_app instead.
-          3. applescript — for Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. One call, no UI traversal.
+          3. applescript — for Safari, Google Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Finder. One call, no UI traversal. EXCEPTION: when the brief's `steps[0]`, `navigation_anchors`, or `resolved_references` point the target (especially a named person like "phone1k" or a specific resource) to a DIFFERENT app, use that app — do not default to Messages/Mail just because the transcript verb is "message" or "email". The brief reflects the user's actual usage; the AppleScript list is a fallback for when no surface match exists.
           4. run_shortcut — for user-installed macOS Shortcuts.
           5. ax_query + ax_press / ax_set_value — for buttons, links, and text fields you can name. Faster and more reliable than clicking pixels.
           6. menu_shortcut — for any menu item; sends the registered keyboard shortcut instead of clicking the menu.
           7. computer — vision + click/type/scroll. ONLY when nothing above applies.
-
-        Application preferences — when a tool choice is flexible, apply these rules:
-        - Commands / shell tasks: use Terminal.app. AppleScript: `tell application "Terminal" to do script "<cmd>"`. If Terminal is already open, target the front window. Never use iTerm2, Ghostty, or other terminals unless the user explicitly names one.
-        - Web browsing: prefer Safari. Fall back to Firefox only if Safari cannot complete the task (e.g. a Firefox-specific extension is required). Never open Chrome unless the user explicitly asks for it.
-        - Text editing: prefer terminal editors (vim, nano) launched inside Terminal over GUI apps (TextEdit, VSCode, Cursor). Open a Terminal window, then `vim <path>` or `nano <path>`. Only use a GUI editor if the user names one.
-        - Presenting / viewing a file (not editing): use open_url with a file:// URI (e.g. `file:///Users/you/doc.pdf`) — macOS routes it to the default app for that type. Never open Finder and double-click when open_url can do it in one call.
 
         Plan-then-act: on turn 1, output one short sentence stating the goal and your first concrete action, THEN your spoken affirmation, THEN call the tool. Keep the spoken affirmation under 9 words — it will be read aloud (e.g. "Opening that now." or "On it."). After turn 1, do NOT write user-facing prose — your work product is tool calls, not commentary. A teammate auditing the trace later reads tool calls and outcomes, not your inner monologue.
 
