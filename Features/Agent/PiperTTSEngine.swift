@@ -55,6 +55,17 @@ final class PiperTTSEngine {
 
     // MARK: - Public
 
+    /// Spawn the piper subprocess eagerly so the first real `speak()` call
+    /// doesn't pay the ~500ms-1s python+model load. Safe to call multiple
+    /// times — no-op when already alive. Called from `AppDelegate.bootAgent`
+    /// and on any settings flip to the JARVIS voice.
+    func warmup() {
+        _ = ensureSpawned()
+        do { if !audioEngine.isRunning { try audioEngine.start() } } catch {
+            log.error("piper.audio_start_failed_during_warmup error=\(error)")
+        }
+    }
+
     /// Speak a sentence. Spawns Piper on first call. Subsequent calls reuse
     /// the live subprocess so latency stays low.
     func speak(_ text: String) {

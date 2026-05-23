@@ -44,6 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Claude Code spawns in CC-provider mode. Cheap to leave running in
         // API-provider mode (no client ever connects).
         MCPBridge.shared.start()
+        // Pre-warm local piper subprocess when JARVIS is the selected voice
+        // so the first spoken affirmation doesn't lag behind the on-screen
+        // action (e.g. "Calculator opens, then 'opening calculator now' is
+        // spoken half a second later").
+        if AgentSettingsStore.shared.ttsVoice.isLocal {
+            PiperTTSEngine.shared.warmup()
+        }
         // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
         AdapterRegistry.shared.register(BrowserAdapter())
         AdapterRegistry.shared.register(TerminalAdapter())
