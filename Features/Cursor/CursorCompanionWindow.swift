@@ -14,10 +14,12 @@ import SwiftUI
 @MainActor
 final class CursorCompanionWindow {
     /// Panel dimensions for each cursor mode. Companion stays compact since
-    /// the dot + listening ring only need ~50pt of canvas. Glow needs a wider
-    /// stage so the radial fade can taper to zero without a hard clip edge.
-    private static let companionPanelSize: CGFloat = 50
-    private static let glowPanelSize: CGFloat = 140
+    /// the orb + listening ripples only need ~60pt of canvas. Glow needs a
+    /// wide stage so the radial fade can taper to zero with ~50pt of margin
+    /// past the visible falloff (kills any chance of the panel rect leaking
+    /// through as a hard square edge).
+    private static let companionPanelSize: CGFloat = 60
+    private static let glowPanelSize: CGFloat = 200
 
     /// Where the sprite center sits relative to the user's real cursor tip
     /// (AppKit screen coords: +x right, +y up). Companion offsets clear the
@@ -40,6 +42,12 @@ final class CursorCompanionWindow {
         let view = CursorCompanionView(viewModel: viewModel)
         let hosting = NSHostingView(rootView: view)
         hosting.frame = CGRect(x: 0, y: 0, width: size, height: size)
+        // Defensive: NSHostingView sometimes inherits a non-clear backing
+        // CALayer. Without this the panel can render as a faint square block
+        // when SwiftUI's `.plusLighter` blend has no truly-transparent base
+        // to blend against.
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
 
         let panel = NSPanel(
             contentRect: hosting.frame,
