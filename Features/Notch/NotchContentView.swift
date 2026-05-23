@@ -13,15 +13,6 @@ extension Notification.Name {
     static let notchToggleRequested = Notification.Name("AgentNotch.notchToggleRequested")
 }
 
-/// Reports the intrinsic height of the open content so the surface can grow
-/// when sections expand (Settings → Advanced, etc).
-private struct NotchContentHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 enum NotchTab: String, CaseIterable, Identifiable {
     case home
     case spotify
@@ -51,16 +42,17 @@ enum NotchTab: String, CaseIterable, Identifiable {
 
 private struct NotchAnimKey: Equatable {
     let open: Bool
-    let h: CGFloat
     let live: Bool
 }
 
 struct NotchContentView: View {
     /// Shared spring driving every animatable property on the notch surface.
-    /// Hoisted so each body recompute reuses one instance instead of allocating
-    /// three identical Animation values per render.
-    private static let notchSpring: Animation =
-        .spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0)
+    /// Tuned for snap: response 0.26 (faster than the prior 0.32) with
+    /// dampingFraction 0.82 (slightly less damped — feels alive, still no
+    /// overshoot above the hardware notch). blendDuration 0 keeps successive
+    /// triggers from melting into each other.
+    static let notchSpring: Animation =
+        .spring(response: 0.26, dampingFraction: 0.82, blendDuration: 0)
 
     /// Selected tab. Reads from UserDefaults once at init; writes are
     /// deferred via `.onChange` so a rapid tab-flip burst doesn't hammer the
@@ -88,9 +80,6 @@ struct NotchContentView: View {
     }
 
     private let openWidth: CGFloat = NotchSizing.openWidth
-    /// Measured height of the open content — flows from a GeometryReader in
-    /// openContent. Springs to its new value when sections expand/collapse.
-    @State private var measuredOpenHeight: CGFloat = 200
 
     /// True while the agent is actively doing work the user should see at a
     /// glance. Drives the intermediate "live activity" notch size.
@@ -118,11 +107,10 @@ struct NotchContentView: View {
     /// The two readouts are mutually exclusive — never stacked.
     private var liveStripActive: Bool { liveActive && !isOpen && isToolCallLive }
 
+    /// Used only when CLOSED or LIVE (open state auto-sizes via fixedSize on
+    /// the outer ZStack). Returns the appropriate small frame height.
     private var height: CGFloat {
-        if isOpen {
-            return min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax)
-        }
-        return liveActive ? liveHeight : closedHeight
+        liveActive ? liveHeight : closedHeight
     }
     private var cornerRadius: CGFloat {
         if isOpen { return 22 }
@@ -185,7 +173,13 @@ struct NotchContentView: View {
                 ToolCallStrip()
                     .opacity(liveStripActive ? 1 : 0)
             }
-            .frame(width: liveWidth, height: liveHeight, alignment: .top)
+            // Collapse to zero when not active so the outer ZStack's
+            // auto-size pass when open doesn't include a stale 60pt
+            // liveHeight contribution (which inflated the closed-notch
+            // height into a tall rectangle with a tail leak).
+            .frame(width: liveActive ? liveWidth : 0,
+                   height: liveActive ? liveHeight : 0,
+                   alignment: .top)
             .opacity(!isOpen && liveActive ? 1 : 0)
             .allowsHitTesting(false)
 
@@ -197,23 +191,27 @@ struct NotchContentView: View {
                 .padding(.top, NotchSizing.notchHeight(for: NSScreen.main) + 2)
                 .frame(width: openWidth, alignment: .top)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: NotchContentHeightKey.self,
-                            value: geo.size.height
-                        )
-                    }
-                )
-                .frame(
-                    width: openWidth,
-                    height: min(max(measuredOpenHeight, 120), NotchSizing.openHeightMax),
-                    alignment: .top
-                )
+                // When closed, collapse the openContent's layout footprint
+                // to zero so the ZStack doesn't auto-size to fit the (hidden)
+                // tall open layout. When open, let its natural height pass
+                // through and define the ZStack's content height.
+                .frame(width: openWidth, height: isOpen ? nil : 0, alignment: .top)
                 .opacity(isOpen ? 1 : 0)
                 .allowsHitTesting(isOpen)
         }
-        .frame(width: width, height: height, alignment: .top)
+        // When OPEN: `.fixedSize(vertical: true)` makes the ZStack resolve
+        // to its tallest child's IDEAL height — openContent's natural
+        // fixedSize'd height (track + lyrics + scrub + transport + ...).
+        // `.frame(height: nil)` leaves that ideal intact.
+        //
+        // When CLOSED/LIVE: fixedSize is OFF and `.frame(height: height)`
+        // pins the ZStack to closedHeight (30pt) or liveHeight (60pt).
+        // Without this gate, fixedSize was inflating the closed notch to
+        // the max child height (~60pt) and leaving a tail artifact below.
+        .fixedSize(horizontal: false, vertical: isOpen)
+        .frame(width: width,
+               height: isOpen ? nil : height,
+               alignment: .top)
         .clipShape(NotchShape(bottomCornerRadius: cornerRadius))
         .contentShape(NotchShape(bottomCornerRadius: cornerRadius))
         .gesture(
@@ -242,19 +240,14 @@ struct NotchContentView: View {
                 scheduleClose()
             }
         }
-        // Single spring drives box size + content opacity + height changes.
-        // High damping kills bounce so top edge can't punch into the real
-        // hardware notch. Response ~0.32 feels organic without feeling slow.
-        // Combine the 3 trigger values into one composite key so SwiftUI
-        // evaluates one .animation modifier instead of three.
-        .animation(Self.notchSpring, value: NotchAnimKey(open: isOpen, h: measuredOpenHeight, live: liveActive))
-        .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
-            // Update even while closed so the first open animates to the
-            // right size in a single motion (no two-step pop).
-            guard newHeight > 1,
-                  abs(newHeight - measuredOpenHeight) > 0.5 else { return }
-            measuredOpenHeight = newHeight
-        }
+        // One spring drives all notch-surface animations: open/close, live
+        // activity in/out, AND any height delta when content grows (e.g.
+        // a discovery section expands). The auto-sized ZStack frame already
+        // tracks content height; we just need an animation context here.
+        // Bare `.animation(_)` is the broadest — it animates every change
+        // implicitly. Acceptable here because the surface only re-renders
+        // on real state changes (notch is an @Observable-backed leaf).
+        .animation(Self.notchSpring, value: NotchAnimKey(open: isOpen, live: liveActive))
         .onChange(of: selectedTabRaw) { _, new in
             UserDefaults.standard.set(new, forKey: "notch.selectedTab")
         }

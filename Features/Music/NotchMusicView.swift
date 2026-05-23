@@ -168,8 +168,15 @@ struct NotchMusicView: View {
     }
 
     private var playingState: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             trackCard
+
+            // Lyrics live directly under the track card — the natural
+            // "what is this song saying" position. Renders only when there's
+            // actual content (loading skeleton OR synced lines OR plain
+            // text). Empty + not-loading state collapses to zero height so
+            // the panel hugs the playing card.
+            lyricsPanel
 
             ScrubBar(
                 current: controller.state.currentTime,
@@ -196,8 +203,6 @@ struct NotchMusicView: View {
             }
 
             secondaryControlsRow
-
-            lyricsPanel
 
             discoveryStack
         }
@@ -391,24 +396,20 @@ struct NotchMusicView: View {
 
             Spacer(minLength: 2)
 
-            // Add-to-playlist menu (Web API only) — uses native Menu so the
-            // user gets a fuzzy native picker. Falls back to "Connect cloud"
-            // affordance when not authed.
-            if controller.webAPIReady {
-                if !controller.playlists.isEmpty,
-                   !controller.state.trackURI.isEmpty {
-                    AddToPlaylistMenu(
-                        playlists: controller.playlists.filter { $0.canModify },
-                        tint: spotifyGreen
-                    ) { playlist in
-                        Task {
-                            _ = await controller.addCurrentTrackToPlaylist(id: playlist.id)
-                        }
+            // Add-to-playlist menu (Web API only). Hidden when unauthed —
+            // we don't show a "Sign in" pill in this row; users sign in via
+            // Advanced Settings (or auto-triggered when they tap a
+            // discovery action that needs it).
+            if controller.webAPIReady,
+               !controller.playlists.isEmpty,
+               !controller.state.trackURI.isEmpty {
+                AddToPlaylistMenu(
+                    playlists: controller.playlists.filter { $0.canModify },
+                    tint: spotifyGreen
+                ) { playlist in
+                    Task {
+                        _ = await controller.addCurrentTrackToPlaylist(id: playlist.id)
                     }
-                }
-            } else {
-                ConnectCloudPill(tint: spotifyGreen) {
-                    Task { _ = await controller.authenticateWebAPI() }
                 }
             }
         }
@@ -423,9 +424,11 @@ struct NotchMusicView: View {
         }
     }
 
-    /// Live lyrics — always renders when track loaded; LyricsView handles
-    /// loading / empty / no-match states internally so user sees the panel
-    /// even when LRClib returns no match.
+    /// Live lyrics card. LyricsView handles its own height per state:
+    /// - synced / plain → 106pt scroller
+    /// - loading        → 28pt "Looking for lyrics…" soft pill
+    /// - empty          → 28pt "no lyrics · just vibes" pill with mini
+    ///                    waveform glyph
     /// `TimelineView` re-runs every ~500ms to drive predicted elapsed —
     /// lyrics lines last 2-4s typically, so 500ms granularity feels live
     /// without burning 4 redraws/sec on the ForEach scroller.
@@ -439,8 +442,7 @@ struct NotchMusicView: View {
                     isPlaying: controller.state.isPlaying
                 )
             }
-            .padding(.top, 2)
-            .transition(.opacity)
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 
@@ -970,12 +972,20 @@ private struct DiscoverySection<Content: View>: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.easeOut(duration: 0.18), value: expanded)
+        // Section-local animation for the chevron rotation + content
+        // transition. The panel-height growth is driven by the parent
+        // notch's spring via `withAnimation` in the toggle below.
+        .animation(NotchContentView.notchSpring, value: expanded)
     }
 
     private var header: some View {
         Button {
-            expanded.toggle()
+            // Drive the toggle inside the shared notch spring so the whole
+            // panel — chevron, section body, AND notch height — animates
+            // as one motion instead of two stutter-steps.
+            withAnimation(NotchContentView.notchSpring) {
+                expanded.toggle()
+            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
