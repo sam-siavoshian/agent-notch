@@ -21,6 +21,29 @@ import ScreenCaptureKit
 public actor ScreenCapture {
     public static let shared = ScreenCapture()
 
+    /// Cache `SCShareableContent` for a short window. The fetch is the
+    /// biggest single cost in the capture path (~30-80ms cold) and the
+    /// content rarely changes between long-presses. Invalidated on display
+    /// reconfig via `NSApplication.didChangeScreenParametersNotification`.
+    private var cachedContent: SCShareableContent?
+    private var cachedContentAt: Date = .distantPast
+    private static let contentTTL: TimeInterval = 5.0
+
+    private func shareableContent() async throws -> SCShareableContent {
+        if let cachedContent, Date().timeIntervalSince(cachedContentAt) < Self.contentTTL {
+            return cachedContent
+        }
+        let fresh = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        cachedContent = fresh
+        cachedContentAt = Date()
+        return fresh
+    }
+
+    public func invalidateContentCache() {
+        cachedContent = nil
+        cachedContentAt = .distantPast
+    }
+
     public struct Snapshot: Sendable {
         public let jpegData: Data
         public let width: Int
@@ -124,7 +147,7 @@ public actor ScreenCapture {
         target: CGSize,
         quality: CGFloat = 0.75
     ) async throws -> TargetSnapshot {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let content = try await shareableContent()
         let display: SCDisplay?
         if let id = displayId {
             display = content.displays.first(where: { $0.displayID == id }) ?? content.displays.first
@@ -214,7 +237,7 @@ public actor ScreenCapture {
     // MARK: - ScreenCaptureKit path
 
     private func snapshotViaSCKit(displayId: CGDirectDisplayID?, quality: CGFloat, maxLongEdge: Int?) async throws -> Snapshot {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let content = try await shareableContent()
         let display: SCDisplay?
         if let id = displayId {
             display = content.displays.first(where: { $0.displayID == id }) ?? content.displays.first

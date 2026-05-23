@@ -13,7 +13,7 @@ import Foundation
 import SwiftUI
 
 struct NotchLiveActivityView: View {
-    @ObservedObject private var state = AgentState.shared
+    private let state = AgentState.shared
     @ObservedObject private var store = AgentSettingsStore.shared
 
     var body: some View {

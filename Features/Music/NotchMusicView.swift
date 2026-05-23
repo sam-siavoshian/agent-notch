@@ -14,6 +14,12 @@
 import AppKit
 import SwiftUI
 
+private struct MusicStateKey: Equatable {
+    let connected: Bool
+    let running: Bool
+    let hasTrack: Bool
+}
+
 struct NotchMusicView: View {
     @ObservedObject private var controller = SpotifyController.shared
     @StateObject private var lyrics = LyricsStore()
@@ -38,9 +44,14 @@ struct NotchMusicView: View {
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .padding(.horizontal, 6)
-        .animation(.easeOut(duration: 0.22), value: controller.isConnected)
-        .animation(.easeOut(duration: 0.22), value: controller.isRunning)
-        .animation(.easeOut(duration: 0.22), value: controller.state.hasTrack)
+        .animation(
+            .easeOut(duration: 0.22),
+            value: MusicStateKey(
+                connected: controller.isConnected,
+                running: controller.isRunning,
+                hasTrack: controller.state.hasTrack
+            )
+        )
         .onChange(of: trackKey) { _, _ in
             anchorWall = Date()
             anchorElapsed = controller.state.currentTime
@@ -259,11 +270,13 @@ struct NotchMusicView: View {
     /// Live lyrics — always renders when track loaded; LyricsView handles
     /// loading / empty / no-match states internally so user sees the panel
     /// even when LRClib returns no match.
-    /// `TimelineView` re-runs every ~250ms to drive predicted elapsed.
+    /// `TimelineView` re-runs every ~500ms to drive predicted elapsed —
+    /// lyrics lines last 2-4s typically, so 500ms granularity feels live
+    /// without burning 4 redraws/sec on the ForEach scroller.
     @ViewBuilder
     private var lyricsPanel: some View {
         if controller.state.hasTrack {
-            TimelineView(.animation(minimumInterval: 0.25, paused: !controller.state.isPlaying)) { _ in
+            TimelineView(.animation(minimumInterval: 0.5, paused: !controller.state.isPlaying)) { _ in
                 LyricsView(
                     store: lyrics,
                     elapsed: predictedElapsed(),
@@ -345,6 +358,10 @@ struct NotchMusicView: View {
             RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .stroke(spotifyGreen.opacity(0.08), lineWidth: 0.5)
         )
+        // Composite the artwork shadow + PillBackground glow + overlay
+        // strokes into one offscreen layer so we don't pay per-frame
+        // compositing on every track-state tick.
+        .compositingGroup()
     }
 
     // MARK: - Pieces
@@ -393,8 +410,9 @@ struct NotchMusicView: View {
                         spotifyGreen: spotifyGreen, action: action)
     }
 
-    private static let _spotifyGreen = Color(red: 0.114, green: 0.725, blue: 0.329) // #1DB954
-    private var spotifyGreen: Color { Self._spotifyGreen }
+    /// Stored `let` so each body eval is a property load, not a re-execution
+    /// of a computed property + indirection through a static.
+    private let spotifyGreen = Color(red: 0.114, green: 0.725, blue: 0.329) // #1DB954
 }
 
 // MARK: - Transport button (prev / play / next)

@@ -16,7 +16,8 @@ final class NotchWindowController: NSObject {
     private var window: NotchWindow?
     private var screenObserver: NSObjectProtocol?
     private var spaceObserver: NSObjectProtocol?
-    private var followTimer: DispatchSourceTimer?
+    private var mouseMoveMonitor: Any?
+    private var followCoalesce: DispatchWorkItem?
     private var lastScreen: NSScreen?
     private var cmdDMonitor: Any?
 
@@ -66,6 +67,8 @@ final class NotchWindowController: NSObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.position(animated: true) }
+            // Screen layout changed — the cached SCShareableContent is stale.
+            Task { await ScreenCapture.shared.invalidateContentCache() }
         }
 
         spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -124,23 +127,29 @@ final class NotchWindowController: NSObject {
         return NSScreen.main
     }
 
-    /// Re-check active screen at ~10Hz so the notch slides to whatever
-    /// display the cursor is on. Cheap: a timer + an origin check.
+    /// Event-driven multi-screen follow. Single-screen setups skip the
+    /// listener entirely (nothing to follow). Multi-screen setups debounce
+    /// mouse-move events through a 200ms coalescing window so we re-position
+    /// at most ~5×/sec while the cursor is actively moving, and 0×/sec while
+    /// the cursor is parked — vs the prior 10Hz timer that fired forever.
     private func startFollowingActiveScreen() {
-        followTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + .milliseconds(100),
-                       repeating: .milliseconds(100),
-                       leeway: .milliseconds(20))
-        timer.setEventHandler { [weak self] in
+        guard NSScreen.screens.count > 1 else { return }
+        mouseMoveMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.scheduleFollowCheck()
+        }
+    }
+
+    private func scheduleFollowCheck() {
+        followCoalesce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let target = self.preferredScreen()
             if target != self.lastScreen {
                 self.position(animated: true)
             }
         }
-        followTimer = timer
-        timer.resume()
+        followCoalesce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(200), execute: work)
     }
 }
 

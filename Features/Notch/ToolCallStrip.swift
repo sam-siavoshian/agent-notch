@@ -12,7 +12,7 @@ import AppKit
 import SwiftUI
 
 struct ToolCallStrip: View {
-    @ObservedObject private var state = AgentState.shared
+    private let state = AgentState.shared
     @StateObject private var frontmost = FrontmostAppObserver()
 
     var body: some View {
@@ -126,6 +126,7 @@ struct ShiningText: View {
 
     private static let base = Color(red: 0x40 / 255, green: 0x40 / 255, blue: 0x40 / 255)
     private static let bright = Color.white
+    private static let band = 0.18
 
     var body: some View {
         TimelineView(.animation) { ctx in
@@ -135,31 +136,27 @@ struct ShiningText: View {
             // Track the peak from just off the right edge to just off the left
             // edge so the highlight enters and exits cleanly.
             let peak = 1.2 - cycle * 1.4
+            let l1 = max(0, min(1, peak - Self.band))
+            let l2 = max(0, min(1, peak))
+            let l3 = max(0, min(1, peak + Self.band))
 
             Text(text)
                 .font(font)
                 .foregroundStyle(
                     LinearGradient(
-                        stops: stops(for: peak),
+                        stops: [
+                            .init(color: Self.base,   location: 0),
+                            .init(color: Self.base,   location: l1),
+                            .init(color: Self.bright, location: l2),
+                            .init(color: Self.base,   location: l3),
+                            .init(color: Self.base,   location: 1)
+                        ],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
         }
-    }
-
-    private func stops(for peak: Double) -> [Gradient.Stop] {
-        let band = 0.18
-        let l1 = max(0, min(1, peak - band))
-        let l2 = max(0, min(1, peak))
-        let l3 = max(0, min(1, peak + band))
-        return [
-            .init(color: Self.base, location: 0),
-            .init(color: Self.base, location: l1),
-            .init(color: Self.bright, location: l2),
-            .init(color: Self.base, location: l3),
-            .init(color: Self.base, location: 1)
-        ]
+        .drawingGroup()
     }
 }
 

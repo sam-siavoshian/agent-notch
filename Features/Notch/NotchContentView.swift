@@ -49,6 +49,12 @@ enum NotchTab: String, CaseIterable, Identifiable {
     }
 }
 
+private struct NotchAnimKey: Equatable {
+    let open: Bool
+    let h: CGFloat
+    let live: Bool
+}
+
 struct NotchContentView: View {
     /// Shared spring driving every animatable property on the notch surface.
     /// Hoisted so each body recompute reuses one instance instead of allocating
@@ -56,11 +62,14 @@ struct NotchContentView: View {
     private static let notchSpring: Animation =
         .spring(response: 0.32, dampingFraction: 0.86, blendDuration: 0)
 
-    @AppStorage("notch.selectedTab") private var selectedTabRaw: String = NotchTab.home.rawValue
+    /// Selected tab. Reads from UserDefaults once at init; writes are
+    /// deferred via `.onChange` so a rapid tab-flip burst doesn't hammer the
+    /// UserDefaults sync IPC on every tap.
+    @State private var selectedTabRaw: String = UserDefaults.standard.string(forKey: "notch.selectedTab") ?? NotchTab.home.rawValue
     @State private var isOpen = false
     @State private var closeTask: Task<Void, Never>?
     @State private var hoverTask: Task<Void, Never>?
-    @ObservedObject private var agentState = AgentState.shared
+    private let agentState = AgentState.shared
 
     private var selectedTab: NotchTab { NotchTab(rawValue: selectedTabRaw) ?? .home }
     private var selectedTabBinding: Binding<NotchTab> {
@@ -236,15 +245,18 @@ struct NotchContentView: View {
         // Single spring drives box size + content opacity + height changes.
         // High damping kills bounce so top edge can't punch into the real
         // hardware notch. Response ~0.32 feels organic without feeling slow.
-        .animation(Self.notchSpring, value: isOpen)
-        .animation(Self.notchSpring, value: measuredOpenHeight)
-        .animation(Self.notchSpring, value: liveActive)
+        // Combine the 3 trigger values into one composite key so SwiftUI
+        // evaluates one .animation modifier instead of three.
+        .animation(Self.notchSpring, value: NotchAnimKey(open: isOpen, h: measuredOpenHeight, live: liveActive))
         .onPreferenceChange(NotchContentHeightKey.self) { newHeight in
             // Update even while closed so the first open animates to the
             // right size in a single motion (no two-step pop).
             guard newHeight > 1,
                   abs(newHeight - measuredOpenHeight) > 0.5 else { return }
             measuredOpenHeight = newHeight
+        }
+        .onChange(of: selectedTabRaw) { _, new in
+            UserDefaults.standard.set(new, forKey: "notch.selectedTab")
         }
     }
 

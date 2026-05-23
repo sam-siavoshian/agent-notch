@@ -9,7 +9,7 @@
 import SwiftUI
 
 struct ClosedNotchView: View {
-    @ObservedObject private var state = AgentState.shared
+    private let state = AgentState.shared
     @ObservedObject private var battery = BatteryService.shared
 
     var body: some View {

@@ -22,7 +22,7 @@ import SwiftUI
 
 struct CursorCompanionView: View {
     @ObservedObject var viewModel: CursorCompanionViewModel
-    @ObservedObject private var agentState = AgentState.shared
+    private let agentState = AgentState.shared
 
     var body: some View {
         Group {
@@ -177,7 +177,7 @@ private struct CompanionDot: View {
 
 private struct CursorGlow: View {
     @ObservedObject var viewModel: CursorCompanionViewModel
-    @ObservedObject var agentState: AgentState
+    let agentState: AgentState
 
     @State private var renderedOpacity: Double = 0.0
 

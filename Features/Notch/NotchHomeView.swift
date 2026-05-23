@@ -14,7 +14,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct NotchHomeView: View {
-    @ObservedObject private var state = AgentState.shared
+    private let state = AgentState.shared
     @ObservedObject private var store = AgentSettingsStore.shared
     @ObservedObject private var permissions = PermissionChecker.shared
 
@@ -294,7 +294,7 @@ private struct ActivityLogRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
-            Text(entry.timestamp, style: .relative)
+            Text(entry.formattedTimestamp)
                 .font(.system(size: 8.5))
                 .foregroundStyle(SoftPill.Text.muted)
                 .fixedSize()

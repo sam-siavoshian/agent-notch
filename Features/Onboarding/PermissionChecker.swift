@@ -2,9 +2,11 @@
 //  PermissionChecker.swift
 //  Agent in the Notch
 //
-//  Polls macOS TCC state for the four permissions we need. Publishes status
-//  so the onboarding UI re-renders the moment the user toggles a switch in
-//  System Settings.
+//  Tracks macOS TCC state for the four permissions we need. Refreshes on
+//  app-activation (user grants permission in System Settings, alt-tabs back
+//  → didBecomeActive fires). No background polling — the prior 500ms timer
+//  burned ~8ms/sec idle CPU forever to catch state transitions that the
+//  activation hook covers anyway.
 //
 
 import Foundation
@@ -62,22 +64,12 @@ public final class PermissionChecker: ObservableObject {
         PermissionID.allCases.filter { statuses[$0] != .granted }
     }
 
-    private var timer: Timer?
-
     public init() {
         refresh()
     }
 
     public func startPolling() {
-        stopPolling()
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
-        // Register on .common so the timer keeps firing during window tracking/modal modes.
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-
-        // Refresh on app activation — the user usually grants in Settings then comes back.
+        NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleActivate),
@@ -91,8 +83,6 @@ public final class PermissionChecker: ObservableObject {
     }
 
     public func stopPolling() {
-        timer?.invalidate()
-        timer = nil
         NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
     }
 

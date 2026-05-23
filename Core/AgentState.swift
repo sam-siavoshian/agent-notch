@@ -2,19 +2,23 @@
 //  AgentState.swift
 //  Agent in the Notch
 //
-//  Observable state for what the agent is doing right now. The Haiku wiring
-//  (Ashan) writes into this; the Notch UI (Wyatt) reads it for the live state
-//  view.
+//  Observable state for what the agent is doing right now. Writes from the
+//  agent wiring, reads from the Notch UI. Uses `@Observable` so views that
+//  only read a slice (e.g. `state.activity`) skip the re-eval when an
+//  unrelated field (`activityLog`) appends.
 //
 
 import Foundation
-import Combine
+import Observation
 
 public struct AgentLogEntry: Identifiable, Sendable {
     public let id = UUID()
     public let timestamp: Date
     public let activity: AgentActivity
     public let detail: String
+    /// Pre-formatted "2m ago" string, set at insertion. Avoids per-row
+    /// `Text(_, style: .relative)` recomputation in the activity feed.
+    public let formattedTimestamp: String
 }
 
 public enum AgentActivity: Equatable, Sendable {
@@ -46,13 +50,20 @@ public enum AgentActivity: Equatable, Sendable {
 }
 
 @MainActor
-public final class AgentState: ObservableObject {
+@Observable
+public final class AgentState {
     public static let shared = AgentState()
 
-    @Published public var activity: AgentActivity = .idle
-    @Published public var detail: String = ""
-    @Published public var lastTranscript: String = ""
-    @Published public var activityLog: [AgentLogEntry] = []
+    public var activity: AgentActivity = .idle
+    public var detail: String = ""
+    public var lastTranscript: String = ""
+    public var activityLog: [AgentLogEntry] = []
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
 
     private init() {
         activityLog.reserveCapacity(31)
@@ -77,7 +88,14 @@ public final class AgentState: ObservableObject {
         }
 
         if shouldLog {
-            activityLog.insert(AgentLogEntry(timestamp: Date(), activity: activity, detail: logDetail), at: 0)
+            let now = Date()
+            let entry = AgentLogEntry(
+                timestamp: now,
+                activity: activity,
+                detail: logDetail,
+                formattedTimestamp: Self.relativeFormatter.localizedString(for: now, relativeTo: now)
+            )
+            activityLog.insert(entry, at: 0)
             if activityLog.count > 30 { activityLog.removeLast() }
         }
         self.activity = activity

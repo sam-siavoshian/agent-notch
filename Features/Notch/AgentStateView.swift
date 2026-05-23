@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct AgentStateView: View {
-    @ObservedObject private var state = AgentState.shared
+    private let state = AgentState.shared
 
     var body: some View {
         StatusChip(
