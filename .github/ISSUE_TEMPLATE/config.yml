@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Landing page + downloads
+    url: https://agent-notch.vercel.app
+    about: Public site for Agent Notch.
