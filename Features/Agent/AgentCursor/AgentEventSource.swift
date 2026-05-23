@@ -7,10 +7,9 @@
 //   1. localEventsSuppressionInterval = 0 — without this, macOS WindowServer
 //      suppresses our synthetic moves whenever the user is also moving their
 //      real trackpad. We need both streams to flow independently.
-//   2. Stable sourceStateID — KeystrokeMonitor's CGEventTap sees every keydown,
-//      including ours. We stamp our source ID and the monitor filters by it,
-//      so the agent's own typing never gets ingested as user input and fed
-//      back to the model on the next turn.
+//   2. Stable sourceStateID — taps can identify and skip our own synthetic
+//      events by reading `event.getIntegerValueField(.eventSourceStateID)`,
+//      so the agent's own typing never gets fed back as user input.
 //
 
 import Foundation
@@ -40,9 +39,8 @@ public enum AgentEventSource {
         return Int64(src.sourceStateID.rawValue)
     }()
 
-    /// True when the event was emitted by our own AgentEventSource. Used by
-    /// KeystrokeMonitor / future ClipboardWatcher / future mouse taps to skip
-    /// agent-self events instead of ingesting them as user activity.
+    /// True when the event was emitted by our own AgentEventSource. Taps can
+    /// use this to skip agent-self events.
     @inlinable
     public static func isSelfEvent(_ event: CGEvent) -> Bool {
         let id = event.getIntegerValueField(.eventSourceStateID)

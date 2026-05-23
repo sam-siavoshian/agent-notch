@@ -2,9 +2,9 @@
 //  ScreenCapture.swift
 //  Agent in the Notch
 //
-//  Shared between Ashan's context module (click-triggered captures for the
-//  Gemini summary pipeline) and Sam's computer-use harness (snapshot tool
-//  call). Uses ScreenCaptureKit on macOS 14+.
+//  Shared between the context module (click-triggered captures) and the
+//  computer-use harness (snapshot tool call). Uses ScreenCaptureKit on
+//  macOS 14+.
 //
 //  Performance notes:
 //  - JPEG-only encode (PNG path removed; both pipelines accept JPEG).
@@ -27,10 +27,10 @@ public actor ScreenCapture {
         public let height: Int
         public let scale: CGFloat
         public let capturedAt: Date
-        /// Full-resolution CGImage BEFORE the downsample-for-Gemini step.
-        /// Used for OCR so small UI text stays readable. Nil only if the
-        /// raw capture is unavailable. Holds a Core Graphics reference —
-        /// don't retain past the immediate capture turn.
+        /// Full-resolution CGImage BEFORE the downsample step. Used for OCR
+        /// so small UI text stays readable. Nil only if the raw capture is
+        /// unavailable. Holds a Core Graphics reference — don't retain past
+        /// the immediate capture turn.
         public let rawImage: CGImage?
 
         public init(jpegData: Data, width: Int, height: Int, scale: CGFloat, capturedAt: Date, rawImage: CGImage? = nil) {
@@ -275,15 +275,6 @@ public actor ScreenCapture {
     private func jpegEncode(_ image: CGImage, quality: CGFloat) -> Data? {
         let rep = NSBitmapImageRep(cgImage: image)
         return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
-    }
-
-    /// Lossless PNG encode of a CGImage. Used only by the Gemini observer path
-    /// (PNG ensures the model gets crisp UI text edges that JPEG would smear).
-    /// JPEG remains the default for OCR, dirty-detection, and the agent's
-    /// initiation screenshot — do not switch those to PNG.
-    public nonisolated func pngEncode(_ image: CGImage) -> Data? {
-        let rep = NSBitmapImageRep(cgImage: image)
-        return rep.representation(using: .png, properties: [:])
     }
 }
 

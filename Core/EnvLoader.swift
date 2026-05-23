@@ -3,7 +3,7 @@
 //  Agent in the Notch
 //
 //  Loads .env into the process environment at launch so every consumer
-//  (Secrets, Gemini service, demo prompt) sees the same values via
+//  (Secrets, demo prompt) sees the same values via
 //  ProcessInfo.processInfo.environment or Env.value(_:).
 //
 //  Search order: bundle Resources (built copy of repo-root .env) → directory

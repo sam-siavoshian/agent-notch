@@ -34,60 +34,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func bootAgent() {
+        // Critical-path: cursor + voice + session must be live before the
+        // user can long-press. Cheap inits, run synchronously.
         CursorCompanion.shared.start()
-        ContextCoordinator.shared.start()
-        ContextDevToolsWindowController.shared.install()
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
         KillSwitch.shared.start()
-        // MCP bridge — Unix socket server for the AgentNotchMCP helper that
-        // Claude Code spawns in CC-provider mode. Cheap to leave running in
-        // API-provider mode (no client ever connects).
-        MCPBridge.shared.start()
-        // Pre-warm local piper subprocess when JARVIS is the selected voice
-        // so the first spoken affirmation doesn't lag behind the on-screen
-        // action (e.g. "Calculator opens, then 'opening calculator now' is
-        // spoken half a second later").
-        if AgentSettingsStore.shared.ttsVoice.isLocal {
-            PiperTTSEngine.shared.warmup()
+        PermissionChecker.shared.startPolling()
+
+        // Deferred: each of these blocks on IO (XPC, AppleScript, ONNX load,
+        // socket bind). Off the main thread so the notch UI is interactive
+        // immediately at boot.
+        Task.detached(priority: .utility) {
+            await MCPBridge.shared.start()
+            await LaunchAtLogin.shared.reconcile()
+            if await AgentSettingsStore.shared.ttsVoice.isLocal {
+                await PiperTTSEngine.shared.warmup()
+            }
+            await SpotifyController.shared.startIfPreviouslyConnected()
         }
-        // Reconcile stored launch-at-login bool with SMAppService's actual
-        // status — user may have revoked / re-added it via System Settings
-        // since last run.
-        LaunchAtLogin.shared.reconcile()
-        // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
-        AdapterRegistry.shared.register(BrowserAdapter())
-        AdapterRegistry.shared.register(TerminalAdapter())
-        AdapterRegistry.shared.register(IDEAdapter())
-        log.info("Registered \(AdapterRegistry.shared.allRegistered().count) app-specific adapter instance(s)")
-        // Phase 1 monitors — passively collect events into EventLog via
-        // EventIngester. Start order matters: KeystrokeMonitor wants
-        // AXObserverManager's focused-element provider, so AXObserverManager
-        // comes first.
-        AXObserverManager.shared.start()
-        let keystrokeOK = KeystrokeMonitor.shared.start()
-        if !keystrokeOK {
-            log.warning("keystroke.start denied — Input Monitoring TCC not granted; running degraded")
-        }
-        ClipboardWatcher.shared.start()
-        DwellTimer.shared.start()
-        // Phase 3 — sequence inference + rolling active_task synthesis.
-        // AnchorRecorder is pure-local (no Mercury inside its tick), so it
-        // always runs. ActiveTaskUpdater calls OpenRouter each tick, so we
-        // gate it behind the mercuryEnabled setting to avoid surprise spend.
-        AnchorRecorder.shared.start()
-        if AgentSettingsStore.shared.mercuryEnabled {
-            ActiveTaskUpdater.shared.start()
-        } else {
-            log.info("ActiveTaskUpdater disabled by settings (mercuryEnabled=false)")
-        }
-        // Keep polling TCC state after onboarding so the Notch UI can show a
-        // banner the moment a permission is revoked / not yet granted.
-        let p = PermissionChecker.shared
-        p.startPolling()
-        // Spotify: user-opt-in. Resume the connection if they previously
-        // tapped Connect (state persists in UserDefaults).
-        SpotifyController.shared.startIfPreviouslyConnected()
-        log.info("boot.complete ax=\(p.statuses[.accessibility]?.rawValue ?? "?") screen=\(p.statuses[.screenRecording]?.rawValue ?? "?") mic=\(p.statuses[.microphone]?.rawValue ?? "?")")
+
+        log.info("boot.complete")
     }
 }

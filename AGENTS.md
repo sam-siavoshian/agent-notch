@@ -29,7 +29,7 @@ Core/                 — shared types and cross-feature contracts only
 Features/
   Notch/              — notch UI and settings panel
   Cursor/             — cursor companion, long-press, click hooks
-  Context/            — screenshot capture, OCR, Gemini observer, Mercury selector, event pipeline
+  Context/            — screenshot capture, OCR, Mercury selector, event pipeline
   Agent/              — Whisper, IntentRouter, Haiku 4.5 computer-use harness
   Calendar/           — EventKit calendar tab
   Music/              — Spotify tab
@@ -65,21 +65,18 @@ Features/Cursor/
 └── LongPressEvents.swift       — notification name constants
 
 Features/Context/
-├── ContextCoordinator.swift        — entry point; implements RecentActivityContext; fires GeminiObserver on major-change captures
+├── ContextCoordinator.swift        — entry point; implements RecentActivityContext; click + app-switch + startup captures
 ├── ContextClickMonitor.swift       — debounced click hook (Accessibility API)
 ├── ContextAppSwitchMonitor.swift   — capture trigger on app switch
 ├── ContextSnapshotStore.swift      — rolling buffer of screenshots (max 20)
 ├── ContextOCRService.swift         — native OCR via Vision framework
 ├── ContextWindowMetadataReader.swift
 ├── ContextTextSignalFilter.swift   — cleans OCR output
-├── ContextDirtyDetector.swift      — dHash + pixel-diff classifier; gates Gemini calls
+├── ContextDirtyDetector.swift      — dHash + pixel-diff classifier; classifies each capture as unchanged/minor/major
 ├── ContextModels.swift             — ContextSnapshot, ContextDiagnostics, etc.
 ├── ContextSchema.swift             — CEvent envelope + variants, L2/L3/L4/L5 types
 ├── ContextDevToolsWindowController.swift — Dev Tools window; Cmd+Shift+I toggles it
-├── GeminiObserver.swift            — continuous throttled observer; gemini-3.1-flash-lite; ≥8s between calls
-├── GeminiVisionClient.swift        — single-call multimodal Gemini client
 ├── SurfaceObservation.swift        — structured Codable observation (app, surface, controls, narrative)
-├── ScreenObservationLog.swift      — in-memory ring (100) + JSONL on disk
 ├── SurfaceMemoryStore.swift        — persistent per-(app, surface) UI knowledge
 ├── CaptureStoryLog.swift           — append-only story of observations; daily-rotated JSONL
 ├── Selector.swift                  — long-press entry: assembles L2+L3+L4+L5+learned_surfaces, calls Mercury 2

@@ -4,8 +4,8 @@
 //
 //  Floating native NSPanel that drops down under the notch and hosts the
 //  rarely-touched controls (Voice / Mic / Output) plus the API-key fields.
-//  Pattern mirrors `ContextDevToolsWindowController`: a singleton @MainActor
-//  controller that lazily builds an NSPanel and toggles its visibility.
+//  Singleton @MainActor controller that lazily builds an NSPanel and toggles
+//  its visibility.
 //
 
 import AppKit

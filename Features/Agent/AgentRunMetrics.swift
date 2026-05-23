@@ -14,8 +14,6 @@ public struct AgentRunMetricsRecord: Codable, Sendable {
     public let fallbackModelID: String
     public let usedFallback: Bool
     public let transcriptLength: Int
-    public let contextLength: Int
-    public let contextIncluded: Bool
     public let turnCount: Int
     public let toolCallCount: Int
     public let screenshotToolCallCount: Int
@@ -144,15 +142,14 @@ public struct HarnessTurnRecord: Sendable, Identifiable {
 }
 
 /// Full per-run harness payload: system blocks at request time, transcript,
-/// resolved intent verb, and the per-turn timeline. `turns` and `finalStatus`
-/// mutate as the run progresses; everything else is set once at startRun.
+/// and the per-turn timeline. `turns` and `finalStatus` mutate as the run
+/// progresses; everything else is set once at startRun.
 public struct HarnessRunDetail: Sendable, Identifiable {
     public let id: UUID
     public let startedAt: Date
     public var endedAt: Date?
     public let transcript: String
     public let systemBlocks: [SystemBlockSummary]
-    public let resolvedIntentVerb: String?
     public var turns: [HarnessTurnRecord]
     public var finalStatus: String?
 
@@ -162,7 +159,6 @@ public struct HarnessRunDetail: Sendable, Identifiable {
         endedAt: Date? = nil,
         transcript: String,
         systemBlocks: [SystemBlockSummary],
-        resolvedIntentVerb: String?,
         turns: [HarnessTurnRecord] = [],
         finalStatus: String? = nil
     ) {
@@ -171,7 +167,6 @@ public struct HarnessRunDetail: Sendable, Identifiable {
         self.endedAt = endedAt
         self.transcript = transcript
         self.systemBlocks = systemBlocks
-        self.resolvedIntentVerb = resolvedIntentVerb
         self.turns = turns
         self.finalStatus = finalStatus
     }

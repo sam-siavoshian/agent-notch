@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.2 (hackathon scope)
 **Owner:** Wyatt (notch & UI), Sam (cursor + computer use), Ashan (long-press + context)
-**Model:** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`, computer-use), Mercury 2 via OpenRouter (context selector), Gemini Flash Lite (background screen observer), OpenAI Whisper `whisper-1` (voice), OpenAI TTS (speech output)
+**Model:** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`, computer-use), Mercury 2 via OpenRouter (context selector), OpenAI Whisper `whisper-1` (voice), OpenAI TTS (speech output)
 
 ---
 
@@ -39,7 +39,7 @@ The user long-presses to talk to the agent. OpenAI Whisper API transcribes. The 
 1. **Capture trigger:** Screenshots are taken on **click events** and **app switches**, not on a 5-second timer. Time-based is stale (user watching Netflix = 720 useless screenshots/hour) and brittle. Click-based is deterministic and free of redundancy.
 1. **Debounce:** ~1 second between captures to avoid spam from rapid clicks / drag selections.
 1. **Cap:** Maintain a rolling buffer, max ~20 screenshots.
-1. **Summarization:** One Gemini call per snapshot (not batched), gated by `ContextGeminiObservationGate` to avoid API spam. Each snapshot runs up to 4 parallel lane calls (Activity, UIMap, EntityContent, Interaction) for modular analysis.
+1. **Summarization:** Each snapshot is OCR'd via Vision and the structured data flows into `SurfaceMemoryStore` / `CaptureStoryLog`; Mercury 2 distills these at long-press time into a brief.
 1. **Merge:** `ContextActivationBuilder` converts the buffer into a `ContextActivationPacket` with four structured fields: `recentTimeline` (up to 5 facts), `observedTransitions` (up to 3 interactions), `learnedUIMemory` (persistent app/surface memory), and `firstActionGuidance` (suggested first actions).
 1. **Inject:** The packet is rendered to a compact text block passed as system context to Sonnet alongside the live voice transcript.
 
@@ -100,7 +100,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 │  - Long-press → OpenAI Whisper API          │
 │  - OS hook on click event (debounced 1s)    │
 │  - Screenshot → rolling buffer (cap 20)     │
-│  - Gemini multimodal (batches of 10, parallel) │
+│  - OCR + accessibility extraction           │
 │  - Merge → ≤2 paragraphs of text            │
 └──────────────────┬──────────────────────────┘
                    │
@@ -109,7 +109,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 │  Sonnet Agent                                │
 │  Inputs:                                    │
 │   - Voice transcript (OpenAI Whisper)       │
-│   - Activity summary (Gemini text)          │
+│   - Activity brief (Mercury 2)              │
 │   - User preferences + system prompt        │
 │  Output: tool calls / computer actions      │
 └─────────────────────────────────────────────┘
@@ -119,8 +119,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 
 - **Native Swift / SwiftUI** — notch UI, cursor overlay, OS-level click hooks, screenshot capture.
 - **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`) — computer-use agent. Requires `ANTHROPIC_API_KEY`.
-- **Mercury 2** (`inception/mercury-2` via OpenRouter) — context selector; distills L2–L5 + Gemini memory into a ≤600-token brief before each agent turn. Requires `OPENROUTER_API_KEY`.
-- **Gemini Flash Lite** (`gemini-3.1-flash-lite`) — continuous background screen observer; builds `SurfaceMemoryStore` + `CaptureStoryLog`. Requires `GEMINI_API_KEY`.
+- **Mercury 2** (`inception/mercury-2` via OpenRouter) — context selector; distills L2–L5 + surface memory into a ≤600-token brief before each agent turn. Requires `OPENROUTER_API_KEY`.
 - **OpenAI Whisper API (`whisper-1`)** — voice transcription (`language=en`, vocabulary prompt). Requires `OPENAI_API_KEY`.
 - **OpenAI TTS** — streaming spoken affirmations from the agent. Requires `OPENAI_API_KEY`.
 
@@ -130,7 +129,7 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 |-------|--------|-------------|-------|
 | **Wyatt** | ✅ done | Notch UI (fresh SwiftUI app). Four settings: reasoning effort, preferences text box, system prompt override, cursor color picker. Live agent state readout. All UI/UX polish. Music tab (Spotify now-playing + lyrics). | Settings persisted at `~/Library/Application Support/AgentNotch/agent_settings.json`. Read via `AgentSettingsStore.shared`. |
 | **Sam** | ✅ done | Cursor companion — PNG overlay that follows the real cursor. Four color variants (red/green/blue/yellow). Long-press listener, listening/thinking/idle visual states. Computer use integration: Sonnet-driven OS actions (click, type, scroll). | Exposes `setCursorColor(color)` via `AgentInterfaces.cursor`. Set `AgentInterfaces.cursor = self` on init. |
-| **Ashan** | ✅ done | Long-press detection → voice transcription via OpenAI Whisper API (`whisper-1`). Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, modular Gemini lane pipeline per snapshot, merge to `ContextActivationPacket`. Core Sonnet agent wiring — assembles transcript + packet + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
+| **Ashan** | ✅ done | Long-press detection → voice transcription via OpenAI Whisper API (`whisper-1`). Context module: click + app-switch triggered screenshot capture (debounced 1s, rolling buffer of 20), OCR via Vision, Mercury 2 selector at long-press time. Core agent wiring — assembles transcript + brief + preferences and fires the model. | Exposes `getRecentActivityContext() -> String` via `AgentInterfaces.context`. Set `AgentInterfaces.context = self` on init. Read settings from `AgentSettingsStore.shared`. |
 
 **Interfaces are the contract.**
 - Wyatt's settings panel calls `setCursorColor(color)` on Sam's cursor module.
@@ -140,13 +139,12 @@ Implemented in `Features/Notch/AgentSettingsView.swift`. Persisted via `Core/Age
 ## 10. Milestones
 
 - **v0:** ✅ Notch shell up with four settings (persisted). ✅ Cursor PNG following real cursor. ✅ Long-press records voice. ✅ Screenshot-on-click writes to disk.
-- **v1 (MVP):** ✅ Click-with-debounce capture → Gemini summary → text injected into Sonnet → Sonnet acts via computer use. End-to-end loop working.
+- **v1 (MVP):** ✅ Click-with-debounce capture → Mercury 2 brief → text injected into Claude → Claude acts via computer use. End-to-end loop working.
 - **v2 (stretch):** ✅ App-switch capture hook (`NSWorkspace.didActivateApplicationNotification`). ✅ Cursor idle float animation. ❌ Browser tab-change hook (out of scope — requires browser extension or Accessibility crawl).
 
 ## 11. Open Questions
 
 - ~~What's the actual click-hook API on macOS, and does it require accessibility permissions?~~ **Resolved:** `CGEvent.tapCreate` with `.listenOnly` — yes, requires Accessibility.
-- ~~Gemini batch latency at 10 images?~~ **Resolved:** We run one Gemini call per snapshot, not batched; gated by `ContextGeminiObservationGate` to avoid spam.
 - ~~Does the cursor PNG overlay need a transparent always-on-top window?~~ **Resolved:** Yes — `CursorCompanionWindow` is a borderless `NSPanel` at `.screenSaverWindowLevel`.
 - ~~Where do user preferences live on disk?~~ **Resolved:** `~/Library/Application Support/AgentNotch/agent_settings.json` — see `Core/AgentSettingsStore.swift`.
 

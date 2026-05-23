@@ -67,31 +67,14 @@ public final class ComputerUseHarness {
 
     public struct Input {
         public var transcript: String
-        public var contextSummary: String
-        /// Intent verb from the Selector — forwarded to HarnessRunDetail for DevTools display.
-        public var intentVerb: String?
-        /// JPEG bytes of the screen at long-press time, ALREADY sized to
-        /// `agentDisplaySize` (1280x800). When non-nil the harness prepends
-        /// an image block to the FIRST user message so Claude sees the
-        /// screen on turn 1, eliminating the throwaway `computer.screenshot`
-        /// tool call most agent runs used to start with.
         public var initiationScreenshot: Data?
-        /// CoordTransform produced alongside the initiation screenshot —
-        /// describes how to map clicks emitted in the screenshot's coordinate
-        /// space back to logical-point space. Required for turn-1 clicks to
-        /// land on-target. If nil, dispatcher uses identity (correct only
-        /// when source display already matches agentDisplaySize).
         public var initiationTransform: ScreenCapture.CoordTransform?
         public init(
             transcript: String,
-            contextSummary: String,
-            intentVerb: String? = nil,
             initiationScreenshot: Data? = nil,
             initiationTransform: ScreenCapture.CoordTransform? = nil
         ) {
             self.transcript = transcript
-            self.contextSummary = contextSummary
-            self.intentVerb = intentVerb
             self.initiationScreenshot = initiationScreenshot
             self.initiationTransform = initiationTransform
         }
@@ -124,8 +107,7 @@ public final class ComputerUseHarness {
         let runID = UUID()
         let startedAt = Date()
         let transcriptLength = input.transcript.count
-        let contextLength = input.contextSummary.count
-        log.info("harness.start run_id=\(runID.uuidString) model=\(self.modelID) transcript_len=\(transcriptLength) context_len=\(contextLength)")
+        log.info("harness.start run_id=\(runID.uuidString) model=\(self.modelID) transcript_len=\(transcriptLength)")
         var toolCallCount = 0
         var screenshotToolCallCount = 0
         var actionCounts: [String: Int] = [:]
@@ -149,35 +131,6 @@ public final class ComputerUseHarness {
             CursorCompanion.shared.setThinking(false)
             isRunning = false
             stopRequested = false
-        }
-
-        // Pre-flight fast path. If a deterministic handler can finish
-        // the task, skip the model loop entirely.
-        let routed = await IntentRouter.tryHandle(transcript: input.transcript)
-        if case .handled(let summary, let affirmation) = routed {
-            TextToSpeechService.shared.speak(capped(affirmation))
-            AgentState.shared.set(.idle, detail: summary)
-            printRunMetrics(AgentRunMetricsRecord(
-                id: runID,
-                startedAt: startedAt,
-                endedAt: Date(),
-                durationMs: milliseconds(from: startedAt, to: Date()),
-                modelID: "fast_path",
-                fallbackModelID: fallbackModelID,
-                usedFallback: false,
-                transcriptLength: transcriptLength,
-                contextLength: contextLength,
-                contextIncluded: !input.contextSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                turnCount: 0,
-                toolCallCount: 0,
-                screenshotToolCallCount: 0,
-                actionCounts: ["fast_path": 1],
-                timeToFirstToolCallMs: nil,
-                timeToFirstNonScreenshotActionMs: nil,
-                finalStatus: "completed_fast_path",
-                errorMessage: nil
-            ))
-            return
         }
 
         // Two coordinate spaces collide here — keep them straight:
@@ -214,10 +167,7 @@ public final class ComputerUseHarness {
             betaHeaders: Self.betaHeaders(for: currentAgentModel, thinkingEnabled: thinkingEnabled)
         )
         var tools = buildTools(displaySize: agentDisplaySize, toolType: currentAgentModel.computerUseToolType)
-        let system = buildSystemBlocks(
-            settings: settings,
-            contextSummary: input.contextSummary
-        )
+        let system = buildSystemBlocks(settings: settings)
 
         let systemSummaries = system.map { block in
             HarnessRunDetail.SystemBlockSummary(
@@ -230,17 +180,14 @@ public final class ComputerUseHarness {
             id: runID,
             startedAt: startedAt,
             transcript: input.transcript,
-            systemBlocks: systemSummaries,
-            resolvedIntentVerb: input.intentVerb
+            systemBlocks: systemSummaries
         ))
 
         // First user message: transcript + (optionally) the long-press
-        // screenshot as an image block. Including the screenshot here saves
-        // a full round-trip — Claude no longer needs to take a
-        // `computer.screenshot` tool call on turn 1 just to see the screen.
-        // The Selector pre-sized the JPEG to exactly `agentDisplaySize` and
-        // shipped the matching CoordTransform in `input.initiationTransform`,
-        // so we attach the bytes as-is.
+        // screenshot as an image block. Including it here saves a full
+        // round-trip — Claude no longer needs a `computer.screenshot` call
+        // on turn 1. AgentSession pre-sizes the JPEG to `agentDisplaySize`
+        // and ships the matching CoordTransform in `input.initiationTransform`.
         let firstUserContent: [ContentBlock]
         if let jpeg = input.initiationScreenshot, !jpeg.isEmpty {
             let base64 = jpeg.base64EncodedString()
@@ -277,8 +224,6 @@ public final class ComputerUseHarness {
                 fallbackModelID: fallbackModelID,
                 usedFallback: usedFallback,
                 transcriptLength: transcriptLength,
-                contextLength: contextLength,
-                contextIncluded: !input.contextSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 turnCount: completedTurns,
                 toolCallCount: toolCallCount,
                 screenshotToolCallCount: screenshotToolCallCount,
@@ -291,26 +236,6 @@ public final class ComputerUseHarness {
 
         }
 
-        // Preview of the latest user message — used in the observability log so
-        // each harness turn carries the input that drove it.
-        func latestUserPreview() -> String {
-            guard let lastUser = messages.last(where: { $0.role == "user" }) else { return "" }
-            for block in lastUser.content {
-                if case .text(let t) = block {
-                    return String(t.prefix(200))
-                }
-                if case .toolResult(_, let inner, _, _) = block {
-                    for ib in inner {
-                        if case .text(let t) = ib { return "tool_result: \(String(t.prefix(180)))" }
-                        if case .image = ib { return "tool_result: <image>" }
-                    }
-                }
-            }
-            return ""
-        }
-
-        let systemBlocksPreview = Self.systemBlocksPreview(system)
-
         while turn < maxTurns {
             if stopRequested {
                 AgentState.shared.set(.idle, detail: "Stopped")
@@ -319,8 +244,6 @@ public final class ComputerUseHarness {
             }
             turn += 1
             log.info("harness.turn run_id=\(runID.uuidString) turn=\(turn) model=\(currentModel)")
-            let turnStartedAt = Date()
-            let userPreviewForTurn = latestUserPreview()
 
             Self.injectPromptCaching(messages: &messages)
 
@@ -443,19 +366,6 @@ public final class ComputerUseHarness {
                         toolCalls: []
                     )
                 )
-                AgentObservabilityLog.shared.record(.harnessTurn(
-                    id: UUID(),
-                    t: turnStartedAt,
-                    turnIndex: turn,
-                    modelID: response.model,
-                    systemBlocksPreview: systemBlocksPreview,
-                    userContentPreview: userPreviewForTurn,
-                    assistantPreview: String(text.prefix(200)),
-                    toolCalls: [],
-                    inputTokens: response.usage?.inputTokens,
-                    outputTokens: response.usage?.outputTokens,
-                    latencyS: Date().timeIntervalSince(turnStartedAt)
-                ))
                 AgentState.shared.set(.idle, detail: text)
                 await recordMetrics(status: "completed_without_tool")
                 return
@@ -474,8 +384,6 @@ public final class ComputerUseHarness {
             resultBlocks.reserveCapacity(toolUses.count)
             var toolRecords: [HarnessTurnRecord.ToolCallRecord] = []
             toolRecords.reserveCapacity(toolUses.count)
-            var observabilityToolCalls: [AgentObservabilityLog.ToolCallSummary] = []
-            observabilityToolCalls.reserveCapacity(toolUses.count)
             for use in toolUses {
                 if stopRequested {
                     await HarnessRunDetailStore.shared.appendTurn(
@@ -516,7 +424,7 @@ public final class ComputerUseHarness {
                 let dispatchStart = Date()
                 let result = await dispatcher.dispatch(toolUseId: use.id, name: use.name, input: use.input)
                 let dispatchDuration = Date().timeIntervalSince(dispatchStart)
-                log.info("harness.tool_result run_id=\(runID.uuidString) action=\(action) is_error=\(result.isError)")
+                log.info("harness.tool_result run_id=\(runID.uuidString) action=\(action) is_error=\(result.isError) dispatch_ms=\(Int(dispatchDuration * 1000))")
                 resultBlocks.append(.toolResult(toolUseId: result.toolUseId, content: result.content, isError: result.isError, cache: false))
 
                 toolRecords.append(HarnessTurnRecord.ToolCallRecord(
@@ -526,13 +434,6 @@ public final class ComputerUseHarness {
                     action: use.name == "computer" ? action : nil,
                     resultIsError: result.isError,
                     resultTextPreview: Self.previewText(of: result.content, limit: 200)
-                ))
-
-                observabilityToolCalls.append(AgentObservabilityLog.ToolCallSummary(
-                    toolName: use.name == "computer" ? "computer.\(action)" : use.name,
-                    argumentsPreview: Self.compactJSON(use.input, limit: 200),
-                    resultPreview: Self.toolResultPreview(content: result.content, isError: result.isError),
-                    durationS: dispatchDuration
                 ))
             }
             messages.append(Message(role: "user", content: resultBlocks))
@@ -552,26 +453,6 @@ public final class ComputerUseHarness {
                     toolCalls: toolRecords
                 )
             )
-
-            let assistantPreviewForTurn: String = {
-                let text = response.content.compactMap { block -> String? in
-                    if case .text(let t) = block { return t } else { return nil }
-                }.joined(separator: " ")
-                return String(text.prefix(200))
-            }()
-            AgentObservabilityLog.shared.record(.harnessTurn(
-                id: UUID(),
-                t: turnStartedAt,
-                turnIndex: turn,
-                modelID: response.model,
-                systemBlocksPreview: systemBlocksPreview,
-                userContentPreview: userPreviewForTurn,
-                assistantPreview: assistantPreviewForTurn,
-                toolCalls: observabilityToolCalls,
-                inputTokens: response.usage?.inputTokens,
-                outputTokens: response.usage?.outputTokens,
-                latencyS: Date().timeIntervalSince(turnStartedAt)
-            ))
 
             if response.stopReason != "tool_use" {
                 log.info("harness.done run_id=\(runID.uuidString) status=completed_after_tools turns=\(turn)")
@@ -609,19 +490,8 @@ public final class ComputerUseHarness {
             activeClaudeClient = nil
         }
 
-        // Same fast-path as API mode — handles open-URL / Spotify / Reminders
-        // without any CLI spawn. Keeps CC turnaround for trivial commands
-        // at zero cost.
-        let routed = await IntentRouter.tryHandle(transcript: input.transcript)
-        if case .handled(let summary, let affirmation) = routed {
-            TextToSpeechService.shared.speak(capped(affirmation))
-            AgentState.shared.set(.idle, detail: summary)
-            log.info("harness.done run_id=\(runID.uuidString) provider=claudeCodeCLI status=completed_fast_path")
-            return
-        }
-
         let settings = AgentSettingsStore.shared.settings
-        let systemText = Self.composeClaudeCodeSystem(settings: settings, contextSummary: input.contextSummary)
+        let systemText = Self.composeClaudeCodeSystem(settings: settings)
         let prompt = ClaudeCodeClient.Prompt(system: systemText, userText: input.transcript)
 
         let client = ClaudeCodeClient()
@@ -705,10 +575,7 @@ public final class ComputerUseHarness {
     /// System prompt for CC mode. Shorter than the API-mode block — Claude
     /// Code already knows how to be an agent. We just tell it about our MCP
     /// tools and the user's preferences.
-    private static func composeClaudeCodeSystem(
-        settings: AgentSettings,
-        contextSummary: String
-    ) -> String {
+    private static func composeClaudeCodeSystem(settings: AgentSettings) -> String {
         var parts: [String] = []
         parts.append("""
         You are an on-screen macOS computer-use agent running inside AgentNotch. The user spoke a command into the cursor companion; act on it.
@@ -732,9 +599,6 @@ public final class ComputerUseHarness {
         Do not use any of your built-in Bash / Read / Edit / Write tools — they are not relevant on this surface. The MCP tools above are your only action surface.
         """)
 
-        if !contextSummary.isEmpty {
-            parts.append("# Context brief\n\(contextSummary)")
-        }
         if !settings.preferences.isEmpty {
             parts.append("# User preferences\n\(settings.preferences)")
         }
@@ -874,10 +738,7 @@ public final class ComputerUseHarness {
 
     // MARK: - System prompt (split for caching)
 
-    private func buildSystemBlocks(
-        settings: AgentSettings,
-        contextSummary: String
-    ) -> [SystemBlock] {
+    private func buildSystemBlocks(settings: AgentSettings) -> [SystemBlock] {
         let staticText = """
         You are an on-screen macOS computer-use ACTOR — not a chatbot, not an assistant. Your only outputs are tool calls and (on turn 1) a 9-word spoken affirmation read aloud to the user.
 
@@ -914,13 +775,6 @@ public final class ComputerUseHarness {
         var blocks: [SystemBlock] = [SystemBlock(text: staticText, cache: true)]
 
         var dynamicParts: [String] = []
-        if !contextSummary.isEmpty {
-            // The contextSummary is the Mercury/local-renderer brief itself — already
-            // structured ("## What the user wants" / "## You are here" / ...). Phase 4
-            // moved authority from raw "activation context" prose into the selector's brief,
-            // so we emit it as-is without wrapper text.
-            dynamicParts.append(contextSummary)
-        }
         if !settings.preferences.isEmpty {
             dynamicParts.append("User preferences:\n\(settings.preferences)")
         }
@@ -1234,21 +1088,12 @@ public final class ComputerUseHarness {
         max(0, Int(end.timeIntervalSince(start) * 1000))
     }
 
-    private func primaryDisplayPixelSize() -> CGSize {
-        guard let screen = NSScreen.main else { return CGSize(width: 2560, height: 1664) }
-        let scale = screen.backingScaleFactor
-        let size = screen.frame.size
-        return CGSize(width: size.width * scale, height: size.height * scale)
-    }
-
     /// macOS logical points (NSScreen.frame). The coordinate space CGEvent
     /// uses for mouse positioning. NOT backing-store pixels.
     private func primaryLogicalDisplaySize() -> CGSize {
         NSScreen.main?.frame.size ?? CGSize(width: 1440, height: 900)
     }
 
-    /// Compact JSON representation of a tool input. Used for the Dev Tools
-    /// per-turn drill-in — small enough to render inline, big enough to debug.
     private static let verifierDecoder = JSONDecoder()
 
     private static let compactJSONEncoder: JSONEncoder = {
@@ -1264,55 +1109,6 @@ public final class ComputerUseHarness {
             return "\(prefix)…"
         }
         return "<unencodable>"
-    }
-
-    /// Condensed multi-block preview for the observability log. Unlike
-    /// `previewText`, this surfaces image dimensions and error markers because
-    /// the timeline viewer treats screenshots as load-bearing data.
-    fileprivate static func toolResultPreview(content: [ContentBlock], isError: Bool) -> String {
-        var pieces: [String] = []
-        if isError { pieces.append("ERROR") }
-        for block in content {
-            switch block {
-            case .text(let t):
-                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    pieces.append(String(trimmed.prefix(180)))
-                }
-            case .image(_, let base64, _):
-                if let data = Data(base64Encoded: base64),
-                   let img = NSImage(data: data) {
-                    let w = Int(img.size.width)
-                    let h = Int(img.size.height)
-                    pieces.append("screenshot \(w)x\(h)")
-                } else {
-                    pieces.append("screenshot")
-                }
-            case .toolUse:
-                pieces.append("<tool_use>")
-            case .toolResult:
-                pieces.append("<tool_result>")
-            case .thinking(let t, _):
-                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    pieces.append("thinking: \(String(trimmed.prefix(120)))")
-                }
-            case .redactedThinking:
-                pieces.append("<redacted_thinking>")
-            }
-            if pieces.joined(separator: " · ").count > 200 { break }
-        }
-        let joined = pieces.joined(separator: " · ")
-        if joined.count > 200 { return String(joined.prefix(200)) + "…" }
-        return joined.isEmpty ? "<empty>" : joined
-    }
-
-    /// Joined preview of the harness's system blocks (cached + dynamic) for
-    /// the observability timeline. First 240 chars per block, capped at 400 total.
-    fileprivate static func systemBlocksPreview(_ blocks: [SystemBlock]) -> String {
-        let joined = blocks.map { String($0.text.prefix(240)) }.joined(separator: "\n---\n")
-        if joined.count > 400 { return String(joined.prefix(400)) + "…" }
-        return joined
     }
 
     /// Pulls the first text block out of a tool result's content array and

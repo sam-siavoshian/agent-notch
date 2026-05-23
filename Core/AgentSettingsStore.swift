@@ -93,13 +93,6 @@ public struct AgentSettings: Equatable, Sendable {
     public var voiceInputDeviceUID: String?
     /// Persistent CoreAudio device UID for TTS output. nil = system default.
     public var voiceOutputDeviceUID: String?
-    public var collectionPaused: Bool
-    public var neverLogApps: [String]
-    public var mercuryEnabled: Bool
-    /// Continuous, throttled (>=8s) background Gemini observer that watches the
-    /// screen after major-change captures and accumulates per-surface UI/UX
-    /// memory. Defaults on; no-ops without `GEMINI_API_KEY`.
-    public var geminiObserverEnabled: Bool
     /// Global panic-button shortcut. First press soft-stops the harness;
     /// a second press within 2s SIGKILLs the app.
     public var killSwitchShortcut: KillSwitchShortcut
@@ -125,14 +118,6 @@ public struct AgentSettings: Equatable, Sendable {
     /// General → Login Items.
     public var launchAtLogin: Bool
 
-    public static let defaultNeverLogApps: [String] = [
-        "com.1password.1password7",
-        "com.1password.1password8",
-        "com.bitwarden.desktop",
-        "com.apple.keychainaccess",
-        "com.agentnotch.app",
-    ]
-
     public static let `default` = AgentSettings(
         agentModel: .haiku,
         reasoningEffort: .medium,
@@ -143,10 +128,6 @@ public struct AgentSettings: Equatable, Sendable {
         ttsVoice: .nova,
         voiceInputDeviceUID: nil,
         voiceOutputDeviceUID: nil,
-        collectionPaused: false,
-        neverLogApps: AgentSettings.defaultNeverLogApps,
-        mercuryEnabled: true,
-        geminiObserverEnabled: true,
         killSwitchShortcut: .default,
         allowPrivateSkyLight: true,
         provider: .anthropicAPI,
@@ -162,8 +143,6 @@ extension AgentSettings: Codable {
         case agentModel
         case reasoningEffort, preferences, systemPrompt, cursorColor, cursorMode, ttsVoice
         case voiceInputDeviceUID, voiceOutputDeviceUID
-        case collectionPaused, neverLogApps, mercuryEnabled
-        case geminiObserverEnabled
         case killSwitchShortcut
         case allowPrivateSkyLight
         case provider, claudeCodePath
@@ -182,10 +161,6 @@ extension AgentSettings: Codable {
         ttsVoice             = (try? c.decode(TTSVoice.self,             forKey: .ttsVoice))             ?? .nova
         voiceInputDeviceUID  = try? c.decode(String.self,                forKey: .voiceInputDeviceUID)
         voiceOutputDeviceUID = try? c.decode(String.self,                forKey: .voiceOutputDeviceUID)
-        collectionPaused     = (try? c.decode(Bool.self,                 forKey: .collectionPaused))     ?? false
-        neverLogApps         = (try? c.decode([String].self,             forKey: .neverLogApps))         ?? AgentSettings.defaultNeverLogApps
-        mercuryEnabled       = (try? c.decode(Bool.self,                 forKey: .mercuryEnabled))       ?? true
-        geminiObserverEnabled = (try? c.decode(Bool.self,                forKey: .geminiObserverEnabled)) ?? true
         killSwitchShortcut   = (try? c.decode(KillSwitchShortcut.self,   forKey: .killSwitchShortcut))   ?? .default
         allowPrivateSkyLight = (try? c.decode(Bool.self,                 forKey: .allowPrivateSkyLight)) ?? true
         provider             = (try? c.decode(AgentProvider.self,        forKey: .provider))             ?? .anthropicAPI
@@ -205,10 +180,6 @@ extension AgentSettings: Codable {
         try c.encode(ttsVoice,             forKey: .ttsVoice)
         try c.encodeIfPresent(voiceInputDeviceUID,  forKey: .voiceInputDeviceUID)
         try c.encodeIfPresent(voiceOutputDeviceUID, forKey: .voiceOutputDeviceUID)
-        try c.encode(collectionPaused,     forKey: .collectionPaused)
-        try c.encode(neverLogApps,         forKey: .neverLogApps)
-        try c.encode(mercuryEnabled,       forKey: .mercuryEnabled)
-        try c.encode(geminiObserverEnabled, forKey: .geminiObserverEnabled)
         try c.encode(killSwitchShortcut,   forKey: .killSwitchShortcut)
         try c.encode(allowPrivateSkyLight, forKey: .allowPrivateSkyLight)
         try c.encode(provider,             forKey: .provider)
@@ -230,7 +201,7 @@ public final class AgentSettingsStore: ObservableObject {
     private static let sharedDecoder = JSONDecoder()
     private static let sharedEncoder: JSONEncoder = {
         let e = JSONEncoder()
-        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        e.outputFormatting = [.sortedKeys]
         return e
     }()
 
@@ -246,10 +217,6 @@ public final class AgentSettingsStore: ObservableObject {
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("agent_settings.json")
         load()
-        // Seed PrivacyGate so a fresh launch reflects persisted preferences
-        // before any monitor fires its first event.
-        PrivacyGate.shared.collectionPaused = settings.collectionPaused
-        PrivacyGate.shared.neverLogApps = Set(settings.neverLogApps)
     }
 
     public var agentModel: AgentModel {
@@ -295,36 +262,6 @@ public final class AgentSettingsStore: ObservableObject {
     public var voiceOutputDeviceUID: String? {
         get { settings.voiceOutputDeviceUID }
         set { update { $0.voiceOutputDeviceUID = newValue } }
-    }
-
-    public var collectionPaused: Bool {
-        get { settings.collectionPaused }
-        set {
-            update { $0.collectionPaused = newValue }
-            PrivacyGate.shared.collectionPaused = newValue
-        }
-    }
-
-    public var neverLogApps: [String] {
-        get { settings.neverLogApps }
-        set {
-            update { $0.neverLogApps = newValue }
-            PrivacyGate.shared.neverLogApps = Set(newValue)
-        }
-    }
-
-    public var mercuryEnabled: Bool {
-        get { settings.mercuryEnabled }
-        // mercuryEnabled has no runtime consumer yet — Phase 4 will honor it.
-        set { update { $0.mercuryEnabled = newValue } }
-    }
-
-    /// Toggle for the continuous background screen observer. When off,
-    /// `GeminiObserver.observe(...)` no-ops and no per-surface memory is
-    /// accumulated.
-    public var geminiObserverEnabled: Bool {
-        get { settings.geminiObserverEnabled }
-        set { update { $0.geminiObserverEnabled = newValue } }
     }
 
     public var killSwitchShortcut: KillSwitchShortcut {

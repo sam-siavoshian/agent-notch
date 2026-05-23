@@ -8,7 +8,6 @@
 #   ./dev.sh --reset-tcc                       # tccutil reset com.agentnotch.app, then build + run
 #   ./dev.sh --show-onboarding                 # force-show the permissions onboarding window on launch
 #   ./dev.sh --rotate-key sk-ant-...           # update keychain entry, then build + run
-#   ./dev.sh --rotate-gemini-key AIza...       # update optional Gemini key, then build + run
 #   ./dev.sh --rotate-openai-key sk-...        # update optional OpenAI (Whisper) key, then build + run
 #   ./dev.sh --rotate-openrouter-key sk-or-... # update optional OpenRouter (Mercury) key, then build + run
 #   ./dev.sh --install                         # build, copy to /Applications, launch from there
@@ -16,16 +15,14 @@
 #                                              #  as long as you don't rebuild)
 #
 # Secrets: reads ANTHROPIC_API_KEY from macOS keychain (service: AgentNotch,
-# account: anthropic). Reads optional GEMINI_API_KEY and OPENAI_API_KEY from
-# the same service (accounts: gemini, openai). Never store keys in this file
-# or in git.
+# account: anthropic). Reads optional OPENAI_API_KEY from the same service
+# (account: openai). Never store keys in this file or in git.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KEYCHAIN_SERVICE="AgentNotch"
 KEYCHAIN_ACCOUNT="anthropic"
-GEMINI_KEYCHAIN_ACCOUNT="gemini"
 OPENAI_KEYCHAIN_ACCOUNT="openai"
 OPENROUTER_KEYCHAIN_ACCOUNT="openrouter"
 SCHEME="AgentNotch"
@@ -62,17 +59,6 @@ while [[ $# -gt 0 ]]; do
         -U >/dev/null
       shift
       ;;
-    --rotate-gemini-key)
-      shift
-      if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-gemini-key needs the key as next arg"; exit 1; fi
-      echo "→ Updating keychain entry for ${KEYCHAIN_SERVICE}/${GEMINI_KEYCHAIN_ACCOUNT}"
-      security add-generic-password \
-        -s "$KEYCHAIN_SERVICE" \
-        -a "$GEMINI_KEYCHAIN_ACCOUNT" \
-        -w "$1" \
-        -U >/dev/null
-      shift
-      ;;
     --rotate-openai-key)
       shift
       if [[ -z "${1:-}" ]]; then echo "ERROR: --rotate-openai-key needs the key as next arg"; exit 1; fi
@@ -96,7 +82,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,13p' "$0"; exit 0 ;;
+      sed -n '2,12p' "$0"; exit 0 ;;
     *)
       if [[ -z "$DEMO_PROMPT" ]]; then DEMO_PROMPT="$1"; shift
       else echo "ERROR: unexpected arg '$1'"; exit 1
@@ -114,14 +100,6 @@ if ! ANTHROPIC_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" 
 fi
 export ANTHROPIC_API_KEY
 
-echo "→ Fetching optional GEMINI_API_KEY from keychain"
-if GEMINI_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$GEMINI_KEYCHAIN_ACCOUNT" -w 2>/dev/null)"; then
-  export GEMINI_API_KEY
-  echo "→ Gemini context observation enabled"
-else
-  echo "→ Gemini key not configured; context observation will run OCR-only"
-fi
-
 echo "→ Fetching optional OPENAI_API_KEY from keychain"
 if OPENAI_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$OPENAI_KEYCHAIN_ACCOUNT" -w 2>/dev/null)"; then
   export OPENAI_API_KEY
@@ -137,14 +115,6 @@ if OPENROUTER_API_KEY="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -
 else
   echo "→ OpenRouter key not configured; Mercury will fall through to LocalBriefRenderer every long-press"
 fi
-
-# Recommended native screenshot-analysis baseline. The AGENTNOTCH_* names take
-# precedence over generic GEMINI_* vars so sandbox experiments cannot
-# accidentally change the macOS app's production context pipeline.
-export AGENTNOTCH_GEMINI_MODEL="${AGENTNOTCH_GEMINI_MODEL:-gemini-3.1-flash-lite}"
-export AGENTNOTCH_GEMINI_MEDIA_RESOLUTION="${AGENTNOTCH_GEMINI_MEDIA_RESOLUTION:-MEDIA_RESOLUTION_HIGH}"
-export AGENTNOTCH_GEMINI_THINKING_LEVEL="${AGENTNOTCH_GEMINI_THINKING_LEVEL:-minimal}"
-echo "→ Gemini config: ${AGENTNOTCH_GEMINI_MODEL}, ${AGENTNOTCH_GEMINI_MEDIA_RESOLUTION}, thinking=${AGENTNOTCH_GEMINI_THINKING_LEVEL}"
 
 # ---------- signing guard ----------
 # Without a stable Apple Development cert, every build is signed ad-hoc and

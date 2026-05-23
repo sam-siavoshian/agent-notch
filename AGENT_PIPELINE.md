@@ -45,7 +45,7 @@ Features/Context/L2Snapshotter.swift:38. Returns `(CL2Snapshot, screenshotJPEG)`
 - **Top 20 recent resources** from `ResourceIndex` (LRU of URIs/files/channels touched, capacity 100).
 - **Recipes for active app** from `AnchorRecorder.recipes(for: bundleID)` (top 8 by `seenCount`).
 - **Learned surfaces** from `SurfaceMemoryStore.memories(for: app)` — top 6 surfaces × top 12 controls each, sorted by `observationCount`.
-- **Recent story** from `CaptureStoryLog` — last 20 entries, filtered to last 5 minutes. Each is `{t, app, surface, narrative, current_goal_guess, content_type, artifact}` from prior **Gemini observer** captures.
+- **Recent story** from `CaptureStoryLog` — last 20 entries, filtered to last 5 minutes. Each is `{t, app, surface, narrative, current_goal_guess, content_type, artifact}`.
 - **User prefs** from `AgentSettingsStore.preferences`.
 
 ### 3c. Mercury 2 call (≤2.5s)
@@ -158,4 +158,4 @@ For each turn (up to `maxTurns=100`):
 - Whisper transcript (text)
 - Initiation screenshot JPEG (image block, no cache)
 
-The brief itself is where ~all the "smarts" live — it's where L2 (live screen), L3 (recipes), L4 (prefs), L5 (active_task + resources), `learned_surfaces` (Gemini's accumulated UI knowledge), and `recent_story` (last 5min of Gemini observations) get distilled by Mercury 2 into ~600 tokens of grounded markdown. Long-press never calls Gemini directly — Gemini's value at long-press time is the SurfaceMemoryStore + CaptureStoryLog it built up during prior background captures.
+The brief itself is where ~all the "smarts" live — it's where L2 (live screen), L3 (recipes), L4 (prefs), L5 (active_task + resources), `learned_surfaces` (accumulated UI knowledge), and `recent_story` (last 5min of observations) get distilled by Mercury 2 into ~600 tokens of grounded markdown.

@@ -21,7 +21,7 @@
 //    4. Emit Event values via AsyncThrowingStream so the harness updates UI
 //       in real time:
 //         - session id on first event   →  ClaudeCodeSession.setSessionId
-//         - tool_use blocks             →  AgentObservabilityLog + UI strip
+//         - tool_use blocks             →  UI strip
 //         - text_delta chunks           →  accumulate into final reply
 //         - usage events                →  ClaudeCodeSession.addUsage
 //         - process exit                →  emit .finished

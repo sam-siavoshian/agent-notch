@@ -114,14 +114,6 @@ struct AdvancedSettingsView: View {
                           placeholder: "sk-…",
                           read: { Secrets.openAIAPIKey },
                           write: { Secrets.setOpenAIAPIKey($0) })
-                APIKeyRow(label: "OpenRouter",
-                          placeholder: "sk-or-…",
-                          read: { Secrets.openRouterAPIKey },
-                          write: { Secrets.setOpenRouterAPIKey($0) })
-                APIKeyRow(label: "Gemini",
-                          placeholder: "AIza…",
-                          read: { Secrets.geminiAPIKey },
-                          write: { Secrets.setGeminiAPIKey($0) })
             }
 
             Spacer(minLength: 0)
