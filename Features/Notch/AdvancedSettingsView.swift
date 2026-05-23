@@ -62,6 +62,20 @@ struct AdvancedSettingsView: View {
 
             Divider().opacity(0.25)
 
+            section("Display") {
+                SettingRow(title: "Visible in lock screen") {
+                    Toggle("", isOn: Binding(
+                        get: { store.showEverywhere },
+                        set: { store.showEverywhere = $0 }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .help("Bumps the notch panel to .screenSaver level so it stays visible above mission control, full-screen apps, and the idle screen saver. Cannot draw over the macOS login window (different security session).")
+                }
+            }
+
+            Divider().opacity(0.25)
+
             section("Audio") {
                 SettingRow(title: "Voice") { voicePicker }
                 SettingRow(title: "Mic") {

@@ -15,7 +15,6 @@ struct AgentSettingsView: View {
             cursorColorRow
             cursorModeRow
             providerRow
-            everywhereRow
             advancedRow
             killSwitchRow
             quitRow
@@ -123,31 +122,6 @@ struct AgentSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Claude Code CLI not detected. Click for install instructions.")
-                }
-            }
-        }
-    }
-
-    /// Notch panel visibility scope. Off (default): standard menu-bar-level
-    /// floating panel. On: rides above the screen-saver layer so it stays
-    /// visible during idle / mission control / full-screen apps. Cannot
-    /// draw over the macOS login window (different security session).
-    private var everywhereRow: some View {
-        SettingRow(title: "Everywhere") {
-            HStack(spacing: 4) {
-                ToolbarIconButton(
-                    systemImage: "rectangle.on.rectangle",
-                    label: "Standard",
-                    isActive: store.showEverywhere == false
-                ) {
-                    store.showEverywhere = false
-                }
-                ToolbarIconButton(
-                    systemImage: "square.stack.3d.up.fill",
-                    label: "Everywhere",
-                    isActive: store.showEverywhere == true
-                ) {
-                    store.showEverywhere = true
                 }
             }
         }
