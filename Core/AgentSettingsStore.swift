@@ -115,6 +115,11 @@ public struct AgentSettings: Equatable, Sendable {
     /// Optional override for the `claude` binary location. nil = resolve via
     /// `which claude` + standard fallbacks at spawn time.
     public var claudeCodePath: String?
+    /// When true, the notch panel rides above the screen saver layer (level
+    /// `.screenSaver`) so it stays visible during idle-screen, full-screen
+    /// presentations, and Mission Control. Note: it still cannot draw over
+    /// the macOS login window, which runs in a separate session.
+    public var showEverywhere: Bool
 
     public static let defaultNeverLogApps: [String] = [
         "com.1password.1password7",
@@ -141,7 +146,8 @@ public struct AgentSettings: Equatable, Sendable {
         killSwitchShortcut: .default,
         allowPrivateSkyLight: true,
         provider: .anthropicAPI,
-        claudeCodePath: nil
+        claudeCodePath: nil,
+        showEverywhere: false
     )
 }
 
@@ -156,6 +162,7 @@ extension AgentSettings: Codable {
         case killSwitchShortcut
         case allowPrivateSkyLight
         case provider, claudeCodePath
+        case showEverywhere
     }
 
     public init(from decoder: Decoder) throws {
@@ -177,6 +184,7 @@ extension AgentSettings: Codable {
         allowPrivateSkyLight = (try? c.decode(Bool.self,                 forKey: .allowPrivateSkyLight)) ?? true
         provider             = (try? c.decode(AgentProvider.self,        forKey: .provider))             ?? .anthropicAPI
         claudeCodePath       = try? c.decode(String.self,                forKey: .claudeCodePath)
+        showEverywhere       = (try? c.decode(Bool.self,                 forKey: .showEverywhere))       ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -198,6 +206,7 @@ extension AgentSettings: Codable {
         try c.encode(allowPrivateSkyLight, forKey: .allowPrivateSkyLight)
         try c.encode(provider,             forKey: .provider)
         try c.encodeIfPresent(claudeCodePath, forKey: .claudeCodePath)
+        try c.encode(showEverywhere,       forKey: .showEverywhere)
     }
 }
 
@@ -328,6 +337,14 @@ public final class AgentSettingsStore: ObservableObject {
     public var claudeCodePath: String? {
         get { settings.claudeCodePath }
         set { update { $0.claudeCodePath = newValue } }
+    }
+
+    public var showEverywhere: Bool {
+        get { settings.showEverywhere }
+        set {
+            update { $0.showEverywhere = newValue }
+            NotchWindowController.shared.applyVisibilityScope()
+        }
     }
 
     public func update(_ mutate: (inout AgentSettings) -> Void) {

@@ -27,6 +27,20 @@ final class NotchWindowController: NSObject {
         window?.frame
     }
 
+    /// Push the notch panel above (or back below) the screen-saver layer
+    /// based on `AgentSettingsStore.showEverywhere`. Called on install and
+    /// whenever the user toggles the setting. The window's collection
+    /// behavior already includes `.canJoinAllSpaces` + `.fullScreenAuxiliary`
+    /// + `.stationary`, so the only knob that changes here is the level.
+    func applyVisibilityScope() {
+        guard let window else { return }
+        let everywhere = AgentSettingsStore.shared.showEverywhere
+        // `.screenSaver` outranks Mission Control, idle screen saver, and
+        // most overlay windows. It cannot draw over LoginWindow (separate
+        // session) — that boundary is enforced by the OS.
+        window.level = everywhere ? .screenSaver : (.mainMenu + 3)
+    }
+
     func install() {
         guard window == nil else { return }
 
@@ -42,6 +56,7 @@ final class NotchWindowController: NSObject {
         panel.contentView = NSHostingView(rootView: NotchContentView())
         window = panel
 
+        applyVisibilityScope()
         position()
         panel.orderFrontRegardless()
 
