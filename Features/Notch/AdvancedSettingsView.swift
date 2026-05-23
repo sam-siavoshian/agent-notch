@@ -64,13 +64,18 @@ struct AdvancedSettingsView: View {
 
             section("Display") {
                 SettingRow(title: "Visible in lock screen") {
-                    Toggle("", isOn: Binding(
+                    miniSwitch(
                         get: { store.showEverywhere },
-                        set: { store.showEverywhere = $0 }
-                    ))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .help("Bumps the notch panel to .screenSaver level so it stays visible above mission control, full-screen apps, and the idle screen saver. Cannot draw over the macOS login window (different security session).")
+                        set: { store.showEverywhere = $0 },
+                        help: "Bumps the notch panel to .screenSaver level so it stays visible above mission control, full-screen apps, and the idle screen saver. Cannot draw over the macOS login window (different security session)."
+                    )
+                }
+                SettingRow(title: "Run on boot") {
+                    miniSwitch(
+                        get: { store.launchAtLogin },
+                        set: { store.launchAtLogin = $0 },
+                        help: "Registers AgentNotch as a macOS login item via SMAppService. Manage in System Settings → General → Login Items."
+                    )
                 }
             }
 
@@ -125,6 +130,20 @@ struct AdvancedSettingsView: View {
         .padding(.top, 14)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Shrunk SwiftUI switch — the native `.switch` style is huge in a
+    /// dense settings panel; scale + frame caps it to row-row height.
+    private func miniSwitch(get: @escaping () -> Bool,
+                            set: @escaping (Bool) -> Void,
+                            help: String) -> some View {
+        Toggle("", isOn: Binding(get: get, set: set))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.mini)
+            .scaleEffect(0.8, anchor: .trailing)
+            .frame(width: 28, height: 16, alignment: .trailing)
+            .help(help)
     }
 
     private var voicePicker: some View {

@@ -120,6 +120,10 @@ public struct AgentSettings: Equatable, Sendable {
     /// presentations, and Mission Control. Note: it still cannot draw over
     /// the macOS login window, which runs in a separate session.
     public var showEverywhere: Bool
+    /// When true, AgentNotch is registered as a macOS login item via
+    /// `SMAppService.mainApp`. User can manage in System Settings →
+    /// General → Login Items.
+    public var launchAtLogin: Bool
 
     public static let defaultNeverLogApps: [String] = [
         "com.1password.1password7",
@@ -147,7 +151,8 @@ public struct AgentSettings: Equatable, Sendable {
         allowPrivateSkyLight: true,
         provider: .anthropicAPI,
         claudeCodePath: nil,
-        showEverywhere: false
+        showEverywhere: false,
+        launchAtLogin: false
     )
 }
 
@@ -163,6 +168,7 @@ extension AgentSettings: Codable {
         case allowPrivateSkyLight
         case provider, claudeCodePath
         case showEverywhere
+        case launchAtLogin
     }
 
     public init(from decoder: Decoder) throws {
@@ -185,6 +191,7 @@ extension AgentSettings: Codable {
         provider             = (try? c.decode(AgentProvider.self,        forKey: .provider))             ?? .anthropicAPI
         claudeCodePath       = try? c.decode(String.self,                forKey: .claudeCodePath)
         showEverywhere       = (try? c.decode(Bool.self,                 forKey: .showEverywhere))       ?? false
+        launchAtLogin        = (try? c.decode(Bool.self,                 forKey: .launchAtLogin))        ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -207,6 +214,7 @@ extension AgentSettings: Codable {
         try c.encode(provider,             forKey: .provider)
         try c.encodeIfPresent(claudeCodePath, forKey: .claudeCodePath)
         try c.encode(showEverywhere,       forKey: .showEverywhere)
+        try c.encode(launchAtLogin,        forKey: .launchAtLogin)
     }
 }
 
@@ -344,6 +352,14 @@ public final class AgentSettingsStore: ObservableObject {
         set {
             update { $0.showEverywhere = newValue }
             NotchWindowController.shared.applyVisibilityScope()
+        }
+    }
+
+    public var launchAtLogin: Bool {
+        get { settings.launchAtLogin }
+        set {
+            update { $0.launchAtLogin = newValue }
+            LaunchAtLogin.shared.apply(enabled: newValue)
         }
     }
 

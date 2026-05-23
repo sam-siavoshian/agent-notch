@@ -51,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if AgentSettingsStore.shared.ttsVoice.isLocal {
             PiperTTSEngine.shared.warmup()
         }
+        // Reconcile stored launch-at-login bool with SMAppService's actual
+        // status — user may have revoked / re-added it via System Settings
+        // since last run.
+        LaunchAtLogin.shared.reconcile()
         // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
         AdapterRegistry.shared.register(BrowserAdapter())
         AdapterRegistry.shared.register(TerminalAdapter())
