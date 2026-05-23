@@ -104,6 +104,26 @@ final class SpotifyController: ObservableObject {
     /// after auth + on demand.
     @Published private(set) var playlists: [SpotifyPlaylist] = []
 
+    // MARK: - Discovery state (lazy — populated on section expand)
+
+    @Published private(set) var searchResults: [SpotifySearchResult] = []
+    @Published private(set) var queueSnapshot: SpotifyQueueSnapshot?
+    @Published private(set) var devices: [SpotifyDevice] = []
+    @Published private(set) var recentlyPlayed: [SpotifyRecentItem] = []
+    @Published private(set) var searchInFlight: Bool = false
+    @Published private(set) var queueInFlight: Bool = false
+    @Published private(set) var devicesInFlight: Bool = false
+    @Published private(set) var recentlyPlayedInFlight: Bool = false
+    /// Set to true once we've seen a 403 on a discovery endpoint that
+    /// requires a scope the user's existing refresh token doesn't have
+    /// (e.g. `user-read-recently-played` added after their original auth).
+    /// UI surfaces a "Reconnect to enable" pill instead of the empty section.
+    @Published private(set) var recentlyPlayedNeedsReauth: Bool = false
+
+    private var searchTask: Task<Void, Never>?
+    private var lastDiscoveryRefresh: [String: Date] = [:]
+    private static let discoveryCacheTTL: TimeInterval = 30
+
     private let connectedKey = "spotify.connected"
     private var notificationTask: Task<Void, Never>?
     private var runningPollTask: Task<Void, Never>?
@@ -550,5 +570,140 @@ final class SpotifyController: ObservableObject {
     private static func fetchArtwork(url: URL) async throws -> Data {
         let (data, _) = try await URLSession.shared.data(from: url)
         return data
+    }
+
+    // MARK: - Discovery (search / queue / devices / recently played)
+
+    /// Debounced live search. Cancels any prior in-flight task. An empty
+    /// query clears results immediately (no network call).
+    func search(_ query: String) async {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            searchResults = []
+            searchInFlight = false
+            return
+        }
+        guard webAPIReady else {
+            searchResults = []
+            return
+        }
+        let task = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            self.searchInFlight = true
+            let results = await SpotifyWebClient.shared.search(trimmed)
+            guard !Task.isCancelled else { return }
+            self.searchResults = results
+            self.searchInFlight = false
+        }
+        searchTask = task
+    }
+
+    /// Play a track URI immediately. Falls back to opening `spotify:track:`
+    /// via NSWorkspace when the Web API isn't authed.
+    @discardableResult
+    func playTrack(uri: String) async -> Bool {
+        guard !uri.isEmpty else { return false }
+        if webAPIReady, await SpotifyWebClient.shared.play(uri: uri) {
+            try? await Task.sleep(for: commandDelay)
+            await refresh()
+            return true
+        }
+        if let url = URL(string: uri) {
+            NSWorkspace.shared.open(url)
+            return true
+        }
+        return false
+    }
+
+    /// Append a track URI to the active device's queue.
+    @discardableResult
+    func addToQueue(uri: String) async -> Bool {
+        guard webAPIReady, !uri.isEmpty else { return false }
+        let ok = await SpotifyWebClient.shared.addToQueue(uri: uri)
+        if ok {
+            // Invalidate the cached queue snapshot so the next read pulls fresh.
+            lastDiscoveryRefresh["queue"] = nil
+        }
+        return ok
+    }
+
+    /// Fetch /me/player/queue and publish. Cached 30s; pass force=true to
+    /// bypass the cache.
+    func refreshQueue(force: Bool = false) async {
+        guard webAPIReady else { return }
+        if !force, let last = lastDiscoveryRefresh["queue"],
+           Date().timeIntervalSince(last) < Self.discoveryCacheTTL {
+            return
+        }
+        queueInFlight = true
+        let snap = await SpotifyWebClient.shared.fetchQueue()
+        queueSnapshot = snap
+        lastDiscoveryRefresh["queue"] = Date()
+        queueInFlight = false
+    }
+
+    /// Fetch /me/player/devices and publish.
+    func refreshDevices(force: Bool = false) async {
+        guard webAPIReady else { return }
+        if !force, let last = lastDiscoveryRefresh["devices"],
+           Date().timeIntervalSince(last) < Self.discoveryCacheTTL {
+            return
+        }
+        devicesInFlight = true
+        devices = await SpotifyWebClient.shared.fetchDevices()
+        lastDiscoveryRefresh["devices"] = Date()
+        devicesInFlight = false
+    }
+
+    /// Fetch /me/player/recently-played and publish. Sets
+    /// `recentlyPlayedNeedsReauth` when Spotify returns no rows AND the
+    /// user is authed — that's the signature of an old token missing the
+    /// `user-read-recently-played` scope (Spotify returns 403 → our
+    /// `apiCall` returns `(false, nil)` → fetch returns []).
+    func refreshRecentlyPlayed(force: Bool = false) async {
+        guard webAPIReady else { return }
+        if !force, let last = lastDiscoveryRefresh["recent"],
+           Date().timeIntervalSince(last) < Self.discoveryCacheTTL {
+            return
+        }
+        recentlyPlayedInFlight = true
+        let rows = await SpotifyWebClient.shared.fetchRecentlyPlayed()
+        recentlyPlayed = rows
+        recentlyPlayedNeedsReauth = rows.isEmpty
+        lastDiscoveryRefresh["recent"] = Date()
+        recentlyPlayedInFlight = false
+    }
+
+    /// Transfer playback to a specific device.
+    @discardableResult
+    func transferPlayback(toDeviceID id: String, play: Bool = true) async -> Bool {
+        guard webAPIReady else { return false }
+        let ok = await SpotifyWebClient.shared.transferPlayback(toDevice: id, play: play)
+        if ok {
+            // Devices change which one is active — invalidate.
+            lastDiscoveryRefresh["devices"] = nil
+            await refreshDevices(force: true)
+        }
+        return ok
+    }
+
+    /// Fuzzy-match a device by name + transfer. Returns the matched device
+    /// name on success, nil on no-match / failure.
+    @discardableResult
+    func transferPlayback(matchingName query: String, play: Bool = true) async -> String? {
+        guard webAPIReady else { return nil }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return nil }
+        await refreshDevices(force: true)
+        let lower = devices.map { ($0, $0.name.lowercased()) }
+        let match: SpotifyDevice? =
+            lower.first(where: { $0.1 == q })?.0
+            ?? lower.first(where: { $0.1.hasPrefix(q) })?.0
+            ?? lower.first(where: { $0.1.contains(q) })?.0
+        guard let device = match else { return nil }
+        let ok = await SpotifyWebClient.shared.transferPlayback(toDevice: device.id, play: play)
+        return ok ? device.name : nil
     }
 }

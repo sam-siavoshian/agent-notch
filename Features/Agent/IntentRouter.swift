@@ -143,15 +143,56 @@ enum SpotifyIntent {
             } summary: { "Repeat \($0)" }
         }
 
-        // Play a named song/artist on Spotify — search via spotify: URL.
-        // "play <query> on spotify"
+        // Play a named song/artist on Spotify. When Web API is authed, search
+        // for the top track and play it directly; fall back to the
+        // `spotify:search:` URL scheme so the user lands in the desktop app.
         if let q = extract(after: "play ", before: " on spotify", in: lower) ??
                    extract(after: "play ", before: " in spotify", in: lower) {
-            let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
-            if let url = URL(string: "spotify:search:\(encoded)") {
-                NSWorkspace.shared.open(url)
-                return .handled(summary: "Spotify search for \(q)", affirmation: "Searching Spotify for \(q).")
-            }
+            return await runOnController { c in
+                if c.webAPIReady {
+                    await c.search(q)
+                    if let top = c.searchResults.first {
+                        if await c.playTrack(uri: top.uri) {
+                            return "Playing \(top.title) by \(top.artist)."
+                        }
+                    }
+                }
+                // Fallback: open the Spotify desktop app on the search results.
+                let encoded = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+                if let url = URL(string: "spotify:search:\(encoded)") {
+                    NSWorkspace.shared.open(url)
+                }
+                return "Searching Spotify for \(q)."
+            } summary: { _ in "Spotify play \(q)" }
+        }
+
+        // "What's next" / "what's in the queue" — read back the first 2-3
+        // queued titles via TTS.
+        if isQueueQuery(lower) {
+            return await runOnController { c in
+                guard c.webAPIReady else { return "Spotify cloud sign-in needed to see the queue." }
+                await c.refreshQueue(force: true)
+                let q = c.queueSnapshot?.queue.prefix(3) ?? []
+                if q.isEmpty { return "Nothing queued up." }
+                let titles = q.map { "\($0.title) by \($0.artist)" }
+                if titles.count == 1 {
+                    return "Up next: \(titles[0])."
+                }
+                let head = titles.dropLast().joined(separator: ", ")
+                let tail = titles.last ?? ""
+                return "Up next: \(head), then \(tail)."
+            } summary: { _ in "Spotify queue readback" }
+        }
+
+        // "Transfer to <device>" / "play on <device>" / "switch to <device>"
+        if let target = parseTransferTarget(lower) {
+            return await runOnController { c in
+                guard c.webAPIReady else { return "Spotify cloud sign-in needed to switch devices." }
+                if let name = await c.transferPlayback(matchingName: target) {
+                    return "Playing on \(name)."
+                }
+                return "Couldn't find a device matching \(target)."
+            } summary: { _ in "Spotify transfer to \(target)" }
         }
 
         // --- Tier 2: Web API (require auth) ---
@@ -276,6 +317,35 @@ enum SpotifyIntent {
         // Strip noise like "playlist" / "my chill playlist" → "my chill"
         let cleaned = q
             .replacingOccurrences(of: " playlist", with: "")
+            .replacingOccurrences(of: " on spotify", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    /// True if the transcript is asking what's next in the queue.
+    private static func isQueueQuery(_ s: String) -> Bool {
+        let cues = [
+            "what's next", "whats next", "what is next",
+            "what's in the queue", "whats in the queue",
+            "what's coming up", "whats coming up",
+            "next up", "queue", "what's queued", "whats queued"
+        ]
+        return cues.contains(where: { s.contains($0) })
+    }
+
+    /// "transfer to <X>" / "switch to <X>" / "play on <X>" / "send to <X>"
+    /// Returns the device-name query, or nil if no trigger fires.
+    private static func parseTransferTarget(_ s: String) -> String? {
+        let triggers = [
+            "transfer to ", "transfer playback to ",
+            "switch to ", "switch playback to ",
+            "play on ", "send to ", "send playback to ",
+            "move to ", "cast to "
+        ]
+        guard let t = triggers.first(where: { s.contains($0) }) else { return nil }
+        guard let q = extract(after: t, in: s) else { return nil }
+        let cleaned = q
+            .replacingOccurrences(of: " device", with: "")
             .replacingOccurrences(of: " on spotify", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return cleaned.isEmpty ? nil : cleaned

@@ -57,6 +57,55 @@ public struct SpotifyPlaybackSnapshot: Sendable {
     public let repeatState: String
 }
 
+/// Track returned from /v1/search?type=track.
+public struct SpotifySearchResult: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let uri: String
+    public let title: String
+    public let artist: String
+    public let album: String
+    public let artworkURL: String?
+    public let durationMs: Int
+}
+
+/// Single item in a /v1/me/player/queue payload.
+public struct SpotifyQueuedTrack: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let uri: String
+    public let title: String
+    public let artist: String
+    public let artworkURL: String?
+}
+
+/// /v1/me/player/queue response.
+public struct SpotifyQueueSnapshot: Sendable {
+    public let currentlyPlaying: SpotifyQueuedTrack?
+    public let queue: [SpotifyQueuedTrack]
+}
+
+/// /v1/me/player/devices row.
+public struct SpotifyDevice: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let type: String
+    public let isActive: Bool
+    public let isPrivateSession: Bool
+    public let volumePercent: Int?
+    public let supportsVolume: Bool
+}
+
+/// One row from /v1/me/player/recently-played.
+public struct SpotifyRecentItem: Identifiable, Hashable, Sendable {
+    /// Composite id `<trackId>:<playedAtISO>` — recently-played can repeat
+    /// the same track within a window, so the track id alone isn't unique.
+    public let id: String
+    public let uri: String
+    public let title: String
+    public let artist: String
+    public let artworkURL: String?
+    public let playedAt: Date
+}
+
 // MARK: - Client
 
 @MainActor
@@ -99,7 +148,8 @@ public final class SpotifyWebClient {
         "playlist-modify-public",
         "user-library-modify",
         "user-library-read",
-        "user-read-currently-playing"
+        "user-read-currently-playing",
+        "user-read-recently-played"
     ]
 
     private static let authBase = "https://accounts.spotify.com"
@@ -333,6 +383,121 @@ public final class SpotifyWebClient {
         )
     }
 
+    // MARK: - Discovery (search / queue / devices / recently played)
+
+    /// GET /search?q=<query>&type=track&limit=<n>. Returns up to `limit` track
+    /// results. Empty / whitespace-only queries short-circuit to an empty array
+    /// so callers can debounce safely.
+    public func search(_ query: String, limit: Int = 8) async -> [SpotifySearchResult] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var comps = URLComponents(string: Self.apiBase + "/search")!
+        comps.queryItems = [
+            URLQueryItem(name: "q", value: trimmed),
+            URLQueryItem(name: "type", value: "track"),
+            URLQueryItem(name: "limit", value: String(max(1, min(limit, 20))))
+        ]
+        guard let url = comps.url else { return [] }
+        let r = await apiCall(method: "GET", urlString: url.absoluteString)
+        guard r.ok, let data = r.data,
+              let page = try? JSONDecoder().decode(SearchPage.self, from: data) else { return [] }
+        return page.tracks.items.map { it in
+            SpotifySearchResult(
+                id: it.id,
+                uri: it.uri,
+                title: it.name,
+                artist: it.artists.first?.name ?? "",
+                album: it.album.name,
+                artworkURL: it.album.images.last?.url ?? it.album.images.first?.url,
+                durationMs: it.duration_ms
+            )
+        }
+    }
+
+    /// GET /me/player/queue. Spotify only returns up to 20 queued items.
+    public func fetchQueue() async -> SpotifyQueueSnapshot? {
+        let url = Self.apiBase + "/me/player/queue"
+        let r = await apiCall(method: "GET", urlString: url)
+        guard r.ok, let data = r.data, !data.isEmpty,
+              let raw = try? JSONDecoder().decode(QueueRaw.self, from: data) else { return nil }
+        let current = raw.currently_playing.flatMap(Self.toQueuedTrack)
+        let queue = raw.queue.compactMap(Self.toQueuedTrack)
+        return SpotifyQueueSnapshot(currentlyPlaying: current, queue: queue)
+    }
+
+    /// POST /me/player/queue?uri=<uri>. Spotify queues on the active device.
+    @discardableResult
+    public func addToQueue(uri: String) async -> Bool {
+        guard let escaped = uri.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return false
+        }
+        let url = Self.apiBase + "/me/player/queue?uri=\(escaped)"
+        return await apiCall(method: "POST", urlString: url).ok
+    }
+
+    /// GET /me/player/devices.
+    public func fetchDevices() async -> [SpotifyDevice] {
+        let url = Self.apiBase + "/me/player/devices"
+        let r = await apiCall(method: "GET", urlString: url)
+        guard r.ok, let data = r.data,
+              let raw = try? JSONDecoder().decode(DevicesRaw.self, from: data) else { return [] }
+        return raw.devices.compactMap { d in
+            guard let id = d.id else { return nil }   // restricted devices have null id
+            return SpotifyDevice(
+                id: id,
+                name: d.name,
+                type: d.type,
+                isActive: d.is_active,
+                isPrivateSession: d.is_private_session ?? false,
+                volumePercent: d.volume_percent,
+                supportsVolume: d.supports_volume ?? true
+            )
+        }
+    }
+
+    /// PUT /me/player. Body: {"device_ids":[id],"play":<bool>}. Transfers
+    /// playback to the given device, keeping playback rolling by default.
+    @discardableResult
+    public func transferPlayback(toDevice id: String, play: Bool = true) async -> Bool {
+        let url = Self.apiBase + "/me/player"
+        let payload: [String: Any] = ["device_ids": [id], "play": play]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        return await apiCall(method: "PUT", urlString: url, body: body,
+                             contentType: "application/json").ok
+    }
+
+    /// PUT /me/player/play. Body: {"uris":["spotify:track:<id>"]}. Starts
+    /// playback of a specific URI on the currently active device.
+    @discardableResult
+    public func play(uri: String) async -> Bool {
+        let url = Self.apiBase + "/me/player/play"
+        let payload: [String: Any] = ["uris": [uri]]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        return await apiCall(method: "PUT", urlString: url, body: body,
+                             contentType: "application/json").ok
+    }
+
+    /// GET /me/player/recently-played?limit=<n>. Returns up to 50.
+    public func fetchRecentlyPlayed(limit: Int = 10) async -> [SpotifyRecentItem] {
+        let bounded = max(1, min(limit, 50))
+        let url = Self.apiBase + "/me/player/recently-played?limit=\(bounded)"
+        let r = await apiCall(method: "GET", urlString: url)
+        guard r.ok, let data = r.data,
+              let raw = try? Self.recentlyPlayedDecoder.decode(RecentlyPlayedPage.self, from: data) else { return [] }
+        return raw.items.compactMap { item in
+            let id = "\(item.track.id):\(item.played_at_raw)"
+            let played = Self.parseISO8601(item.played_at_raw) ?? Date()
+            return SpotifyRecentItem(
+                id: id,
+                uri: item.track.uri,
+                title: item.track.name,
+                artist: item.track.artists.first?.name ?? "",
+                artworkURL: item.track.album.images.last?.url ?? item.track.album.images.first?.url,
+                playedAt: played
+            )
+        }
+    }
+
     // MARK: - Private helpers
 
     /// Single chokepoint for all Web API requests. Auto-refreshes the access
@@ -517,6 +682,93 @@ private struct PlayerRaw: Codable {
     let repeat_state: String
     let item: Item?
     struct Item: Codable { let uri: String }
+}
+
+// MARK: - Discovery Codable shapes
+
+private struct TrackJSON: Codable {
+    let id: String
+    let uri: String
+    let name: String
+    let duration_ms: Int
+    let artists: [ArtistJSON]
+    let album: AlbumJSON
+}
+
+private struct ArtistJSON: Codable {
+    let name: String
+}
+
+private struct AlbumJSON: Codable {
+    let name: String
+    let images: [ImageJSON]
+}
+
+private struct ImageJSON: Codable {
+    let url: String
+}
+
+private struct SearchPage: Codable {
+    let tracks: Tracks
+    struct Tracks: Codable { let items: [TrackJSON] }
+}
+
+private struct QueueRaw: Codable {
+    let currently_playing: TrackJSON?
+    let queue: [TrackJSON]
+}
+
+private struct DevicesRaw: Codable {
+    let devices: [DeviceJSON]
+    struct DeviceJSON: Codable {
+        let id: String?
+        let name: String
+        let type: String
+        let is_active: Bool
+        let is_private_session: Bool?
+        let volume_percent: Int?
+        let supports_volume: Bool?
+    }
+}
+
+private struct RecentlyPlayedPage: Codable {
+    let items: [Item]
+    struct Item: Codable {
+        let track: TrackJSON
+        let played_at_raw: String
+        enum CodingKeys: String, CodingKey {
+            case track
+            case played_at_raw = "played_at"
+        }
+    }
+}
+
+extension SpotifyWebClient {
+    /// Spotify's `recently-played` `played_at` field is an ISO 8601 string
+    /// with fractional seconds (e.g. `2024-01-15T12:34:56.789Z`). The default
+    /// `.iso8601` strategy on JSONDecoder rejects fractional seconds, so we
+    /// store the raw string and parse manually via this formatter chain.
+    fileprivate static let recentlyPlayedDecoder: JSONDecoder = {
+        JSONDecoder()
+    }()
+
+    fileprivate static func parseISO8601(_ s: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: s) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        return iso.date(from: s)
+    }
+
+    fileprivate static func toQueuedTrack(_ t: TrackJSON) -> SpotifyQueuedTrack? {
+        SpotifyQueuedTrack(
+            id: t.id,
+            uri: t.uri,
+            title: t.name,
+            artist: t.artists.first?.name ?? "",
+            artworkURL: t.album.images.last?.url ?? t.album.images.first?.url
+        )
+    }
 }
 
 // MARK: - Loopback callback listener

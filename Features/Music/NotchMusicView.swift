@@ -30,6 +30,14 @@ struct NotchMusicView: View {
     @State private var anchorWall: Date = Date()
     @State private var anchorElapsed: Double = 0
 
+    // Discovery section expand state. Folded by default so the music card
+    // stays compact; each section pulls its data on first expand.
+    @State private var queueExpanded = false
+    @State private var devicesExpanded = false
+    @State private var recentExpanded = false
+    @State private var searchExpanded = false
+    @State private var searchQuery: String = ""
+
     private var trackKey: String { controller.state.title + "|" + controller.state.artist }
 
     var body: some View {
@@ -190,6 +198,154 @@ struct NotchMusicView: View {
             secondaryControlsRow
 
             lyricsPanel
+
+            discoveryStack
+        }
+    }
+
+    /// Power-user collapsible sections (Queue / Devices / Recently Played /
+    /// Search). Visible only when the Web API is authed.
+    @ViewBuilder
+    private var discoveryStack: some View {
+        if controller.webAPIReady {
+            VStack(spacing: 6) {
+                queueSection
+                devicesSection
+                recentSection
+                searchSection
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    // MARK: - Queue
+
+    private var queueSection: some View {
+        DiscoverySection(
+            title: "Up Next",
+            icon: "list.bullet",
+            count: controller.queueSnapshot?.queue.count,
+            expanded: $queueExpanded,
+            inFlight: controller.queueInFlight,
+            onRefresh: { Task { await controller.refreshQueue(force: true) } }
+        ) {
+            let queue = controller.queueSnapshot?.queue ?? []
+            if queue.isEmpty {
+                DiscoveryEmptyRow(text: controller.queueInFlight ? "Loading…" : "Queue is empty")
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(Array(queue.prefix(5))) { item in
+                        QueueRow(track: item)
+                    }
+                    if queue.count > 5 {
+                        DiscoveryEmptyRow(text: "+ \(queue.count - 5) more in queue")
+                    }
+                }
+            }
+        }
+        .onChange(of: queueExpanded) { _, expanded in
+            if expanded { Task { await controller.refreshQueue() } }
+        }
+    }
+
+    // MARK: - Devices
+
+    private var devicesSection: some View {
+        DiscoverySection(
+            title: "Devices",
+            icon: "hifispeaker.2.fill",
+            count: controller.devices.count > 0 ? controller.devices.count : nil,
+            expanded: $devicesExpanded,
+            inFlight: controller.devicesInFlight,
+            onRefresh: { Task { await controller.refreshDevices(force: true) } }
+        ) {
+            if controller.devices.isEmpty {
+                DiscoveryEmptyRow(text: controller.devicesInFlight ? "Loading…" : "No devices found")
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(controller.devices) { device in
+                        DeviceRow(device: device) {
+                            Task { await controller.transferPlayback(toDeviceID: device.id) }
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: devicesExpanded) { _, expanded in
+            if expanded { Task { await controller.refreshDevices() } }
+        }
+    }
+
+    // MARK: - Recently Played
+
+    private var recentSection: some View {
+        DiscoverySection(
+            title: "Recently Played",
+            icon: "clock.arrow.circlepath",
+            count: controller.recentlyPlayed.count > 0 ? controller.recentlyPlayed.count : nil,
+            expanded: $recentExpanded,
+            inFlight: controller.recentlyPlayedInFlight,
+            onRefresh: { Task { await controller.refreshRecentlyPlayed(force: true) } }
+        ) {
+            if controller.recentlyPlayed.isEmpty {
+                if controller.recentlyPlayedNeedsReauth && !controller.recentlyPlayedInFlight {
+                    ReconnectPrompt {
+                        Task { _ = await controller.authenticateWebAPI() }
+                    }
+                } else {
+                    DiscoveryEmptyRow(text: controller.recentlyPlayedInFlight ? "Loading…" : "Nothing to show yet")
+                }
+            } else {
+                VStack(spacing: 2) {
+                    ForEach(Array(controller.recentlyPlayed.prefix(10))) { item in
+                        RecentRow(item: item) {
+                            Task { await controller.playTrack(uri: item.uri) }
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: recentExpanded) { _, expanded in
+            if expanded { Task { await controller.refreshRecentlyPlayed() } }
+        }
+    }
+
+    // MARK: - Search
+
+    private var searchSection: some View {
+        DiscoverySection(
+            title: "Search",
+            icon: "magnifyingglass",
+            count: nil,
+            expanded: $searchExpanded,
+            inFlight: controller.searchInFlight,
+            onRefresh: nil
+        ) {
+            VStack(spacing: 4) {
+                SearchPillField(text: $searchQuery)
+                if !searchQuery.isEmpty {
+                    if controller.searchResults.isEmpty && !controller.searchInFlight {
+                        DiscoveryEmptyRow(text: "No results")
+                    } else {
+                        VStack(spacing: 2) {
+                            ForEach(controller.searchResults) { result in
+                                SearchResultRow(result: result,
+                                                onPlay: { Task {
+                                                    await controller.playTrack(uri: result.uri)
+                                                    searchQuery = ""
+                                                    searchExpanded = false
+                                                } },
+                                                onQueue: { Task {
+                                                    _ = await controller.addToQueue(uri: result.uri)
+                                                } })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .onChange(of: searchQuery) { _, q in
+            Task { await controller.search(q) }
         }
     }
 
@@ -790,5 +946,363 @@ private struct ConnectCloudPill: View {
         .onHover { hovered = $0 }
         .animation(.easeOut(duration: 0.14), value: hovered)
         .help("Sign in to Spotify for Like + Add-to-Playlist + 3-state repeat")
+    }
+}
+
+// MARK: - DiscoverySection (reusable collapsible header + body)
+
+private struct DiscoverySection<Content: View>: View {
+    let title: String
+    let icon: String
+    let count: Int?
+    @Binding var expanded: Bool
+    let inFlight: Bool
+    let onRefresh: (() -> Void)?
+    @ViewBuilder var content: () -> Content
+
+    @State private var hovered = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            header
+            if expanded {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: expanded)
+    }
+
+    private var header: some View {
+        Button {
+            expanded.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(SoftPill.Text.muted)
+                    .frame(width: 12)
+                Text(title)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(SoftPill.Text.secondary)
+                if let count, count > 0 {
+                    Text("·  \(count)")
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(SoftPill.Text.muted)
+                }
+                Spacer(minLength: 0)
+                if inFlight {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.55)
+                        .frame(width: 10, height: 10)
+                }
+                if let onRefresh, expanded {
+                    Button {
+                        onRefresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(SoftPill.Text.muted)
+                            .frame(width: 12, height: 12)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Refresh")
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(SoftPill.Text.muted)
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(hovered ? SoftPill.Surface.hover : SoftPill.Surface.inset.opacity(0.45))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
+private struct DiscoveryEmptyRow: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9.5))
+            .foregroundStyle(SoftPill.Text.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
+    }
+}
+
+private struct DiscoveryArtwork: View {
+    let url: String?
+    var size: CGFloat = 22
+
+    var body: some View {
+        Group {
+            if let s = url, let u = URL(string: s) {
+                AsyncImage(url: u) { phase in
+                    if let img = phase.image {
+                        img.resizable()
+                    } else {
+                        Rectangle().fill(SoftPill.Surface.inset)
+                    }
+                }
+            } else {
+                Rectangle().fill(SoftPill.Surface.inset)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(Color.white.opacity(0.05), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Row variants
+
+private struct QueueRow: View {
+    let track: SpotifyQueuedTrack
+
+    var body: some View {
+        HStack(spacing: 8) {
+            DiscoveryArtwork(url: track.artworkURL, size: 20)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(track.title)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(SoftPill.Text.primary)
+                    .lineLimit(1)
+                Text(track.artist)
+                    .font(.system(size: 9))
+                    .foregroundStyle(SoftPill.Text.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 3)
+    }
+}
+
+private struct DeviceRow: View {
+    let device: SpotifyDevice
+    let onTap: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                Image(systemName: iconName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(device.isActive
+                                     ? Color(red: 0.114, green: 0.725, blue: 0.329)
+                                     : SoftPill.Text.muted)
+                    .frame(width: 14)
+                Text(device.name)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(SoftPill.Text.primary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if device.isActive {
+                    Circle()
+                        .fill(Color(red: 0.114, green: 0.725, blue: 0.329))
+                        .frame(width: 5, height: 5)
+                        .shadow(color: Color(red: 0.114, green: 0.725, blue: 0.329).opacity(0.6), radius: 2)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(hovered ? SoftPill.Surface.hover : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .disabled(device.isActive)
+        .help(device.isActive ? "Active device" : "Transfer playback to \(device.name)")
+    }
+
+    private var iconName: String {
+        switch device.type.lowercased() {
+        case "computer":            return "laptopcomputer"
+        case "smartphone":          return "iphone"
+        case "tablet":              return "ipad"
+        case "speaker", "avr":      return "hifispeaker.fill"
+        case "tv":                  return "tv"
+        case "automobile":          return "car.fill"
+        case "stb":                 return "appletv.fill"
+        case "audiodongle":         return "wave.3.right"
+        case "gameconsole":         return "gamecontroller.fill"
+        case "castaudio", "castvideo": return "airplayaudio"
+        default:                    return "hifispeaker.2.fill"
+        }
+    }
+}
+
+private struct RecentRow: View {
+    let item: SpotifyRecentItem
+    let onTap: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 8) {
+                DiscoveryArtwork(url: item.artworkURL, size: 20)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(item.title)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(SoftPill.Text.primary)
+                        .lineLimit(1)
+                    Text(item.artist)
+                        .font(.system(size: 9))
+                        .foregroundStyle(SoftPill.Text.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text(Self.relative.localizedString(for: item.playedAt, relativeTo: Date()))
+                    .font(.system(size: 8.5, design: .monospaced))
+                    .foregroundStyle(SoftPill.Text.muted)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(hovered ? SoftPill.Surface.hover : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help("Play \(item.title)")
+    }
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+}
+
+private struct SearchPillField: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(SoftPill.Text.muted)
+            TextField("Search Spotify…", text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(SoftPill.Text.primary)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(SoftPill.Text.muted)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(SoftPill.Surface.inset)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 0.5)
+                )
+        )
+    }
+}
+
+private struct SearchResultRow: View {
+    let result: SpotifySearchResult
+    let onPlay: () -> Void
+    let onQueue: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            DiscoveryArtwork(url: result.artworkURL, size: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(result.title)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(SoftPill.Text.primary)
+                    .lineLimit(1)
+                Text(result.artist)
+                    .font(.system(size: 9))
+                    .foregroundStyle(SoftPill.Text.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            if hovered {
+                Button(action: onQueue) {
+                    Image(systemName: "text.badge.plus")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(SoftPill.Text.muted)
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.plain)
+                .help("Add to queue")
+                Button(action: onPlay) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Color(red: 0.114, green: 0.725, blue: 0.329))
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.plain)
+                .help("Play now")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(hovered ? SoftPill.Surface.hover : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onPlay)
+        .onHover { hovered = $0 }
+    }
+}
+
+private struct ReconnectPrompt: View {
+    let onTap: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Reconnect Spotify to enable")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(Color(red: 0.114, green: 0.725, blue: 0.329))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color(red: 0.114, green: 0.725, blue: 0.329).opacity(hovered ? 0.18 : 0.10))
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
     }
 }
