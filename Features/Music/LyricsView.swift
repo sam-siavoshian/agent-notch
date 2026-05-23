@@ -41,9 +41,13 @@ struct LyricsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipped()
             .mask(fadeMask)
         }
         .frame(height: lineHeight * CGFloat(visibleHalf * 2 + 1) + 16)
+        .clipped()
+        .contentShape(Rectangle())
         .opacity(isPlaying ? 1.0 : 0.6)
         .animation(.easeOut(duration: 0.18), value: isPlaying)
     }

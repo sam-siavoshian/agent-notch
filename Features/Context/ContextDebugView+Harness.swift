@@ -223,6 +223,7 @@ struct ContextDebugHarnessPane: View {
                         .textSelection(.enabled)
                 }
                 metaRow("cache_creation_input_tokens", "\(turn.cacheCreationInputTokens ?? 0)")
+                metaRow("cache_hit_ratio", Self.cacheHitRatioString(turn))
                 if !turn.toolCalls.isEmpty {
                     Divider().padding(.vertical, 2)
                     Text("Tool calls (\(turn.toolCalls.count))")
@@ -254,6 +255,18 @@ struct ContextDebugHarnessPane: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// cache_read / (cache_read + cache_creation + uncached input).
+    /// 0.65+ on turn 3 confirms the rolling-breakpoint strategy is working.
+    static func cacheHitRatioString(_ turn: HarnessTurnRecord) -> String {
+        let read = Double(turn.cacheReadInputTokens ?? 0)
+        let create = Double(turn.cacheCreationInputTokens ?? 0)
+        let input = Double(turn.inputTokens ?? 0)
+        let denom = read + create + input
+        guard denom > 0 else { return "—" }
+        let pct = (read / denom) * 100
+        return String(format: "%.1f%% (%.0f / %.0f)", pct, read, denom)
     }
 
     private func cacheBadge(_ turn: HarnessTurnRecord) -> some View {

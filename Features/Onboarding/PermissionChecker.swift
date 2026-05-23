@@ -44,6 +44,14 @@ public final class PermissionChecker: ObservableObject {
         .inputMonitoring: .unknown
     ]
 
+    /// Whether the `claude` CLI is installed and discoverable. Not a TCC
+    /// permission — refreshed lazily (every 10s, not every 0.5s like TCC
+    /// statuses) because a CLI install state changes on the order of
+    /// minutes, not milliseconds. nil = not yet checked.
+    @Published public private(set) var claudeCodeInstalled: Bool? = nil
+
+    private var lastClaudeCheck: Date?
+
     public var allGranted: Bool {
         statuses.values.allSatisfy { $0 == .granted }
     }
@@ -89,12 +97,36 @@ public final class PermissionChecker: ObservableObject {
     }
 
     public func refresh() {
-        statuses = [
+        let newStatuses: [PermissionID: Status] = [
             .accessibility: checkAccessibility(),
             .screenRecording: checkScreenRecording(),
             .microphone: checkMicrophone(),
             .inputMonitoring: checkInputMonitoring()
         ]
+        // Skip the assign-and-notify if nothing changed. Without this guard,
+        // every tick (2× per second) fires objectWillChange and re-renders
+        // every SwiftUI view observing this checker.
+        if newStatuses != statuses {
+            statuses = newStatuses
+        }
+        refreshClaudeCodeInstallIfDue()
+    }
+
+    /// Stats the candidate install paths at most every 10 seconds. A CLI
+    /// install state doesn't change faster than that, and the file-stat
+    /// budget on the 0.5s polling loop would otherwise be wasted.
+    private func refreshClaudeCodeInstallIfDue() {
+        let now = Date()
+        if let last = lastClaudeCheck, now.timeIntervalSince(last) < 10 {
+            return
+        }
+        lastClaudeCheck = now
+        let installed = ClaudeBinaryResolver.resolve(
+            override: AgentSettingsStore.shared.claudeCodePath
+        ) != nil
+        if installed != claudeCodeInstalled {
+            claudeCodeInstalled = installed
+        }
     }
 
     // MARK: - Requests

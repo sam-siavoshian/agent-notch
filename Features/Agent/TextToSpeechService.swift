@@ -54,6 +54,17 @@ final class TextToSpeechService {
     func speak(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Local Piper path bypasses the OpenAI HTTP pipeline entirely.
+        // Switching mid-utterance: stop our HTTP stream so the two
+        // playback paths don't talk over each other.
+        if AgentSettingsStore.shared.settings.ttsVoice.isLocal {
+            currentTask?.cancel()
+            currentTask = nil
+            playerNode.stop()
+            PiperTTSEngine.shared.speak(trimmed)
+            return
+        }
+        PiperTTSEngine.shared.stop()
         currentTask?.cancel()
         playerNode.stop()
         applyOutputDeviceIfChanged()
@@ -66,6 +77,7 @@ final class TextToSpeechService {
         currentTask?.cancel()
         currentTask = nil
         playerNode.stop()
+        PiperTTSEngine.shared.stop()
     }
 
     // MARK: - Streaming

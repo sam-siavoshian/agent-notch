@@ -2,178 +2,150 @@
 //  CursorCompanionView.swift
 //  Agent in the Notch
 //
-//  Soft-pill cursor companion. SF Symbol `cursorarrow` rendered as a
-//  miniature pill surface: top→bottom-trailing gradient body, white
-//  bottom-rim peek for glass-raised dimension, warm tinted halo,
-//  4-layer shadow stack. Listening + thinking states animate without
-//  ever stripping the dimensional treatment.
+//  Two render paths gated by `viewModel.mode`:
+//
+//    .companion — calm soft-pill glass dot beside the real cursor.
+//                 Replaces the old duplicate cursorarrow sprite which read
+//                 as a second pointer competing with the OS arrow. The new
+//                 dot is small (11pt), restrained (2% breathe, 1.10 listen
+//                 pulse), uses a single soft ring + single thinking arc.
+//
+//    .glow      — invisible at rest. While the agent is active (long-press
+//                 or AgentState.activity != .idle) a soft radial glow fades
+//                 in directly under the real cursor and hue-shifts with the
+//                 agent state via SoftPill.activityHue(...). `.plusLighter`
+//                 blend so it warms whatever pixels sit beneath without
+//                 hard-overlaying them.
 //
 
 import SwiftUI
 
 struct CursorCompanionView: View {
     @ObservedObject var viewModel: CursorCompanionViewModel
-    @State private var pulse: CGFloat = 1.0
-    @State private var orbit: Double = 0.0
-    @State private var idleScale: CGFloat = 1.0
-    @State private var idleOpacity: Double = 1.0
-    @State private var haloPhase: CGFloat = 1.0
+    @ObservedObject private var agentState = AgentState.shared
 
-    private static let spriteSize: CGFloat = 17
-    private static let symbol = "cursorarrow"
+    var body: some View {
+        Group {
+            switch viewModel.mode {
+            case .companion: CompanionDot(viewModel: viewModel)
+            case .glow:      CursorGlow(viewModel: viewModel, agentState: agentState)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Companion mode (soft-pill glass dot)
+
+private struct CompanionDot: View {
+    @ObservedObject var viewModel: CursorCompanionViewModel
+
+    @State private var listenPulse: CGFloat = 1.0
+    @State private var thinkPhase: Double = 0.0
+
+    private static let dotSize: CGFloat = 11
+    private static let ringRadius: CGFloat = 14
 
     private var isIdle: Bool { !viewModel.isListening && !viewModel.isThinking }
 
     var body: some View {
         ZStack {
-            groundShadow
-            ambientHalo
             listeningRing
-            cursorBody
-                .scaleEffect(viewModel.isListening ? pulse : idleScale)
-                .opacity(isIdle ? idleOpacity : 1.0)
-            thinkingOrbit
+            thinkingArc
+            dotBody
+                .scaleEffect(viewModel.isListening ? listenPulse : 1.0)
         }
-        .frame(width: Self.spriteSize * 2.8, height: Self.spriteSize * 2.8)
-        .onAppear { startIdleAnimations() }
+        .frame(width: Self.dotSize * 4, height: Self.dotSize * 4)
         .onChange(of: viewModel.isListening) { _, listening in
             if listening {
-                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                    pulse = 1.22
-                    haloPhase = 1.25
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                    listenPulse = 1.10
                 }
             } else {
-                // Kill the active repeatForever transaction first, then
-                // ease back to rest. Without the nil-animation reset the
-                // pulse keeps oscillating after the task ends.
                 var tx = Transaction(animation: nil)
                 tx.disablesAnimations = true
-                withTransaction(tx) {
-                    pulse = 1.0
-                    haloPhase = 1.0
-                }
-                withAnimation(.easeOut(duration: 0.25)) {
-                    pulse = 1.0
-                    haloPhase = 1.0
-                }
+                withTransaction(tx) { listenPulse = 1.0 }
+                withAnimation(.easeOut(duration: 0.25)) { listenPulse = 1.0 }
             }
         }
         .onChange(of: viewModel.isThinking) { _, thinking in
             if thinking {
-                withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) {
-                    orbit = 360
+                withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) {
+                    thinkPhase = 360
                 }
             } else {
                 var tx = Transaction(animation: nil)
                 tx.disablesAnimations = true
-                withTransaction(tx) { orbit = 0 }
+                withTransaction(tx) { thinkPhase = 0 }
             }
         }
-        .allowsHitTesting(false)
     }
 
-    // MARK: layers
+    private var dotBody: some View {
+        let gradient = RadialGradient(
+            colors: [softPillLight, softPillMid, softPillDeep.opacity(0.0)],
+            center: UnitPoint(x: 0.38, y: 0.34),
+            startRadius: 0,
+            endRadius: Self.dotSize * 0.7
+        )
+        let glowOpacity: Double = viewModel.isListening ? 0.55 : 0.35
+        let glowRadius: CGFloat = viewModel.isListening ? 8 : 5
+        let restOpacity: Double = isIdle ? 0.95 : 1.0
 
-    private var groundShadow: some View {
-        Ellipse()
-            .fill(Color.black.opacity(0.14))
-            .frame(width: Self.spriteSize * 0.75, height: Self.spriteSize * 0.30)
-            .blur(radius: 4)
-            .offset(y: Self.spriteSize * 0.65)
+        return Circle()
+            .fill(gradient)
+            .overlay(innerHighlight)
+            .frame(width: Self.dotSize, height: Self.dotSize)
+            .shadow(color: Color.black.opacity(0.22), radius: 1.5, x: 0, y: 0.8)
+            .shadow(color: softPillMid.opacity(glowOpacity), radius: glowRadius, x: 0, y: 0)
+            .opacity(restOpacity)
     }
 
-    private var ambientHalo: some View {
+    // Single warm inner highlight (top-left light leak) — sells the
+    // soft-pill dimensional feel without the old 4-layer SF-Symbol stack.
+    private var innerHighlight: some View {
         Circle()
-            .fill(
-                RadialGradient(
-                    colors: [
-                        softPillColor.opacity(0.34),
-                        softPillColor.opacity(0.0)
-                    ],
-                    center: .center,
-                    startRadius: 1,
-                    endRadius: Self.spriteSize * 1.25
-                )
-            )
-            .frame(width: Self.spriteSize * 2.6, height: Self.spriteSize * 2.6)
-            .scaleEffect(viewModel.isListening ? haloPhase : 1.0)
-            .opacity(viewModel.isListening ? 1.0 : (isIdle ? 0.55 : 0.78))
+            .fill(Color.white.opacity(0.55))
+            .frame(width: Self.dotSize * 0.42, height: Self.dotSize * 0.42)
+            .blur(radius: 1.6)
+            .offset(x: -Self.dotSize * 0.18, y: -Self.dotSize * 0.20)
+            .blendMode(.plusLighter)
     }
 
     @ViewBuilder
     private var listeningRing: some View {
         if viewModel.isListening {
             Circle()
-                .stroke(Color.white.opacity(0.55), lineWidth: 1.4)
-                .frame(width: Self.spriteSize * 1.55 * pulse, height: Self.spriteSize * 1.55 * pulse)
-                .blur(radius: 0.4)
-                .shadow(color: softPillColor.opacity(0.5), radius: 6)
+                .stroke(Color.white.opacity(0.45), lineWidth: 0.8)
+                .frame(width: Self.ringRadius * 2 * listenPulse,
+                       height: Self.ringRadius * 2 * listenPulse)
+                .blur(radius: 0.3)
+                .shadow(color: softPillMid.opacity(0.45), radius: 5)
+                .opacity(2.2 - Double(listenPulse))   // 1.20 at rest pulse → 1.0 at peak
         }
-    }
-
-    /// Cursor body. Three layered SF Symbol passes:
-    ///   1. White rim peeking offset down-right (glass raised edge).
-    ///   2. Main gradient body (light→saturated, top-left to bottom-right).
-    ///   3. Top-left white gleam (inner highlight).
-    /// Wrapped in 4-layer soft-pill shadow stack + warm tinted glow.
-    private var cursorBody: some View {
-        ZStack {
-            Image(systemName: Self.symbol)
-                .font(.system(size: Self.spriteSize, weight: .black))
-                .foregroundStyle(Color.white.opacity(0.85))
-                .offset(x: 0.6, y: 0.9)
-                .blur(radius: 0.35)
-
-            Image(systemName: Self.symbol)
-                .font(.system(size: Self.spriteSize, weight: .black))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [softPillColorLight, softPillColor, softPillColorDeep],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            Image(systemName: Self.symbol)
-                .font(.system(size: Self.spriteSize, weight: .black))
-                .foregroundStyle(Color.white.opacity(0.45))
-                .offset(x: -0.45, y: -0.55)
-                .blur(radius: 0.25)
-                .blendMode(.plusLighter)
-                .mask(
-                    Image(systemName: Self.symbol)
-                        .font(.system(size: Self.spriteSize, weight: .black))
-                )
-        }
-        // 4-layer soft-pill shadow recipe
-        .shadow(color: Color.black.opacity(0.10), radius: 0.5, x: 0, y: 0.3)
-        .shadow(color: Color.black.opacity(0.18), radius: 3, x: 0, y: 2)
-        .shadow(color: Color.black.opacity(0.10), radius: 8, x: 0, y: 5)
-        .shadow(color: softPillColor.opacity(viewModel.isListening ? 0.75 : 0.45),
-                radius: viewModel.isListening ? 10 : 6, x: 0, y: 0)
     }
 
     @ViewBuilder
-    private var thinkingOrbit: some View {
+    private var thinkingArc: some View {
         if viewModel.isThinking {
-            ZStack {
-                ForEach(0..<3, id: \.self) { i in
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: 3.2 - CGFloat(i) * 0.7, height: 3.2 - CGFloat(i) * 0.7)
-                        .opacity(1.0 - Double(i) * 0.32)
-                        .offset(y: -Self.spriteSize * 0.95)
-                        .rotationEffect(.degrees(orbit - Double(i) * 30))
-                        .shadow(color: softPillColor.opacity(0.75), radius: 2.5)
-                }
-            }
+            Circle()
+                .trim(from: 0.72, to: 1.0)
+                .stroke(
+                    AngularGradient(
+                        colors: [softPillMid.opacity(0.0), softPillMid.opacity(0.85)],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
+                )
+                .frame(width: Self.ringRadius * 2, height: Self.ringRadius * 2)
+                .rotationEffect(.degrees(thinkPhase))
+                .shadow(color: softPillMid.opacity(0.55), radius: 3)
         }
     }
 
-    // MARK: palette
+    // MARK: palette — picks the user's chosen swatch (Sam's original spec)
 
-    /// Wyatt's CursorColor → soft-pill pastel palette (mid tone).
-    private var softPillColor: Color {
+    private var softPillMid: Color {
         switch viewModel.color {
         case .red:    return Color(red: 0.953, green: 0.478, blue: 0.478) // #F37A7A
         case .blue:   return Color(red: 0.357, green: 0.486, blue: 0.980) // #5B7CFA
@@ -182,18 +154,16 @@ struct CursorCompanionView: View {
         }
     }
 
-    /// Lighter (mixed ~35% white) for gradient top stop.
-    private var softPillColorLight: Color {
+    private var softPillLight: Color {
         switch viewModel.color {
         case .red:    return Color(red: 0.985, green: 0.700, blue: 0.700)
-        case .blue:   return Color(red: 0.610, green: 0.685, blue: 0.992)
-        case .green:  return Color(red: 0.700, green: 0.905, blue: 0.760)
-        case .yellow: return Color(red: 0.985, green: 0.840, blue: 0.520)
+        case .blue:   return Color(red: 0.640, green: 0.715, blue: 0.992)
+        case .green:  return Color(red: 0.730, green: 0.920, blue: 0.780)
+        case .yellow: return Color(red: 0.992, green: 0.860, blue: 0.560)
         }
     }
 
-    /// Slightly deeper (mixed ~18% black) for gradient bottom stop.
-    private var softPillColorDeep: Color {
+    private var softPillDeep: Color {
         switch viewModel.color {
         case .red:    return Color(red: 0.780, green: 0.380, blue: 0.380)
         case .blue:   return Color(red: 0.280, green: 0.385, blue: 0.820)
@@ -201,13 +171,80 @@ struct CursorCompanionView: View {
         case .yellow: return Color(red: 0.820, green: 0.605, blue: 0.215)
         }
     }
+}
 
-    private func startIdleAnimations() {
-        withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
-            idleScale = 1.04
+// MARK: - Glow mode (radial halo under cursor while agent is active)
+
+private struct CursorGlow: View {
+    @ObservedObject var viewModel: CursorCompanionViewModel
+    @ObservedObject var agentState: AgentState
+
+    @State private var renderedOpacity: Double = 0.0
+
+    private static let glowDiameter: CGFloat = 100
+    private static let pressAnchorSize: CGFloat = 3
+
+    /// Glow is visible while the user is holding (isListening) OR while the
+    /// agent is doing visible work after the press. Once the agent returns
+    /// to idle the glow fades out even if the user is still holding — that
+    /// matches the user mental model of "the agent is busy → glow on."
+    private var shouldRender: Bool {
+        if viewModel.isListening { return true }
+        switch agentState.activity {
+        case .idle: return false
+        default:    return true
         }
-        withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
-            idleOpacity = 0.82
+    }
+
+    private var hue: Color { SoftPill.activityHue(agentState.activity) }
+
+    var body: some View {
+        ZStack {
+            // Soft radial halo. `.plusLighter` blends with whatever sits
+            // beneath the cursor so the effect feels like light leaking onto
+            // the desktop rather than an opaque sticker laid over it.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [hue.opacity(0.55), hue.opacity(0.0)],
+                        center: .center,
+                        startRadius: 0,
+                        endRadius: Self.glowDiameter / 2
+                    )
+                )
+                .frame(width: Self.glowDiameter, height: Self.glowDiameter)
+                .blur(radius: 12)
+                .blendMode(.plusLighter)
+
+            // Tight center anchor pinned to the press point. Only when the
+            // user is physically holding — gives the soft glow a hard "you
+            // clicked here" focal point so the press location does not feel
+            // ambiguous.
+            if viewModel.isListening {
+                Circle()
+                    .fill(hue)
+                    .frame(width: Self.pressAnchorSize, height: Self.pressAnchorSize)
+                    .shadow(color: hue.opacity(0.7), radius: 2)
+            }
+        }
+        .opacity(renderedOpacity)
+        .onAppear { syncOpacity(animated: false) }
+        .onChange(of: shouldRender) { _, _ in syncOpacity(animated: true) }
+        .onChange(of: viewModel.mode) { _, _ in syncOpacity(animated: false) }
+    }
+
+    private func syncOpacity(animated: Bool) {
+        let target: Double = shouldRender ? 1.0 : 0.0
+        if animated {
+            let duration = shouldRender ? 0.22 : 0.32
+            let curve: Animation = shouldRender
+                ? .easeOut(duration: duration)
+                : .easeIn(duration: duration)
+            withAnimation(curve) { renderedOpacity = target }
+        } else {
+            var tx = Transaction(animation: nil)
+            tx.disablesAnimations = true
+            withTransaction(tx) { renderedOpacity = target }
         }
     }
 }

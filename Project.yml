@@ -25,17 +25,65 @@ configFiles:
   Release: Local.xcconfig
 
 targets:
+  AgentNotchMCP:
+    type: tool
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Helpers/AgentNotchMCP
+    settings:
+      base:
+        PRODUCT_NAME: AgentNotchMCP
+        SKIP_INSTALL: NO
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+
   AgentNotch:
     type: application
     platform: macOS
     deploymentTarget: "14.0"
+    dependencies:
+      - target: AgentNotchMCP
+        link: false
+        embed: false
+    postCompileScripts:
+      - name: "Embed AgentNotchMCP helper"
+        script: |
+          set -euo pipefail
+          if [ -z "${BUILT_PRODUCTS_DIR:-}" ] || [ -z "${TARGET_BUILD_DIR:-}" ] || [ -z "${EXECUTABLE_FOLDER_PATH:-}" ]; then
+            echo "missing build env vars" >&2
+            exit 1
+          fi
+          src="$BUILT_PRODUCTS_DIR/AgentNotchMCP"
+          dst="$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AgentNotchMCP"
+          if [ ! -f "$src" ]; then
+            echo "AgentNotchMCP helper not built at $src" >&2
+            exit 1
+          fi
+          /bin/mkdir -p "$(dirname "$dst")"
+          /bin/cp -f "$src" "$dst"
+          /bin/chmod +x "$dst"
+        inputFiles:
+          - $(BUILT_PRODUCTS_DIR)/AgentNotchMCP
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/AgentNotchMCP
     sources:
       - path: App
         excludes:
           - "Info.plist"
           - "AgentNotch.entitlements"
+          # Finder-style "Foo 2.swift" / "Foo 3.swift" duplicates left over
+          # from cherry-pick merges redefine the same types as Foo.swift and
+          # ambiguate every cross-file reference. Exclude across all source
+          # roots so xcodegen never picks them up.
+          - "**/* [0-9].swift"
       - path: Core
+        excludes:
+          - "**/* [0-9].swift"
       - path: Features
+        excludes:
+          - "**/* [0-9].swift"
       - path: .env
         buildPhase: resources
         optional: true

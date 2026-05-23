@@ -33,16 +33,19 @@ public enum L2Snapshotter {
     /// `overallDeadline` parameter is informational — the actual ceiling comes
     /// from the per-component deadlines below.
     ///
-    /// Returns both the CL2Snapshot (text payload) AND the raw JPEG bytes of
-    /// the screenshot used for OCR. The JPEG is kept OUT of CL2Snapshot to
-    /// avoid bloating the Mercury 2 (text-only) selector prompt by hundreds
-    /// of KB — callers that want the image (e.g. AgentSession passing the
-    /// initiation screenshot through to Claude) read it from the tuple.
+    /// Returns the CL2Snapshot (text payload), the JPEG bytes of the screenshot
+    /// (already center-cropped + scaled to WXGA 1280x800 so the harness can
+    /// attach it to message[0] without re-encoding), and the CoordTransform the
+    /// harness needs to invert click coordinates back to logical-point space.
+    ///
+    /// The JPEG is kept OUT of CL2Snapshot to avoid bloating the Mercury 2
+    /// (text-only) selector prompt by hundreds of KB. OCR runs on the FULL-RES
+    /// raw image internally so small UI text stays legible.
     ///
     /// There is no per-long-press vision call — the continuous GeminiObserver
     /// is the only vision path; its accumulated SurfaceMemoryStore feeds
     /// Mercury via the `learned_surfaces` payload field.
-    public static func snapshot(overallDeadline: TimeInterval = 0.4) async -> (l2: CL2Snapshot, screenshotJPEG: Data?) {
+    public static func snapshot(overallDeadline: TimeInterval = 0.4) async -> (l2: CL2Snapshot, screenshotJPEG: Data?, transform: ScreenCapture.CoordTransform?) {
         _ = overallDeadline // reserved for future use (e.g. Dev Tools timing assertions)
 
         // Frontmost app
@@ -61,6 +64,7 @@ public enum L2Snapshotter {
         let capture = await captureTask
         let ocrLines = capture.ocrLines
         let screenshotJPEG = capture.jpegData
+        let transform = capture.transform
 
         let axElements = await axElementsTask
         let appSpecific = await appSpecificTask
@@ -86,7 +90,7 @@ public enum L2Snapshotter {
             clipboard: clipboard,
             appSpecific: appSpecific
         )
-        return (l2: l2, screenshotJPEG: screenshotJPEG)
+        return (l2: l2, screenshotJPEG: screenshotJPEG, transform: transform)
     }
 
     // MARK: - Window + display
@@ -120,14 +124,22 @@ public enum L2Snapshotter {
 
     // MARK: - Screenshot + OCR
 
-    /// Bundle returned from `captureScreenshotAndOCR`: the OCR text and the
-    /// JPEG bytes from the same capture. JPEG is the downsampled (≤1568 long
-    /// edge) version because that's what Anthropic auto-downsamples to anyway
-    /// — sending the full-res image just costs upload time.
+    /// Bundle returned from `captureScreenshotAndOCR`: the OCR text plus the
+    /// JPEG bytes of the same capture pre-sized to the computer-use harness's
+    /// `agentDisplaySize` (1280x800 WXGA). The `transform` describes the
+    /// crop+scale applied so the harness can invert future click coordinates
+    /// back to logical-point space.
     private struct CaptureResult: Sendable {
         let ocrLines: [String]
         let jpegData: Data?
+        let transform: ScreenCapture.CoordTransform?
     }
+
+    /// WXGA target the harness pins for the model's coordinate space.
+    /// Kept here so L2 ships a JPEG that exactly matches what
+    /// `ToolDispatcher.computer.screenshot` will emit on subsequent turns —
+    /// turn-1 clicks then land on-target without any extra round-trip.
+    private static let harnessTargetSize = CGSize(width: 1280, height: 800)
 
     /// Race the real screenshot+OCR pipeline against a wall-clock deadline.
     /// Whichever finishes first wins; the other task is cancelled.
@@ -138,35 +150,41 @@ public enum L2Snapshotter {
             }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(deadline * 1_000_000_000))
-                return CaptureResult(ocrLines: [], jpegData: nil)
+                return CaptureResult(ocrLines: [], jpegData: nil, transform: nil)
             }
-            let result = await group.next() ?? CaptureResult(ocrLines: [], jpegData: nil)
+            let result = await group.next() ?? CaptureResult(ocrLines: [], jpegData: nil, transform: nil)
             group.cancelAll()
             return result
         }
     }
 
     /// Bridge to the existing ScreenCapture + ContextOCRService stack.
-    /// One screenshot serves two purposes: full-res raw image for OCR (small
-    /// UI text stays legible) and a downsampled JPEG for the multimodal
-    /// model. ScreenCapture returns both in a single Snapshot.
+    /// One screenshot serves two purposes:
+    ///   - full-res raw image for OCR (small UI text stays legible)
+    ///   - 1280x800 WXGA JPEG for the harness's first user-message image
+    /// Anthropic's computer-use models peak in click accuracy at WXGA, so we
+    /// pre-size on capture; subsequent screenshots from ToolDispatcher use
+    /// the same target.
     private static func invokeCaptureAndOCR() async -> CaptureResult {
         do {
-            // Use the default maxLongEdge (1568) so jpegData is sized for
-            // Anthropic. rawImage is still the full-res capture.
-            let snapshot = try await ScreenCapture.shared.snapshot(
-                displayId: nil,
-                quality: 0.7,
-                maxLongEdge: 1568
+            let snapshot = try await ScreenCapture.shared.targetSnapshot(
+                target: harnessTargetSize
             )
             guard let raw = snapshot.rawImage else {
-                // Shouldn't happen with the SCKit path, but be defensive.
-                return CaptureResult(ocrLines: [], jpegData: snapshot.jpegData)
+                return CaptureResult(
+                    ocrLines: [],
+                    jpegData: snapshot.jpegData,
+                    transform: snapshot.transform
+                )
             }
             let recognized = await ContextOCRService.shared.recognizeText(in: raw, maxResults: 80)
-            return CaptureResult(ocrLines: recognized.map(\.text), jpegData: snapshot.jpegData)
+            return CaptureResult(
+                ocrLines: recognized.map(\.text),
+                jpegData: snapshot.jpegData,
+                transform: snapshot.transform
+            )
         } catch {
-            return CaptureResult(ocrLines: [], jpegData: nil)
+            return CaptureResult(ocrLines: [], jpegData: nil, transform: nil)
         }
     }
 

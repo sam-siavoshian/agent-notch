@@ -11,10 +11,12 @@ import Combine
 @MainActor
 public final class CursorCompanionViewModel: ObservableObject {
     @Published public var color: CursorColor
+    @Published public var mode: CursorMode
     @Published public var isListening: Bool = false
     @Published public var isThinking: Bool = false
 
-    public init(color: CursorColor) {
+    public init(color: CursorColor, mode: CursorMode = .companion) {
         self.color = color
+        self.mode = mode
     }
 }

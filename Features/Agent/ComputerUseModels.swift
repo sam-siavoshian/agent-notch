@@ -15,8 +15,10 @@ public enum AnthropicModel {
 }
 
 /// Anthropic prompt cache marker. Server caches everything up to and including
-/// the block this is attached to. Only the 4 most recent breakpoints count, so
-/// the harness keeps one rolling marker on the latest screenshot.
+/// the block this is attached to. Only the 4 most recent breakpoints count;
+/// the harness uses one on the system block + three rolling on the last
+/// content block of each of the 3 most recent user messages
+/// (see `ComputerUseHarness.injectPromptCaching`).
 public struct CacheControl: Codable, Sendable {
     public var type: String
     public init(type: String = "ephemeral") { self.type = type }
@@ -60,6 +62,9 @@ public struct AnthropicMessageRequest: Codable, Sendable {
     public var tools: [Tool]
     public var toolChoice: ToolChoice?
     public var thinking: ThinkingConfig?
+    /// SSE streaming flag. nil = non-streaming (full response). true = server
+    /// returns text/event-stream — caller must use AnthropicClient.sendStreaming.
+    public var stream: Bool?
 
     public init(
         model: String,
@@ -68,7 +73,8 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         messages: [Message],
         tools: [Tool],
         toolChoice: ToolChoice? = nil,
-        thinking: ThinkingConfig? = nil
+        thinking: ThinkingConfig? = nil,
+        stream: Bool? = nil
     ) {
         self.model = model
         self.maxTokens = maxTokens
@@ -77,6 +83,7 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         self.tools = tools
         self.toolChoice = toolChoice
         self.thinking = thinking
+        self.stream = stream
     }
 
     enum CodingKeys: String, CodingKey {
@@ -87,6 +94,7 @@ public struct AnthropicMessageRequest: Codable, Sendable {
         case tools
         case toolChoice = "tool_choice"
         case thinking
+        case stream
     }
 
     public struct ToolChoice: Codable, Sendable {
@@ -309,6 +317,14 @@ public indirect enum JSON: Codable, Sendable {
     case array([JSON])
     case object([String: JSON])
 
+    /// Round-trip an `Encodable` value through JSON into the enum so callers
+    /// don't reinvent the encoder/decoder dance every time they need to plumb
+    /// an MCP response or tool schema through the in-memory form.
+    public static func from<E: Encodable>(_ value: E) throws -> JSON {
+        let data = try JSONEncoder().encode(value)
+        return try JSONDecoder().decode(JSON.self, from: data)
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null; return }
@@ -352,5 +368,147 @@ public indirect enum JSON: Codable, Sendable {
     }
     public var objectValue: [String: JSON]? {
         if case .object(let v) = self { return v } else { return nil }
+    }
+
+    /// Shared decoder for `parse(_:)`. Reused so we don't allocate one per call
+    /// on hot paths (stream tool-use input reassembly, MCP envelope reads).
+    private static let stringDecoder = JSONDecoder()
+
+    /// Decode a JSON string into a `JSON` value. Throws on malformed input
+    /// (caller decides whether to fall back). Use this everywhere we accept a
+    /// JSON-as-string payload (stream input_json_delta reassembly, MCP wire
+    /// format) so the failure mode is uniform.
+    public static func parse(_ raw: String) throws -> JSON {
+        guard let data = raw.data(using: .utf8) else {
+            throw NSError(
+                domain: "JSON.parse",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "input is not valid UTF-8"]
+            )
+        }
+        return try Self.stringDecoder.decode(JSON.self, from: data)
+    }
+}
+
+// MARK: - Streaming
+
+/// One server-sent event from Anthropic's streaming Messages API. Reference:
+/// https://docs.anthropic.com/en/docs/build-with-claude/streaming
+///
+/// The harness assembles a full `AnthropicMessageResponse` from these as the
+/// stream completes, but exposes the deltas live so TTS can start speaking on
+/// the first `text_delta` instead of waiting for the entire turn.
+public enum StreamEvent: Sendable {
+    /// Initial envelope. `message` carries id/model/role with usage prefilled
+    /// (input_tokens + cache fields) but empty content.
+    case messageStart(message: AnthropicMessageResponse)
+    /// A new content block is opening at this index. The block is the
+    /// "empty shell" (text=""; tool_use with input={}, etc.).
+    case contentBlockStart(index: Int, block: ContentBlock)
+    /// A delta against the content block at `index`. Variants:
+    /// `.text(_)` for text_delta, `.thinking(_)` for thinking_delta,
+    /// `.signature(_)` for signature_delta on a thinking block,
+    /// `.partialJSON(_)` for input_json_delta on a tool_use block.
+    case contentBlockDelta(index: Int, delta: BlockDelta)
+    case contentBlockStop(index: Int)
+    /// End-of-turn metadata. `stopReason` is the final stop_reason; usage's
+    /// `outputTokens` is authoritative (input_tokens was on messageStart).
+    case messageDelta(stopReason: String?, stopSequence: String?, outputTokens: Int?)
+    case messageStop
+    case ping
+    case streamError(type: String, message: String)
+
+    public enum BlockDelta: Sendable {
+        case text(String)
+        case thinking(String)
+        case signature(String)
+        case partialJSON(String)
+    }
+}
+
+/// Parses a single `data: <json>` payload into a `StreamEvent`. The line's
+/// `event:` header is encoded in the payload's `type` field — Anthropic always
+/// duplicates it there — so the parser doesn't need the SSE event name.
+/// Returns nil for unknown payloads (forward-compat with future event types).
+public enum StreamEventDecoder {
+    private static let decoder: JSONDecoder = {
+        let d = JSONDecoder()
+        return d
+    }()
+
+    public static func decode(_ jsonString: String) -> StreamEvent? {
+        guard let data = jsonString.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else {
+            return nil
+        }
+        switch type {
+        case "message_start":
+            guard let msg = obj["message"] as? [String: Any],
+                  let raw = try? JSONSerialization.data(withJSONObject: msg),
+                  let response = try? decoder.decode(AnthropicMessageResponse.self, from: raw) else {
+                return nil
+            }
+            return .messageStart(message: response)
+
+        case "content_block_start":
+            guard let index = obj["index"] as? Int,
+                  let block = obj["content_block"] as? [String: Any],
+                  let raw = try? JSONSerialization.data(withJSONObject: block),
+                  let cb = try? decoder.decode(ContentBlock.self, from: raw) else {
+                return nil
+            }
+            return .contentBlockStart(index: index, block: cb)
+
+        case "content_block_delta":
+            guard let index = obj["index"] as? Int,
+                  let delta = obj["delta"] as? [String: Any],
+                  let dtype = delta["type"] as? String else {
+                return nil
+            }
+            switch dtype {
+            case "text_delta":
+                let s = (delta["text"] as? String) ?? ""
+                return .contentBlockDelta(index: index, delta: .text(s))
+            case "thinking_delta":
+                let s = (delta["thinking"] as? String) ?? ""
+                return .contentBlockDelta(index: index, delta: .thinking(s))
+            case "signature_delta":
+                let s = (delta["signature"] as? String) ?? ""
+                return .contentBlockDelta(index: index, delta: .signature(s))
+            case "input_json_delta":
+                let s = (delta["partial_json"] as? String) ?? ""
+                return .contentBlockDelta(index: index, delta: .partialJSON(s))
+            default:
+                return nil
+            }
+
+        case "content_block_stop":
+            guard let index = obj["index"] as? Int else { return nil }
+            return .contentBlockStop(index: index)
+
+        case "message_delta":
+            let delta = obj["delta"] as? [String: Any]
+            let stopReason = delta?["stop_reason"] as? String
+            let stopSequence = delta?["stop_sequence"] as? String
+            let usage = obj["usage"] as? [String: Any]
+            let outTokens = usage?["output_tokens"] as? Int
+            return .messageDelta(stopReason: stopReason, stopSequence: stopSequence, outputTokens: outTokens)
+
+        case "message_stop":
+            return .messageStop
+
+        case "ping":
+            return .ping
+
+        case "error":
+            let err = obj["error"] as? [String: Any]
+            let etype = (err?["type"] as? String) ?? "unknown"
+            let emsg  = (err?["message"] as? String) ?? ""
+            return .streamError(type: etype, message: emsg)
+
+        default:
+            return nil
+        }
     }
 }

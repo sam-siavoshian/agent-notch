@@ -40,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         VoiceRecordingService.shared.start()
         AgentSession.shared.start()
         KillSwitch.shared.start()
+        // MCP bridge — Unix socket server for the AgentNotchMCP helper that
+        // Claude Code spawns in CC-provider mode. Cheap to leave running in
+        // API-provider mode (no client ever connects).
+        MCPBridge.shared.start()
         // Phase 2 adapters — register so L2Snapshotter can populate `app_specific` for known apps.
         AdapterRegistry.shared.register(BrowserAdapter())
         AdapterRegistry.shared.register(TerminalAdapter())

@@ -13,6 +13,8 @@ struct AgentSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
             cursorColorRow
+            cursorModeRow
+            providerRow
             advancedRow
             killSwitchRow
             quitRow
@@ -64,6 +66,63 @@ struct AgentSettingsView: View {
                     .foregroundStyle(activeSwatch)
                     .shadow(color: activeSwatch.opacity(0.7), radius: 5)
                     .animation(.smooth(duration: 0.25), value: store.cursorColor)
+            }
+        }
+    }
+
+    private var cursorModeRow: some View {
+        SettingRow(title: "Mode") {
+            HStack(spacing: 4) {
+                ToolbarIconButton(
+                    systemImage: "cursorarrow",
+                    label: "Companion",
+                    isActive: store.cursorMode == .companion
+                ) {
+                    store.cursorMode = .companion
+                }
+                ToolbarIconButton(
+                    systemImage: "circle.dotted",
+                    label: "Glow",
+                    isActive: store.cursorMode == .glow
+                ) {
+                    store.cursorMode = .glow
+                }
+            }
+        }
+    }
+
+    /// Toggle between Anthropic API (default) and the user's local
+    /// `claude` CLI as the agent backend. Settings persist; takes effect on
+    /// the next long-press.
+    private var providerRow: some View {
+        SettingRow(title: "Provider") {
+            HStack(spacing: 4) {
+                ToolbarIconButton(
+                    systemImage: "cloud",
+                    label: "Anthropic",
+                    isActive: store.provider == .anthropicAPI
+                ) {
+                    store.provider = .anthropicAPI
+                }
+                ToolbarIconButton(
+                    systemImage: "terminal",
+                    label: "Claude Code",
+                    isActive: store.provider == .claudeCodeCLI
+                ) {
+                    store.provider = .claudeCodeCLI
+                }
+                if store.provider == .claudeCodeCLI,
+                   PermissionChecker.shared.claudeCodeInstalled == false {
+                    Button {
+                        ClaudeCodeInstallWindowController.shared.toggle()
+                    } label: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(SoftPill.Status.amber)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Claude Code CLI not detected. Click for install instructions.")
+                }
             }
         }
     }

@@ -13,8 +13,39 @@ import Foundation
 
 public enum TTSVoice: String, Codable, CaseIterable, Identifiable, Sendable {
     case alloy, echo, fable, nova, onyx, shimmer
+    /// Local Piper TTS using the user-supplied `jarvis-high.onnx` model.
+    /// Routes through `PiperTTSEngine` instead of OpenAI; no API key, no
+    /// network. Needs the `piper` CLI installed and the ONNX file present
+    /// at `~/jarvis-voice/voices/jarvis-high.onnx`.
+    case jarvis
+
     public var id: String { rawValue }
-    public var displayName: String { rawValue.capitalized }
+    public var displayName: String {
+        switch self {
+        case .jarvis: return "JARVIS (local)"
+        default:      return rawValue.capitalized
+        }
+    }
+
+    /// True when the voice is generated locally rather than via OpenAI's
+    /// hosted TTS endpoint. The TextToSpeechService dispatches accordingly.
+    public var isLocal: Bool { self == .jarvis }
+}
+
+/// Visual mode for the cursor surface. `.companion` floats a soft-pill dot
+/// alongside the real cursor at all times (current behavior). `.glow` hides
+/// the dot at rest and renders a soft radial glow directly under the cursor
+/// only while the agent is active (long-press + run). Mutually exclusive.
+public enum CursorMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case companion
+    case glow
+    public var id: String { rawValue }
+    public var displayName: String {
+        switch self {
+        case .companion: return "Companion"
+        case .glow:      return "Glow"
+        }
+    }
 }
 
 public struct KillSwitchShortcut: Codable, Equatable, Sendable {
@@ -56,6 +87,7 @@ public struct AgentSettings: Equatable, Sendable {
     public var preferences: String
     public var systemPrompt: String
     public var cursorColor: CursorColor
+    public var cursorMode: CursorMode
     public var ttsVoice: TTSVoice
     /// Persistent CoreAudio device UID for voice input. nil = system default.
     public var voiceInputDeviceUID: String?
@@ -75,6 +107,14 @@ public struct AgentSettings: Equatable, Sendable {
     /// (clicks on Chromium web content). Default on. Disable to force the
     /// agent driver onto the all-public-API path (postToPid + AX only).
     public var allowPrivateSkyLight: Bool
+    /// Backend that runs the computer-use loop. `.anthropicAPI` (default) hits
+    /// Anthropic directly with our API key; `.claudeCodeCLI` spawns the user's
+    /// locally-installed `claude` binary and surfaces our tools via the MCP
+    /// bridge — zero AgentNotch API spend, billed against the user's CC auth.
+    public var provider: AgentProvider
+    /// Optional override for the `claude` binary location. nil = resolve via
+    /// `which claude` + standard fallbacks at spawn time.
+    public var claudeCodePath: String?
 
     public static let defaultNeverLogApps: [String] = [
         "com.1password.1password7",
@@ -90,6 +130,7 @@ public struct AgentSettings: Equatable, Sendable {
         preferences: "",
         systemPrompt: "",
         cursorColor: .blue,
+        cursorMode: .companion,
         ttsVoice: .nova,
         voiceInputDeviceUID: nil,
         voiceOutputDeviceUID: nil,
@@ -98,7 +139,9 @@ public struct AgentSettings: Equatable, Sendable {
         mercuryEnabled: true,
         geminiObserverEnabled: true,
         killSwitchShortcut: .default,
-        allowPrivateSkyLight: true
+        allowPrivateSkyLight: true,
+        provider: .anthropicAPI,
+        claudeCodePath: nil
     )
 }
 
@@ -106,12 +149,13 @@ public struct AgentSettings: Equatable, Sendable {
 extension AgentSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case agentModel
-        case reasoningEffort, preferences, systemPrompt, cursorColor, ttsVoice
+        case reasoningEffort, preferences, systemPrompt, cursorColor, cursorMode, ttsVoice
         case voiceInputDeviceUID, voiceOutputDeviceUID
         case collectionPaused, neverLogApps, mercuryEnabled
         case geminiObserverEnabled
         case killSwitchShortcut
         case allowPrivateSkyLight
+        case provider, claudeCodePath
     }
 
     public init(from decoder: Decoder) throws {
@@ -121,6 +165,7 @@ extension AgentSettings: Codable {
         preferences          = (try? c.decode(String.self,               forKey: .preferences))          ?? ""
         systemPrompt         = (try? c.decode(String.self,               forKey: .systemPrompt))         ?? ""
         cursorColor          = (try? c.decode(CursorColor.self,          forKey: .cursorColor))          ?? .blue
+        cursorMode           = (try? c.decode(CursorMode.self,           forKey: .cursorMode))           ?? .companion
         ttsVoice             = (try? c.decode(TTSVoice.self,             forKey: .ttsVoice))             ?? .nova
         voiceInputDeviceUID  = try? c.decode(String.self,                forKey: .voiceInputDeviceUID)
         voiceOutputDeviceUID = try? c.decode(String.self,                forKey: .voiceOutputDeviceUID)
@@ -130,6 +175,8 @@ extension AgentSettings: Codable {
         geminiObserverEnabled = (try? c.decode(Bool.self,                forKey: .geminiObserverEnabled)) ?? true
         killSwitchShortcut   = (try? c.decode(KillSwitchShortcut.self,   forKey: .killSwitchShortcut))   ?? .default
         allowPrivateSkyLight = (try? c.decode(Bool.self,                 forKey: .allowPrivateSkyLight)) ?? true
+        provider             = (try? c.decode(AgentProvider.self,        forKey: .provider))             ?? .anthropicAPI
+        claudeCodePath       = try? c.decode(String.self,                forKey: .claudeCodePath)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -139,6 +186,7 @@ extension AgentSettings: Codable {
         try c.encode(preferences,          forKey: .preferences)
         try c.encode(systemPrompt,         forKey: .systemPrompt)
         try c.encode(cursorColor,          forKey: .cursorColor)
+        try c.encode(cursorMode,           forKey: .cursorMode)
         try c.encode(ttsVoice,             forKey: .ttsVoice)
         try c.encodeIfPresent(voiceInputDeviceUID,  forKey: .voiceInputDeviceUID)
         try c.encodeIfPresent(voiceOutputDeviceUID, forKey: .voiceOutputDeviceUID)
@@ -148,6 +196,8 @@ extension AgentSettings: Codable {
         try c.encode(geminiObserverEnabled, forKey: .geminiObserverEnabled)
         try c.encode(killSwitchShortcut,   forKey: .killSwitchShortcut)
         try c.encode(allowPrivateSkyLight, forKey: .allowPrivateSkyLight)
+        try c.encode(provider,             forKey: .provider)
+        try c.encodeIfPresent(claudeCodePath, forKey: .claudeCodePath)
     }
 }
 
@@ -210,6 +260,11 @@ public final class AgentSettingsStore: ObservableObject {
         set { update { $0.cursorColor = newValue } }
     }
 
+    public var cursorMode: CursorMode {
+        get { settings.cursorMode }
+        set { update { $0.cursorMode = newValue } }
+    }
+
     public var ttsVoice: TTSVoice {
         get { settings.ttsVoice }
         set { update { $0.ttsVoice = newValue } }
@@ -263,6 +318,16 @@ public final class AgentSettingsStore: ObservableObject {
     public var allowPrivateSkyLight: Bool {
         get { settings.allowPrivateSkyLight }
         set { update { $0.allowPrivateSkyLight = newValue } }
+    }
+
+    public var provider: AgentProvider {
+        get { settings.provider }
+        set { update { $0.provider = newValue } }
+    }
+
+    public var claudeCodePath: String? {
+        get { settings.claudeCodePath }
+        set { update { $0.claudeCodePath = newValue } }
     }
 
     public func update(_ mutate: (inout AgentSettings) -> Void) {

@@ -6,14 +6,25 @@
 //  feed results back → loop until stop_reason != "tool_use". Updates
 //  AgentState as it goes so the notch UI reflects what's happening.
 //
-//  Optimizations layered on top of the basic loop:
-//  - Static system prompt cached server-side via cache_control. Dynamic
-//    context (activation packet, prefs, custom prompt) lives after the
-//    cache breakpoint.
-//  - Tools list also cached (one cache breakpoint on the last tool).
-//  - Rolling cache_control on the most recent tool_result so every
-//    subsequent turn reads the prior turns' state from cache instead of
-//    re-tokenizing the whole history.
+//  Optimizations layered on top of the basic loop (mirrors anthropic-quickstarts
+//  computer-use-demo/loop.py):
+//  - SSE streaming. Each turn streams via AnthropicClient.sendStreaming and
+//    is assembled in `streamMessage` to the existing AnthropicMessageResponse
+//    shape, so the rest of the loop stays unchanged.
+//  - Prompt caching: 4 breakpoints per request. (1) cache_control on the
+//    system block caches tools + system together (tools come earlier in the
+//    request prefix). (2,3,4) cache_control on the LAST content block of
+//    each of the 3 most-recent user messages, rolling forward each turn. See
+//    `injectPromptCaching`.
+//  - Fixed WXGA 1280x800 coordinate space. ScreenCapture.targetSnapshot
+//    center-crops + scales the source to match; the returned CoordTransform
+//    inverts model clicks back to logical-point space (`ToolDispatcher`).
+//  - Extended thinking gated to reasoningEffort == .high. .low / .medium
+//    send no `thinking` field, keeping the messages cache warm across
+//    adjacent turns. `interleaved-thinking-2025-05-14` beta only shipped
+//    when thinking is on.
+//  - Retry on 429 / 500 / 529 with exponential backoff + jitter
+//    (`AnthropicClient.withRetry` / `streamWithRetry`).
 //  - max_tokens bumped to 4096 so the model can plan + describe + act
 //    without truncation.
 //  - The model is taught (in system prompt) a strict tool preference order
@@ -33,19 +44,24 @@ public final class ComputerUseHarness {
     public var fallbackModelID: String = AnthropicModel.haiku45
     public var maxTurns: Int = 100
     public var maxOutputTokens: Int = 4096
-    /// Long-edge ceiling for what the agent sees + clicks in. Anthropic's
-    /// computer-use models are most accurate at XGA/WXGA scale and degrade
-    /// noticeably past ~1280px; keep this small unless we change models.
-    public var agentScreenshotLongEdge: Int = 1280
+    /// What the model SEES + emits coordinates in. Hard-pinned to WXGA
+    /// (1280x800) because Anthropic's computer-use models peak in click
+    /// accuracy at exactly this resolution. Non-16:10 displays are
+    /// center-cropped to fit (see `ScreenCapture.targetSnapshot`).
+    public let agentDisplaySize: CGSize = CGSize(width: 1280, height: 800)
 
     public private(set) var isRunning: Bool = false
     private var stopRequested: Bool = false
+    /// Live CC subprocess wrapper during CC-provider runs. Captured so the
+    /// kill-switch can terminate it. Nil in API-provider mode.
+    private var activeClaudeClient: ClaudeCodeClient?
 
     private init() {}
 
     public func requestStop() {
         guard isRunning else { return }
         stopRequested = true
+        activeClaudeClient?.cancel()
         NSLog("[Harness] stop requested")
     }
 
@@ -54,25 +70,51 @@ public final class ComputerUseHarness {
         public var contextSummary: String
         /// Intent verb from the Selector — forwarded to HarnessRunDetail for DevTools display.
         public var intentVerb: String?
-        /// JPEG bytes of the screen at long-press time. When non-nil the
-        /// harness prepends an image block to the FIRST user message so
-        /// Claude sees the screen on turn 1 — eliminating the throwaway
-        /// `computer.screenshot` tool call most agent runs used to start with.
+        /// JPEG bytes of the screen at long-press time, ALREADY sized to
+        /// `agentDisplaySize` (1280x800). When non-nil the harness prepends
+        /// an image block to the FIRST user message so Claude sees the
+        /// screen on turn 1, eliminating the throwaway `computer.screenshot`
+        /// tool call most agent runs used to start with.
         public var initiationScreenshot: Data?
+        /// CoordTransform produced alongside the initiation screenshot —
+        /// describes how to map clicks emitted in the screenshot's coordinate
+        /// space back to logical-point space. Required for turn-1 clicks to
+        /// land on-target. If nil, dispatcher uses identity (correct only
+        /// when source display already matches agentDisplaySize).
+        public var initiationTransform: ScreenCapture.CoordTransform?
         public init(
             transcript: String,
             contextSummary: String,
             intentVerb: String? = nil,
-            initiationScreenshot: Data? = nil
+            initiationScreenshot: Data? = nil,
+            initiationTransform: ScreenCapture.CoordTransform? = nil
         ) {
             self.transcript = transcript
             self.contextSummary = contextSummary
             self.intentVerb = intentVerb
             self.initiationScreenshot = initiationScreenshot
+            self.initiationTransform = initiationTransform
         }
     }
 
     public func run(_ input: Input) async {
+        // Re-entry guard. Without this, a second long-press while a turn is
+        // in flight would race: API mode would interleave AgentState updates,
+        // CC mode would spawn a second `claude` subprocess that gets
+        // rejected by the MCP bridge (single client at a time).
+        if isRunning {
+            log.warning("harness.skip reason=already_running")
+            return
+        }
+
+        // Provider switch lives BEFORE the API-key guard. CC mode uses the
+        // user's own `claude` auth — our Anthropic key isn't needed.
+        let provider = AgentSettingsStore.shared.provider
+        if provider == .claudeCodeCLI {
+            await runClaudeCodeMode(input)
+            return
+        }
+
         guard let apiKey = Secrets.anthropicAPIKey else {
             log.error("harness.start missing_api_key=true")
             AgentState.shared.set(.error(message: "Missing ANTHROPIC_API_KEY"))
@@ -138,20 +180,22 @@ public final class ComputerUseHarness {
             return
         }
 
-        // Three distinct coordinate spaces collide here — keep them straight:
+        // Two coordinate spaces collide here — keep them straight:
         //   * logicalSize: macOS logical points (NSScreen.frame). What
         //     CGEvent / CGWarpMouseCursorPosition operate in.
-        //   * backingSize: backing-store pixels (logical × backingScaleFactor).
-        //     Useful for almost nothing except SCKit raw captures.
-        //   * agentTargetSize: what the model SEES — screenshot dimensions +
-        //     coordinate space we advertise to Anthropic. Capped at 1280 long
-        //     edge per Anthropic's computer-use accuracy guidance.
+        //   * agentDisplaySize: fixed 1280x800. What the model SEES —
+        //     screenshot dimensions + the coordinate space we advertise to
+        //     Anthropic. Picked to match WXGA per Anthropic computer-use
+        //     accuracy guidance.
+        // The CoordTransform produced alongside each screenshot maps the
+        // model's emitted click point back to logical space.
         let logicalSize = primaryLogicalDisplaySize()
-        let agentTargetSize = computeAgentTargetSize(logicalSize: logicalSize, maxLongEdge: agentScreenshotLongEdge)
+        let initialTransform = input.initiationTransform
+            ?? ScreenCapture.CoordTransform.identity(size: logicalSize)
         let dispatcher = ToolDispatcher(
-            agentDisplaySize: agentTargetSize,
+            agentDisplaySize: agentDisplaySize,
             logicalDisplaySize: logicalSize,
-            screenshotLongEdge: agentScreenshotLongEdge
+            initialTransform: initialTransform
         )
 
         // Per-run model resolution. `currentAgentModel` is the typed selection
@@ -161,14 +205,15 @@ public final class ComputerUseHarness {
         // computer-use-2025-01-24). Falls back to .haiku if the settings
         // store is unreachable.
         var currentAgentModel = AgentSettingsStore.shared.agentModel
+        let thinkingEnabled = (AgentSettingsStore.shared.reasoningEffort == .high)
         // var, not let — `AnthropicClient` is a struct and we mutate its
         // `betaHeaders` on the fallback path (the computer-use beta has to
         // switch with the model family).
         var client = AnthropicClient(
             apiKey: apiKey,
-            betaHeaders: Self.betaHeaders(for: currentAgentModel)
+            betaHeaders: Self.betaHeaders(for: currentAgentModel, thinkingEnabled: thinkingEnabled)
         )
-        var tools = buildTools(displaySize: agentTargetSize, toolType: currentAgentModel.computerUseToolType)
+        var tools = buildTools(displaySize: agentDisplaySize, toolType: currentAgentModel.computerUseToolType)
         let system = buildSystemBlocks(
             settings: settings,
             contextSummary: input.contextSummary
@@ -193,20 +238,17 @@ public final class ComputerUseHarness {
         // screenshot as an image block. Including the screenshot here saves
         // a full round-trip — Claude no longer needs to take a
         // `computer.screenshot` tool call on turn 1 just to see the screen.
+        // The Selector pre-sized the JPEG to exactly `agentDisplaySize` and
+        // shipped the matching CoordTransform in `input.initiationTransform`,
+        // so we attach the bytes as-is.
         let firstUserContent: [ContentBlock]
         if let jpeg = input.initiationScreenshot, !jpeg.isEmpty {
-            // Selector hands us a 1568-long-edge JPEG (sized for OCR). The
-            // agent's coordinate space is `agentTargetSize` (≤1280 long edge),
-            // so resize the initiation image to match — otherwise the model
-            // sees one resolution but is told the display is another, and
-            // every turn-1 click lands off-target.
-            let resizedJPEG = Self.resizeJPEG(jpeg, maxLongEdge: agentScreenshotLongEdge) ?? jpeg
-            let base64 = resizedJPEG.base64EncodedString()
+            let base64 = jpeg.base64EncodedString()
             firstUserContent = [
                 .text(input.transcript),
                 .image(mediaType: "image/jpeg", base64: base64, cache: false)
             ]
-            log.info("harness.first_user has_image=true image_bytes=\(resizedJPEG.count) original_bytes=\(jpeg.count)")
+            log.info("harness.first_user has_image=true image_bytes=\(jpeg.count) target=\(Int(agentDisplaySize.width))x\(Int(agentDisplaySize.height))")
         } else {
             firstUserContent = [.text(input.transcript)]
         }
@@ -280,17 +322,19 @@ public final class ComputerUseHarness {
             let turnStartedAt = Date()
             let userPreviewForTurn = latestUserPreview()
 
-            // Move the cache breakpoint to the most recent tool_result so the
-            // next request reads everything before it from cache. Older
-            // breakpoints get stripped to stay within Anthropic's 4-marker cap.
-            applyRollingCacheMarker(to: &messages)
+            Self.injectPromptCaching(messages: &messages)
 
-            let effort = AgentSettingsStore.shared.reasoningEffort
-            let thinkingConfig: ThinkingConfig? = effort.thinkingBudgetTokens.map { ThinkingConfig(budgetTokens: $0) }
+            // Thinking is gated to .high effort only. .low and .medium send NO
+            // thinking block at all so the messages-cache stays warm across
+            // adjacent turns (any flip of the thinking field invalidates the
+            // messages cache). Beta header tracks the same gate.
+            let thinkingConfig: ThinkingConfig? = thinkingEnabled
+                ? AgentSettingsStore.shared.reasoningEffort.thinkingBudgetTokens.map { ThinkingConfig(budgetTokens: $0) }
+                : nil
             // max_tokens must exceed budget_tokens; leave headroom for the actual
             // tool-call output that follows reasoning.
             let effectiveMaxTokens: Int = {
-                guard let budget = effort.thinkingBudgetTokens else { return maxOutputTokens }
+                guard let budget = thinkingConfig?.budgetTokens else { return maxOutputTokens }
                 return max(maxOutputTokens, budget + 2048)
             }()
             let request = AnthropicMessageRequest(
@@ -306,7 +350,7 @@ public final class ComputerUseHarness {
             let requestedAt = Date()
             let response: AnthropicMessageResponse
             do {
-                response = try await client.send(request)
+                response = try await Self.streamMessage(request, client: client)
             } catch let err as AnthropicClient.Error {
                 if !triedFallback, shouldFallback(err) {
                     log.warning("harness.fallback run_id=\(runID.uuidString) from=\(currentModel) to=\(self.fallbackModelID) status=\(err.status ?? -1)")
@@ -319,8 +363,8 @@ public final class ComputerUseHarness {
                     // or the next request fails with the same 400 we're
                     // recovering from.
                     currentAgentModel = .haiku
-                    tools = buildTools(displaySize: agentTargetSize, toolType: currentAgentModel.computerUseToolType)
-                    client.betaHeaders = Self.betaHeaders(for: currentAgentModel)
+                    tools = buildTools(displaySize: agentDisplaySize, toolType: currentAgentModel.computerUseToolType)
+                    client.betaHeaders = Self.betaHeaders(for: currentAgentModel, thinkingEnabled: thinkingEnabled)
                     continue
                 }
                 let status = err.status.map(String.init) ?? "nil"
@@ -542,6 +586,164 @@ public final class ComputerUseHarness {
         await recordMetrics(status: "max_turns", errorMessage: "Hit max turns (\(maxTurns))")
     }
 
+    // MARK: - Claude Code (CLI) provider mode
+
+    /// CC-provider replacement for the API-mode loop. Spawns the user's
+    /// `claude` binary, streams its stream-json output, and lets it drive
+    /// tools via the MCP bridge instead of running our own multi-turn loop.
+    /// The user-visible UX (notch state, TTS, tool strip, observability) is
+    /// the same — the difference is whose model + auth runs the show.
+    private func runClaudeCodeMode(_ input: Input) async {
+        let runID = UUID()
+        let startedAt = Date()
+        log.info("harness.start run_id=\(runID.uuidString) provider=claudeCodeCLI transcript_len=\(input.transcript.count)")
+
+        AgentState.shared.set(.thinking)
+        CursorCompanion.shared.setThinking(true)
+        isRunning = true
+        stopRequested = false
+        defer {
+            CursorCompanion.shared.setThinking(false)
+            isRunning = false
+            stopRequested = false
+            activeClaudeClient = nil
+        }
+
+        // Same fast-path as API mode — handles open-URL / Spotify / Reminders
+        // without any CLI spawn. Keeps CC turnaround for trivial commands
+        // at zero cost.
+        let routed = await IntentRouter.tryHandle(transcript: input.transcript)
+        if case .handled(let summary, let affirmation) = routed {
+            TextToSpeechService.shared.speak(capped(affirmation))
+            AgentState.shared.set(.idle, detail: summary)
+            log.info("harness.done run_id=\(runID.uuidString) provider=claudeCodeCLI status=completed_fast_path")
+            return
+        }
+
+        let settings = AgentSettingsStore.shared.settings
+        let systemText = Self.composeClaudeCodeSystem(settings: settings, contextSummary: input.contextSummary)
+        let prompt = ClaudeCodeClient.Prompt(system: systemText, userText: input.transcript)
+
+        let client = ClaudeCodeClient()
+        self.activeClaudeClient = client
+
+        var sawAffirmation = false
+        var finalText = ""
+        var hadError = false
+        var errorDetail: String?
+
+        var hooksInFlight = 0
+        do {
+            for try await event in client.run(prompt: prompt) {
+                if stopRequested { break }
+                switch event {
+                case .spawned:
+                    AgentState.shared.set(.thinking, detail: "Launching Claude Code…")
+                case .hookStarted(let name):
+                    hooksInFlight += 1
+                    AgentState.shared.set(.thinking, detail: "Running hook: \(name)")
+                case .hookCompleted:
+                    hooksInFlight = max(0, hooksInFlight - 1)
+                    if hooksInFlight == 0 {
+                        AgentState.shared.set(.thinking, detail: "Waiting for model…")
+                    }
+                case .sessionStarted(let id):
+                    log.info("cc.session run_id=\(runID.uuidString) session=\(id)")
+                    AgentState.shared.set(.thinking, detail: "Waiting for model…")
+                case .thinking:
+                    AgentState.shared.set(.thinking, detail: "Thinking…")
+                case .toolStarted(let name, _):
+                    AgentState.shared.set(.toolCall(name: name), detail: name)
+                case .toolCompleted:
+                    break
+                case .assistantText(let chunk):
+                    finalText += chunk
+                    // Speak the first non-empty assistant chunk as the
+                    // turn-1 affirmation, capped to N words.
+                    if !sawAffirmation {
+                        let trimmed = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            sawAffirmation = true
+                            TextToSpeechService.shared.speak(capped(trimmed))
+                        }
+                    }
+                case .usage(let inT, let outT):
+                    log.info("cc.usage run_id=\(runID.uuidString) input=\(inT) output=\(outT)")
+                case .finished(let text):
+                    if !text.isEmpty { finalText = text }
+                case .stderr(let line):
+                    log.warning("cc.stderr line=\(line.prefix(200))")
+                }
+            }
+        } catch {
+            hadError = true
+            errorDetail = "\(error)"
+            log.error("cc.error run_id=\(runID.uuidString) error=\(error)")
+        }
+
+        let elapsed = Int(Date().timeIntervalSince(startedAt) * 1000)
+        if stopRequested {
+            AgentState.shared.set(.idle, detail: "Stopped")
+            log.info("harness.done run_id=\(runID.uuidString) provider=claudeCodeCLI status=stopped_by_user duration_ms=\(elapsed)")
+            return
+        }
+        if hadError {
+            let detail = errorDetail ?? "Claude Code error"
+            AgentState.shared.set(.error(message: detail))
+            log.info("harness.done run_id=\(runID.uuidString) provider=claudeCodeCLI status=error duration_ms=\(elapsed)")
+            return
+        }
+
+        let trimmed = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sawAffirmation && !trimmed.isEmpty {
+            TextToSpeechService.shared.speak(capped(trimmed))
+        }
+        AgentState.shared.set(.idle, detail: trimmed.isEmpty ? "" : trimmed)
+        log.info("harness.done run_id=\(runID.uuidString) provider=claudeCodeCLI status=completed duration_ms=\(elapsed) final_len=\(trimmed.count)")
+    }
+
+    /// System prompt for CC mode. Shorter than the API-mode block — Claude
+    /// Code already knows how to be an agent. We just tell it about our MCP
+    /// tools and the user's preferences.
+    private static func composeClaudeCodeSystem(
+        settings: AgentSettings,
+        contextSummary: String
+    ) -> String {
+        var parts: [String] = []
+        parts.append("""
+        You are an on-screen macOS computer-use agent running inside AgentNotch. The user spoke a command into the cursor companion; act on it.
+
+        Tools available to you live under the `agentnotch` MCP server. PREFER them in this order, falling back when the prior tool cannot do the task:
+          1. open_app    — plain "open <DesktopApp>" goals.
+          2. open_url    — web URLs (https, mailto, sms) and deep links (spotify:, things:///add, etc).
+          3. applescript — Safari, Chrome, Spotify, Music, Messages, Mail, Notes, Reminders, Calendar, Terminal, Finder.
+          4. run_shortcut — user-installed macOS Shortcuts.
+          5. ax_query + ax_press / ax_set_value — buttons / links / text fields you can name.
+          6. menu_shortcut — sends the registered shortcut for a menu item.
+          7. screenshot + left_click / type / key / scroll — vision-driven, last resort.
+
+        Conventions:
+          - Coordinates are in 1280x800 model space. The MCP `screenshot` tool returns that view.
+          - On the first reply emit one short spoken-style sentence (under 9 words) BEFORE any tool call. That sentence is read aloud to the user.
+          - Do not ask clarifying questions. Pick the most likely interpretation and act.
+          - Stop only when EVERY explicit sub-goal in the command is observably done.
+          - Refuse irreversible destructive actions (delete files, send payments, send messages to people you cannot confirm) without explicit user confirmation.
+
+        Do not use any of your built-in Bash / Read / Edit / Write tools — they are not relevant on this surface. The MCP tools above are your only action surface.
+        """)
+
+        if !contextSummary.isEmpty {
+            parts.append("# Context brief\n\(contextSummary)")
+        }
+        if !settings.preferences.isEmpty {
+            parts.append("# User preferences\n\(settings.preferences)")
+        }
+        if !settings.systemPrompt.isEmpty {
+            parts.append(settings.systemPrompt)
+        }
+        return parts.joined(separator: "\n\n")
+    }
+
     // MARK: - Tools
 
     private func buildTools(displaySize: CGSize, toolType: String) -> [Tool] {
@@ -637,11 +839,16 @@ public final class ComputerUseHarness {
                 "required": .array([.string("title")])
             ])
         )
+        // No cache_control on tools — Anthropic caps at 4 breakpoints per
+        // request. Reference impl (anthropic-quickstarts loop.py:265-288) puts
+        // the shared breakpoint on the system block; the request prefix is
+        // hashed front-to-back, so caching at system also caches tools that
+        // appear before it. Total: 1 (system) + 3 (rolling user) = 4.
         let computer: Tool = .computer(
             displayWidth: Int(displaySize.width),
             displayHeight: Int(displaySize.height),
             displayNumber: 1,
-            cache: true,
+            cache: false,
             toolType: toolType
         )
 
@@ -649,14 +856,20 @@ public final class ComputerUseHarness {
     }
 
     /// Beta headers for a given user-selected model. The computer-use header
-    /// is model-family-specific (see `AgentModel.computerUseBetaHeader`);
-    /// the others (prompt-caching, interleaved-thinking) are constant.
-    private static func betaHeaders(for model: AgentModel) -> [String] {
-        return [
+    /// is model-family-specific (see `AgentModel.computerUseBetaHeader`).
+    /// `interleaved-thinking-2025-05-14` is added ONLY when thinking is on for
+    /// this run — sending it with `thinking: nil` would still expose the
+    /// model to the interleaved schema and risks cache misses every time the
+    /// effort dropdown flips between sessions.
+    private static func betaHeaders(for model: AgentModel, thinkingEnabled: Bool) -> [String] {
+        var headers = [
             model.computerUseBetaHeader,
-            "prompt-caching-2024-07-31",
-            "interleaved-thinking-2025-05-14"
+            "prompt-caching-2024-07-31"
         ]
+        if thinkingEnabled {
+            headers.append("interleaved-thinking-2025-05-14")
+        }
+        return headers
     }
 
     // MARK: - System prompt (split for caching)
@@ -724,24 +937,209 @@ public final class ComputerUseHarness {
 
     // MARK: - Cache marker management
 
-    private func applyRollingCacheMarker(to messages: inout [Message]) {
-        var latestIdx: Int?
+    /// Reference-impl prompt-caching strategy. Ported from anthropic-quickstarts
+    /// computer-use-demo/loop.py:265-288 (`_inject_prompt_caching`).
+    ///
+    /// Goal: keep cache_control on the LAST content block of the 3 most-recent
+    /// user messages, and strip it from older user messages so we stay under
+    /// Anthropic's 4-breakpoint cap (the other slot is held by the system+tools
+    /// caches). Every new turn now reads the entire prior trajectory from cache
+    /// at 10% input cost.
+    ///
+    /// `cache_control` lives only on `tool_result` and `image` blocks per the
+    /// API. For each rolling user message we stamp the LAST such block; for
+    /// older user messages we strip every cache marker.
+    private static func injectPromptCaching(messages: inout [Message]) {
+        // Indices of the 3 most-recent user messages (newest first).
+        var userIndices: [Int] = []
         for i in stride(from: messages.count - 1, through: 0, by: -1) {
-            if messages[i].role == "user",
-               messages[i].content.contains(where: { if case .toolResult = $0 { return true } else { return false } }) {
-                latestIdx = i
-                break
+            if messages[i].role == "user" {
+                userIndices.append(i)
+                if userIndices.count == 3 { break }
             }
         }
-        guard let latestIdx else { return }
+        let rollingSet = Set(userIndices)
 
-        for i in messages.indices {
-            guard messages[i].role == "user" else { continue }
-            let shouldMark = (i == latestIdx)
-            messages[i].content = messages[i].content.map { block in
-                if case .toolResult = block { return block.withCache(shouldMark) }
-                return block
+        for i in messages.indices where messages[i].role == "user" {
+            if rollingSet.contains(i) {
+                // Stamp cache_control on the LAST cache-eligible block in this
+                // user message. Walk backward, stop at the first toolResult or
+                // image and mark it; strip cache from any earlier ones.
+                var blocks = messages[i].content
+                var stamped = false
+                for j in stride(from: blocks.count - 1, through: 0, by: -1) {
+                    switch blocks[j] {
+                    case .toolResult, .image:
+                        blocks[j] = blocks[j].withCache(!stamped)
+                        stamped = true
+                    default:
+                        break
+                    }
+                }
+                messages[i].content = blocks
+            } else if Self.hasAnyCacheMarker(messages[i].content) {
+                // Older user message that still carries a marker from a prior
+                // turn — strip. Skip the Array realloc when there is nothing
+                // to strip (most older messages on long runs).
+                messages[i].content = messages[i].content.map { $0.withCache(false) }
             }
+        }
+    }
+
+    private static func hasAnyCacheMarker(_ blocks: [ContentBlock]) -> Bool {
+        for block in blocks {
+            switch block {
+            case .toolResult(_, _, _, let cache) where cache: return true
+            case .image(_, _, let cache) where cache: return true
+            default: continue
+            }
+        }
+        return false
+    }
+
+    /// Drive the streaming endpoint to completion, assembling the same
+    /// `AnthropicMessageResponse` the non-streaming endpoint would have
+    /// returned. The harness can hand off the assembled response to its
+    /// existing loop logic untouched.
+    private static func streamMessage(
+        _ request: AnthropicMessageRequest,
+        client: AnthropicClient
+    ) async throws -> AnthropicMessageResponse {
+        var responseID: String = ""
+        var responseModel: String = request.model
+        var responseRole: String = "assistant"
+        var stopReason: String?
+        var inputTokens: Int?
+        var outputTokens: Int?
+        var cacheReadInputTokens: Int?
+        var cacheCreationInputTokens: Int?
+
+        var builders: [Int: BlockBuilder] = [:]
+        var blockOrder: [Int] = []
+
+        for try await event in client.sendStreaming(request) {
+            switch event {
+            case .messageStart(let m):
+                responseID = m.id
+                responseModel = m.model
+                responseRole = m.role
+                if let u = m.usage {
+                    inputTokens = u.inputTokens
+                    outputTokens = u.outputTokens
+                    cacheReadInputTokens = u.cacheReadInputTokens
+                    cacheCreationInputTokens = u.cacheCreationInputTokens
+                }
+
+            case .contentBlockStart(let index, let block):
+                if !blockOrder.contains(index) { blockOrder.append(index) }
+                var b = BlockBuilder(kind: .unknown)
+                switch block {
+                case .text(let t):
+                    b.kind = .text
+                    b.text = t
+                case .toolUse(let id, let name, _):
+                    b.kind = .toolUse
+                    b.toolUseId = id
+                    b.toolName = name
+                case .thinking(let t, let sig):
+                    b.kind = .thinking
+                    b.thinking = t
+                    b.signature = sig
+                default:
+                    b.kind = .unknown
+                }
+                builders[index] = b
+
+            case .contentBlockDelta(let index, let delta):
+                guard var b = builders[index] else { continue }
+                switch delta {
+                case .text(let s):        b.text += s
+                case .thinking(let s):    b.thinking += s
+                case .signature(let s):   b.signature += s
+                case .partialJSON(let s): b.partialJSON += s
+                }
+                builders[index] = b
+
+            case .contentBlockStop:
+                break
+
+            case .messageDelta(let sr, _, let outTokens):
+                stopReason = sr
+                if let n = outTokens { outputTokens = n }
+
+            case .messageStop, .ping:
+                break
+
+            case .streamError(let type, let message):
+                throw AnthropicClient.Error(
+                    status: 500,
+                    body: "{\"type\":\"\(type)\",\"message\":\"\(message)\"}",
+                    underlying: nil
+                )
+            }
+        }
+
+        // Materialize the content list in stream order.
+        var content: [ContentBlock] = []
+        for index in blockOrder {
+            guard let b = builders[index] else { continue }
+            switch b.kind {
+            case .text:
+                content.append(.text(b.text))
+            case .toolUse:
+                // Re-parse the accumulated JSON string into our JSON enum so
+                // the dispatcher can read it the same way it reads non-stream
+                // tool_use blocks.
+                let inputJSON = parseToolInputJSON(b.partialJSON, toolID: b.toolUseId, toolName: b.toolName)
+                content.append(.toolUse(id: b.toolUseId, name: b.toolName, input: inputJSON))
+            case .thinking:
+                content.append(.thinking(thinking: b.thinking, signature: b.signature))
+            case .unknown:
+                continue
+            }
+        }
+
+        return AnthropicMessageResponse(
+            id: responseID,
+            model: responseModel,
+            role: responseRole,
+            content: content,
+            stopReason: stopReason,
+            usage: AnthropicMessageResponse.Usage(
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                cacheCreationInputTokens: cacheCreationInputTokens,
+                cacheReadInputTokens: cacheReadInputTokens
+            )
+        )
+    }
+
+    /// In-progress assembly state for one stream block. Anthropic emits blocks
+    /// in monotonic index order; the index field disambiguates concurrent
+    /// thinking + tool_use + text blocks.
+    private struct BlockBuilder {
+        enum Kind { case text, toolUse, thinking, unknown }
+        var kind: Kind
+        var text: String = ""
+        var toolUseId: String = ""
+        var toolName: String = ""
+        var partialJSON: String = ""
+        var thinking: String = ""
+        var signature: String = ""
+    }
+
+    private static func parseToolInputJSON(_ raw: String, toolID: String, toolName: String) -> JSON {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload = trimmed.isEmpty ? "{}" : trimmed
+        do {
+            return try JSON.parse(payload)
+        } catch {
+            // Silent fallback to {} hides real Anthropic schema changes — the
+            // dispatcher would then see a tool call with no coordinates / no
+            // text and fail with "Missing 'coordinate'" without any upstream
+            // signal. Log loudly so we can spot it.
+            log.error("stream.tool_input_decode_failed tool=\(toolName) id=\(toolID) raw_len=\(raw.count) preview=\(payload.prefix(160)) error=\(error)")
+            return .object([:])
         }
     }
 
@@ -847,48 +1245,6 @@ public final class ComputerUseHarness {
     /// uses for mouse positioning. NOT backing-store pixels.
     private func primaryLogicalDisplaySize() -> CGSize {
         NSScreen.main?.frame.size ?? CGSize(width: 1440, height: 900)
-    }
-
-    /// Resize a JPEG so its longest edge is ≤ `maxLongEdge`. Returns nil on
-    /// any decode/encode failure so the caller can fall back to the original.
-    static func resizeJPEG(_ data: Data, maxLongEdge: Int) -> Data? {
-        guard let src = NSBitmapImageRep(data: data) else { return nil }
-        let w = src.pixelsWide
-        let h = src.pixelsHigh
-        let longest = max(w, h)
-        guard longest > maxLongEdge, longest > 0 else { return data }
-        let scale = CGFloat(maxLongEdge) / CGFloat(longest)
-        let newW = Int(CGFloat(w) * scale)
-        let newH = Int(CGFloat(h) * scale)
-        guard newW > 0, newH > 0,
-              let cs = src.cgImage?.colorSpace,
-              let ctx = CGContext(
-                  data: nil, width: newW, height: newH,
-                  bitsPerComponent: 8, bytesPerRow: 0,
-                  space: cs,
-                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              ) else { return nil }
-        ctx.interpolationQuality = .medium
-        if let cg = src.cgImage {
-            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: newW, height: newH))
-        }
-        guard let outCG = ctx.makeImage() else { return nil }
-        let rep = NSBitmapImageRep(cgImage: outCG)
-        return rep.representation(using: .jpeg, properties: [.compressionFactor: 0.7])
-    }
-
-    /// Scale the logical display down so the longest edge equals `maxLongEdge`,
-    /// preserving aspect ratio. Used to derive the agent's coordinate space —
-    /// also matches what `ScreenCapture.snapshot(maxLongEdge:)` will produce
-    /// when we ask it for screenshots at the same cap.
-    private func computeAgentTargetSize(logicalSize: CGSize, maxLongEdge: Int) -> CGSize {
-        let longest = max(logicalSize.width, logicalSize.height)
-        guard longest > CGFloat(maxLongEdge), longest > 0 else { return logicalSize }
-        let scale = CGFloat(maxLongEdge) / longest
-        return CGSize(
-            width: (logicalSize.width * scale).rounded(),
-            height: (logicalSize.height * scale).rounded()
-        )
     }
 
     /// Compact JSON representation of a tool input. Used for the Dev Tools

@@ -176,7 +176,83 @@ struct NotchMusicView: View {
                 openSpotifyButton
             }
 
+            secondaryControlsRow
+
             lyricsPanel
+        }
+    }
+
+    /// Shuffle / heart / repeat / add-to-playlist. Tier-2 features are only
+    /// visible when the Web API is authed; Tier-1 (shuffle, boolean repeat)
+    /// is always on.
+    private var secondaryControlsRow: some View {
+        HStack(spacing: 6) {
+            // Shuffle (AppleScript)
+            SecondaryToggleButton(
+                system: "shuffle",
+                isOn: controller.state.isShuffled,
+                tint: spotifyGreen,
+                help: "Shuffle \(controller.state.isShuffled ? "on" : "off")"
+            ) {
+                Task { await controller.toggleShuffle() }
+            }
+
+            // Like / heart (Web API only) — hidden until authed.
+            if controller.webAPIReady {
+                SecondaryToggleButton(
+                    system: (controller.state.isLiked == true) ? "heart.fill" : "heart",
+                    isOn: controller.state.isLiked == true,
+                    tint: Color(red: 0xF3/255, green: 0x7A/255, blue: 0x7A/255),
+                    help: (controller.state.isLiked == true)
+                          ? "Remove from Liked Songs"
+                          : "Save to Liked Songs"
+                ) {
+                    Task { await controller.toggleLiked() }
+                }
+                .disabled(controller.state.trackID.isEmpty)
+            }
+
+            // Repeat — cycles off / context / track when authed; off ↔ context otherwise.
+            SecondaryToggleButton(
+                system: controller.state.repeatMode.displaySymbol,
+                isOn: controller.state.repeatMode != .off,
+                tint: spotifyGreen,
+                help: repeatTooltip
+            ) {
+                Task { await controller.cycleRepeatMode() }
+            }
+
+            Spacer(minLength: 2)
+
+            // Add-to-playlist menu (Web API only) — uses native Menu so the
+            // user gets a fuzzy native picker. Falls back to "Connect cloud"
+            // affordance when not authed.
+            if controller.webAPIReady {
+                if !controller.playlists.isEmpty,
+                   !controller.state.trackURI.isEmpty {
+                    AddToPlaylistMenu(
+                        playlists: controller.playlists.filter { $0.canModify },
+                        tint: spotifyGreen
+                    ) { playlist in
+                        Task {
+                            _ = await controller.addCurrentTrackToPlaylist(id: playlist.id)
+                        }
+                    }
+                }
+            } else {
+                ConnectCloudPill(tint: spotifyGreen) {
+                    Task { _ = await controller.authenticateWebAPI() }
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private var repeatTooltip: String {
+        switch controller.state.repeatMode {
+        case .off:     return controller.webAPIReady ? "Repeat off → all" : "Repeat off → all"
+        case .context: return controller.webAPIReady ? "Repeat all → track" : "Repeat all → off"
+        case .track:   return "Repeat track → off"
         }
     }
 
@@ -569,5 +645,132 @@ private struct ScrubBar: View {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let s = Int(seconds.rounded())
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+// MARK: - Secondary toggle (shuffle / heart / repeat)
+
+private struct SecondaryToggleButton: View {
+    let system: String
+    let isOn: Bool
+    let tint: Color
+    let help: String
+    let action: () -> Void
+
+    @State private var hovered = false
+    @State private var pressed = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 10.5, weight: .bold))
+                .foregroundStyle(isOn ? tint : SoftPill.Text.secondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle()
+                        .fill(hovered ? SoftPill.Surface.hover : SoftPill.Surface.inset)
+                )
+                .overlay(
+                    Circle().strokeBorder(
+                        isOn ? tint.opacity(hovered ? 0.6 : 0.35)
+                             : Color.white.opacity(hovered ? 0.12 : 0.05),
+                        lineWidth: 0.8
+                    )
+                )
+                .shadow(color: isOn ? tint.opacity(hovered ? 0.45 : 0.25) : .clear,
+                        radius: isOn ? (hovered ? 6 : 3) : 0, y: 0)
+                .scaleEffect(pressed ? 0.92 : (hovered ? 1.05 : 1.0))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in pressed = true }
+                .onEnded   { _ in pressed = false }
+        )
+        .animation(.easeOut(duration: 0.14), value: hovered)
+        .animation(.spring(response: 0.18, dampingFraction: 0.78), value: pressed)
+        .help(help)
+    }
+}
+
+// MARK: - Add-to-playlist menu
+
+private struct AddToPlaylistMenu: View {
+    let playlists: [SpotifyPlaylist]
+    let tint: Color
+    let onPick: (SpotifyPlaylist) -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Menu {
+            // Cap at 50 entries to keep the menu sane. Most users have far fewer.
+            ForEach(playlists.prefix(50)) { playlist in
+                Button(playlist.name) { onPick(playlist) }
+            }
+            if playlists.count > 50 {
+                Divider()
+                Text("+\(playlists.count - 50) more, use voice")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 9.5, weight: .bold))
+                Text("Playlist")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(hovered ? SoftPill.Text.primary : SoftPill.Text.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(hovered ? SoftPill.Surface.hover : SoftPill.Surface.inset)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(tint.opacity(hovered ? 0.35 : 0.1), lineWidth: 0.8)
+                    )
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hovered = $0 }
+        .help("Add this track to a playlist")
+    }
+}
+
+// MARK: - Connect-cloud pill (shown when Web API isn't authed yet)
+
+private struct ConnectCloudPill: View {
+    let tint: Color
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 9, weight: .bold))
+                Text("Sign in")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(hovered ? SoftPill.Text.primary : SoftPill.Text.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(hovered ? SoftPill.Surface.hover : SoftPill.Surface.inset)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(tint.opacity(hovered ? 0.45 : 0.15), lineWidth: 0.8)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+        .help("Sign in to Spotify for Like + Add-to-Playlist + 3-state repeat")
     }
 }

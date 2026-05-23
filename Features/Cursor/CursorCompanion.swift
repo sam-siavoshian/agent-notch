@@ -24,8 +24,8 @@ public final class CursorCompanion: CursorAppearanceSetting {
     private var settingsCancellable: AnyCancellable?
 
     private init() {
-        let initialColor = AgentSettingsStore.shared.cursorColor
-        let vm = CursorCompanionViewModel(color: initialColor)
+        let initial = AgentSettingsStore.shared.settings
+        let vm = CursorCompanionViewModel(color: initial.cursorColor, mode: initial.cursorMode)
         self.viewModel = vm
         self.window = CursorCompanionWindow(viewModel: vm)
         self.tracker = CursorTracker(window: window)
@@ -38,6 +38,9 @@ public final class CursorCompanion: CursorAppearanceSetting {
         longPress.start()
         wireNotifications()
         wireSettings()
+        // Seed window geometry from persisted mode. Without this the panel
+        // boots at companion size even if the user previously chose glow.
+        window.setMode(AgentSettingsStore.shared.cursorMode)
         AgentInterfaces.cursor = self
     }
 
@@ -111,11 +114,18 @@ public final class CursorCompanion: CursorAppearanceSetting {
     }
 
     private func wireSettings() {
+        // AgentSettings is Equatable, so a single .removeDuplicates() on the
+        // whole struct is enough. The sink projects the two fields we care
+        // about. Tuple-projected pipelines time out Swift's type checker.
         settingsCancellable = AgentSettingsStore.shared.$settings
-            .map(\.cursorColor)
             .removeDuplicates()
-            .sink { [weak self] color in
-                self?.viewModel.color = color
+            .sink { [weak self] settings in
+                guard let self else { return }
+                self.viewModel.color = settings.cursorColor
+                if self.viewModel.mode != settings.cursorMode {
+                    self.viewModel.mode = settings.cursorMode
+                    self.window.setMode(settings.cursorMode)
+                }
             }
     }
 }

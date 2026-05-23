@@ -99,7 +99,8 @@ public final class AgentSession {
             transcript: transcript,
             contextSummary: result.brief,
             intentVerb: result.intent.verb,
-            initiationScreenshot: result.initiationScreenshot
+            initiationScreenshot: result.initiationScreenshot,
+            initiationTransform: result.initiationTransform
         )
         currentRunTask?.cancel()
         let t = Task { @MainActor in

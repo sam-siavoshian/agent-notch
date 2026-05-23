@@ -32,31 +32,31 @@ public struct DispatchedToolResult: Sendable {
 public actor ToolDispatcher {
     /// Coordinate space the MODEL sees: matches the screenshot dimensions we
     /// send back AND the `display_width_px/display_height_px` we advertise in
-    /// the computer tool registration. Anthropic computer-use models are
-    /// trained on roughly-XGA-sized inputs and degrade past ~1280px wide —
-    /// keep this small for accurate clicks.
+    /// the computer tool registration. Pinned to WXGA 1280x800 by the harness;
+    /// Anthropic's computer-use models peak in click accuracy at this size.
     public let agentDisplaySize: CGSize
     /// Real macOS logical-point space — what `CGEvent.mouseCursorPosition`
     /// and `NSEvent.mouseLocation` operate in. On a 14" MBP this is
-    /// 1512×982-ish, NOT the 3024×1964 backing-store pixel count and NOT the
-    /// 1280×~ agent target. Coordinates from the model are scaled from
-    /// agentDisplaySize → this space before being posted as CGEvents.
+    /// 1512×982-ish. Used as a fallback only; the live `transform` below
+    /// is what we actually invert clicks through.
     public let logicalDisplaySize: CGSize
-    /// Long-edge cap for screenshots returned via `computer.screenshot`.
-    /// Matches `agentDisplaySize.longEdge` so the image the model receives
-    /// and the coordinate space it emits clicks in are 1:1.
-    public let screenshotLongEdge: Int
     private let capture: ScreenCapture
+    /// Live transform from the most recent screenshot the model has seen.
+    /// Updated on every `computer.screenshot` action so subsequent clicks
+    /// inverse-map through the same crop/scale the model is reasoning over.
+    /// Initialised from the harness's `initiationTransform` so turn-1 clicks
+    /// hit the right pixels even before the first in-loop screenshot.
+    private var transform: ScreenCapture.CoordTransform
 
     public init(
         agentDisplaySize: CGSize,
         logicalDisplaySize: CGSize,
-        screenshotLongEdge: Int,
+        initialTransform: ScreenCapture.CoordTransform,
         capture: ScreenCapture = .shared
     ) {
         self.agentDisplaySize = agentDisplaySize
         self.logicalDisplaySize = logicalDisplaySize
-        self.screenshotLongEdge = screenshotLongEdge
+        self.transform = initialTransform
         self.capture = capture
     }
 
@@ -103,7 +103,12 @@ public actor ToolDispatcher {
         }
         switch action {
         case "screenshot":
-            let snap = try await capture.snapshot(maxLongEdge: screenshotLongEdge)
+            let snap = try await capture.targetSnapshot(target: agentDisplaySize)
+            // Refresh transform so subsequent clicks invert through the same
+            // crop/scale the model is now reasoning over. If the user has
+            // moved the window or switched displays the crop region shifts
+            // — without this update clicks land on stale pixels.
+            self.transform = snap.transform
             let b64 = snap.jpegData.base64EncodedString()
             return DispatchedToolResult(
                 toolUseId: toolUseId,
@@ -335,11 +340,10 @@ public actor ToolDispatcher {
     private struct DispatchError: Swift.Error { let message: String; init(_ m: String) { self.message = m } }
 
     /// Decode the `coordinate` array the model emitted (in agentDisplaySize
-    /// space) and scale it into macOS logical points so the resulting CGPoint
-    /// can be handed directly to `CGEvent.mouseCursorPosition` /
-    /// `CGWarpMouseCursorPosition`. Without this scaling, clicks land
-    /// (logical/agent) ratio off-target — a 2x mismatch on Retina means
-    /// every click lands at twice the intended offset.
+    /// space) and invert it through the live `transform` to land in macOS
+    /// logical-point space. The transform encodes both the center-crop
+    /// applied during capture AND the scale to the model's target size, so
+    /// non-16:10 displays still click on the right pixels.
     private func requireCoordinate(_ input: JSON) throws -> CGPoint {
         guard let coord = input.objectValue?["coordinate"]?.arrayValue,
               coord.count >= 2,
@@ -347,9 +351,7 @@ public actor ToolDispatcher {
               let y = coord[1].intValue else {
             throw DispatchError("Missing or invalid 'coordinate'")
         }
-        let sx = logicalDisplaySize.width / max(1, agentDisplaySize.width)
-        let sy = logicalDisplaySize.height / max(1, agentDisplaySize.height)
-        return CGPoint(x: CGFloat(x) * sx, y: CGFloat(y) * sy)
+        return transform.toLogical(CGPoint(x: CGFloat(x), y: CGFloat(y)))
     }
 
     private func ok(_ id: String, _ text: String) -> DispatchedToolResult {

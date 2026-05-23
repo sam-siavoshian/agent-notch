@@ -28,6 +28,10 @@ public final class ContextSelector {
         /// sees the screen without taking a `computer.screenshot` tool call.
         /// Nil if capture failed or timed out.
         public let initiationScreenshot: Data?
+        /// CoordTransform paired with `initiationScreenshot`. Forwarded to the
+        /// harness so turn-1 clicks invert through the same crop/scale the
+        /// JPEG was produced with. Nil when capture timed out or failed.
+        public let initiationTransform: ScreenCapture.CoordTransform?
         public let degraded: Bool        // true if we fell back to LocalBriefRenderer
         public let latencyS: Double
         public let modelUsed: String?    // nil when degraded
@@ -59,6 +63,7 @@ public final class ContextSelector {
         let snap = await L2Snapshotter.snapshot(overallDeadline: 0.4)
         let l2 = snap.l2
         let initiationScreenshot = snap.screenshotJPEG
+        let initiationTransform = snap.transform
 
         // Refresh active_task when it's either time-stale OR doesn't cover the
         // current app. The second trigger matters when the 30s/90s gates in
@@ -126,6 +131,7 @@ public final class ContextSelector {
                         structuredBrief: parsed.brief,
                         l2: l2,
                         initiationScreenshot: initiationScreenshot,
+                        initiationTransform: initiationTransform,
                         degraded: false,
                         latencyS: Date().timeIntervalSince(started),
                         modelUsed: MercuryClient.defaultModel
@@ -160,6 +166,7 @@ public final class ContextSelector {
             structuredBrief: nil,
             l2: l2,
             initiationScreenshot: initiationScreenshot,
+            initiationTransform: initiationTransform,
             degraded: true,
             latencyS: Date().timeIntervalSince(started),
             modelUsed: nil

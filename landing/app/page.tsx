@@ -13,7 +13,7 @@ export default function Home() {
           <nav className="pill nav">
             <a className="nav__link" href="#features">features</a>
             <a className="nav__link" href="#how">how it works</a>
-            <a className="nav__link" href="#github">github</a>
+            <a className="nav__link" href="https://github.com/sam-siavoshian/agent-notch" target="_blank" rel="noopener noreferrer">github</a>
             <span className="nav__sep" aria-hidden="true" />
             <a className="pill pill--dark nav__cta" href="#download">
               download
@@ -249,7 +249,7 @@ export default function Home() {
           <a className="pill pill--dark" href="/AgentNotch.dmg" download>
             download for mac
           </a>
-          <a className="pill pill--soft" href="#github">
+          <a className="pill pill--soft" href="https://github.com/sam-siavoshian/agent-notch" target="_blank" rel="noopener noreferrer">
             star on github
           </a>
         </div>
@@ -260,7 +260,7 @@ export default function Home() {
         <div className="footer__links">
           <a href="#features">features</a>
           <a href="#how">how it works</a>
-          <a href="#github">github</a>
+          <a href="https://github.com/sam-siavoshian/agent-notch" target="_blank" rel="noopener noreferrer">github</a>
           <span className="footer__license">mit licensed</span>
         </div>
         <span>open source. made with care.</span>
